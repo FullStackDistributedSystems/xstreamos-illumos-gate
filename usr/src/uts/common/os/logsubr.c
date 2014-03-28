@@ -249,8 +249,11 @@ log_init(void)
 	 */
 	printf("\rSunOS Release %s Version %s %u-bit\n",
 	    utsname.release, utsname.version, NBBY * (uint_t)sizeof (void *));
-	printf("Copyright (c) 1983, 2010, Oracle and/or its affiliates. "
-	    "All rights reserved.\n");
+/*      printf("Copyright (c) 1983, 2010, Oracle and/or its affiliates. "
+            "All rights reserved.\n");*/
+        printf("XStreamOS is mantained and distributed by Sonicle (http://www.sonicle.com).\n");
+        printf("All other trademarks and copyrights are the property of their respective owners.\n");
+
 #ifdef DEBUG
 	printf("DEBUG enabled\n");
 #endif
