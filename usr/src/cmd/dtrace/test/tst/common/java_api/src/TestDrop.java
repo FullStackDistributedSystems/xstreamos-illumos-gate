@@ -63,7 +63,9 @@ public class TestDrop {
     {
 	while (consumer.isRunning() && !done.get()) {
 	    try {
-		Thread.currentThread().sleep(50);
+		/*Thread.currentThread().sleep(50);*/
+		/* under jdk1.7 */
+		Thread.sleep(50);
 	    } catch (InterruptedException e) {
 	    }
 

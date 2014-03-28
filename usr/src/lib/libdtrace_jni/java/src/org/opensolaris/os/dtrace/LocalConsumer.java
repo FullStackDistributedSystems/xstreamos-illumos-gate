@@ -637,7 +637,9 @@ public class LocalConsumer implements Consumer {
 		// that listeners finish executing consumerStopped()
 		// before the stop() method returns.
 		synchronized (this) {
-		    if (state == State.STOPPED || state == state.CLOSED) {
+		    /*if (state == State.STOPPED || state == state.CLOSED) {*/
+		    /* under jdk1.7 */
+		    if (state == State.STOPPED || state == State.CLOSED) {
 			//
 			// This consumer was stopped just after calling
 			// go() but before starting (the premature return

@@ -30,7 +30,8 @@
 include $(SRC)/cmd/Makefile.cmd
 
 CLASSPATH =	$(SRC)/cmd/pools/poold
-JAVAFLAGS +=	-source 1.4
+#under jdk1.7
+#JAVAFLAGS +=	-source 1.4
 
 SOURCE =	LocalityDomain.java \
 		LocalityGroup.java

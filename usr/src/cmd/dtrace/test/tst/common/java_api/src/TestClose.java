@@ -44,7 +44,9 @@ public class TestClose {
 	    consumer.enable();
 	    consumer.go();
 	    try {
-		Thread.currentThread().sleep(1000);
+		/*Thread.currentThread().sleep(1000);*/
+		/* under jdk1.7 */
+		Thread.sleep(1000);
 	    } catch (InterruptedException e) {
 		e.printStackTrace();
 		System.exit(1);
@@ -64,7 +66,9 @@ public class TestClose {
 	    consumer.enable();
 	    consumer.go();
 	    try {
-		Thread.currentThread().sleep(1000);
+		/*Thread.currentThread().sleep(1000);*/
+		/* under jdk1.7 */
+		Thread.sleep(1000);
 	    } catch (InterruptedException e) {
 		e.printStackTrace();
 		System.exit(1);

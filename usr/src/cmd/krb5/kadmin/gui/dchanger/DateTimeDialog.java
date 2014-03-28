@@ -491,7 +491,9 @@ public class DateTimeDialog extends Dialog {
 	    else
                if (e.getSource() == help) {
 		if (hd != null)
-		  hd.show();
+		  /*hd.show();*/
+		  /* under jdk1.7 */
+		  hd.setVisible(true);
 		else {
 		  hd = new
 		    HelpDialog(DateTimeDialog.this.parent,

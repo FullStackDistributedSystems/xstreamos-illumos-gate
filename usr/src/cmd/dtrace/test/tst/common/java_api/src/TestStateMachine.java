@@ -609,7 +609,9 @@ public class TestStateMachine {
 	    consumer.go();
 	    // Avoid race, call afterGo() in ConsumerListener
 	    try {
-		Thread.currentThread().sleep(300);
+		/*Thread.currentThread().sleep(300);*/
+		/* under jdk1.7 */
+		Thread.sleep(300);
 	    } catch (InterruptedException e) {
 		e.printStackTrace();
 		exit(1);

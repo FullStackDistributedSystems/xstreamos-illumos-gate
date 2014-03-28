@@ -38,7 +38,8 @@ clobber :=	TARGET= clobber
 install :=	TARGET= install
 lint :=		TARGET= lint
 
-JAVAFLAGS= -nowarn -O
+#under jdk1.7
+#JAVAFLAGS= -nowarn -O
 
 CLASSES=Kadmin
 

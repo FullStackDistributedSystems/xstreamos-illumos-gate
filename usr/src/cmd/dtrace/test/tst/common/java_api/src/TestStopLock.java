@@ -51,7 +51,9 @@ public class TestStopLock {
 	    consumer.enable();
 	    consumer.go();
 	    try {
-		Thread.currentThread().sleep(500);
+		/*Thread.currentThread().sleep(500);*/
+		/* under jdk1.7 */
+		Thread.sleep(500);
 	    } catch (InterruptedException e) {
 		e.printStackTrace();
 		System.exit(1);

@@ -80,6 +80,8 @@ include		$(SRC)/Makefile.master
 CLASSPATH=	$(SRC)/cmd/cmd-inet/usr.sadm/dhcpmgr
 
 JAVAFILES =	$(CLASSFILES:.class=.java)
+#under jdk1.7
+JAVAFLAGS =     -source 1.6 -target 1.6 -Xlint:-deprecation,-options
 
 MSGDIR=		$(ROOT)/usr/share/lib/locale/com/sun/dhcpmgr/client
 MSGDIRS =       $(ROOT)/usr/share/lib/locale \

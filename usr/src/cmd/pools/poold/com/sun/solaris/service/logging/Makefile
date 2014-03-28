@@ -30,7 +30,8 @@
 include $(SRC)/cmd/Makefile.cmd
 
 CLASSPATH =	$(SRC)/cmd/pools/poold
-JAVAFLAGS +=	-source 1.4
+#jdk1.7
+#JAVAFLAGS +=	-source 1.4
 
 SOURCE =	Facility.java \
 		Severity.java \
