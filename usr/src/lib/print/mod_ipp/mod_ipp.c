@@ -20,6 +20,7 @@
  */
 
 /*
+ * Copyright 2014 Sonicle S.r.l.  All rights reserved.
  * Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  *
@@ -51,7 +52,7 @@
 #include "papi.h"
 #ifndef APACHE_RELEASE	/* appears to only exist in Apache 1.X */
 #define	APACHE2
-#include "apr_compat.h"
+#define ap_table_get apr_table_get
 #endif
 
 #include <papi.h>
@@ -194,7 +195,7 @@ void _log_rerror(const char *file, int line, int level, request_rec *r,
 	va_end(args);
 
 #ifdef APACHE2
-	ap_log_rerror(file, line, level, NULL, r, message);
+	ap_log_rerror(file, line, level, APR_SUCCESS, r, message);
 #else
 	ap_log_rerror(file, line, level, r, message);
 #endif
@@ -288,6 +289,7 @@ ipp_handler(request_rec *r)
 					config->default_svc);
 	}
 
+#ifndef APACHE2
 	/*
 	 * For Trusted Solaris, pass the fd number of the socket connection
 	 * to the backend so the it can be forwarded to the backend print
@@ -296,6 +298,7 @@ ipp_handler(request_rec *r)
 	 */
 	(void) papiAttributeListAddInteger(&request, PAPI_ATTR_EXCL,
 			"peer-socket", ap_bfileno(r->connection->client, B_RD));
+#endif
 
 	/* process the request */
 	status = ipp_process_request(request, &response, read_data, r);
@@ -399,7 +402,7 @@ ipp_conformance(cmd_parms *cmd, void *cfg, const char *arg)
 
 /*ARGSUSED0*/
 static const char *
-ipp_operation(cmd_parms *cmd, void *cfg, char *op, char *toggle)
+ipp_operation(cmd_parms *cmd, void *cfg, const char *op, const char *toggle)
 {
 	IPPListenerConfig *config = (IPPListenerConfig *)cfg;
 	papi_status_t status;
@@ -494,7 +497,8 @@ ipp_register_hooks(apr_pool_t *p)
 	/* Need to make sure we don't get directory listings by accident */
 	ap_hook_handler(ipp_handler, NULL, modules, APR_HOOK_MIDDLE);
 	ap_hook_default_port(ipp_port, NULL, NULL, APR_HOOK_MIDDLE);
-	ap_hook_http_method(ipp_method, NULL, NULL, APR_HOOK_MIDDLE);
+        ap_hook_http_scheme(ipp_method, NULL, NULL, APR_HOOK_MIDDLE);
+        /*ap_hook_http_method(ipp_method, NULL, NULL, APR_HOOK_MIDDLE);*/
 }
 
 module AP_MODULE_DECLARE_DATA ipp_module = {

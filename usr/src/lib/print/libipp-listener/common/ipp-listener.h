@@ -20,6 +20,7 @@
  */
 
 /*
+ * Copyright 2014 Sonicle S.r.l.  All rights reserved.
  * Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  *
@@ -40,7 +41,7 @@ extern "C" {
 
 /* exported functions */
 extern papi_status_t ipp_configure_operation(papi_attribute_t ***list,
-						char *operation, char *type);
+						const char *operation, const char *type);
 extern papi_status_t ipp_process_request(papi_attribute_t **request,
 					papi_attribute_t ***response,
 					ipp_reader_t iread, void *fd);

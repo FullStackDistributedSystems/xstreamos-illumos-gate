@@ -20,6 +20,7 @@
  */
 
 /*
+ * Copyright 2014 Sonicle S.r.l.  All rights reserved.
  * Copyright 2008 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  *
@@ -151,7 +152,7 @@ static struct {
 };
 
 static int
-ipp_operation_name_to_index(char *name)
+ipp_operation_name_to_index(const char *name)
 {
 	int i;
 
@@ -233,7 +234,7 @@ ipp_operation_handler(papi_attribute_t **request, papi_attribute_t ***response)
 }
 
 static char
-type_to_boolean(char *type)
+type_to_boolean(const char *type)
 {
 	char result = PAPI_FALSE;
 
@@ -276,7 +277,7 @@ ipp_configure_all_operations(papi_attribute_t ***list, char boolean)
 }
 
 papi_status_t
-ipp_configure_operation(papi_attribute_t ***list, char *operation, char *type)
+ipp_configure_operation(papi_attribute_t ***list, const char *operation, const char *type)
 {
 	papi_status_t result = PAPI_OPERATION_NOT_SUPPORTED;
 	char boolean = PAPI_FALSE;

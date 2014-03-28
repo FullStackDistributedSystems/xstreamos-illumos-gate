@@ -22,6 +22,7 @@
 /*
  * Copyright (c) 2014 Gary Mills
  *
+ * Copyright 2014 Sonicle S.r.l.  All rights reserved.
  * Copyright 2008 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  *
@@ -203,7 +204,7 @@ papiAttributeValueDup(papi_attribute_value_type_t type,
 }
 
 static papi_attribute_t *
-papiAttributeAlloc(char *name, papi_attribute_value_type_t type)
+papiAttributeAlloc(const char *name, papi_attribute_value_type_t type)
 {
 	papi_attribute_t *result = NULL;
 
@@ -238,7 +239,7 @@ papiAttributeListAppendValue(papi_attribute_value_t ***values,
 
 papi_status_t
 papiAttributeListAddValue(papi_attribute_t ***list, int flgs,
-		char *name, papi_attribute_value_type_t type,
+		const char *name, papi_attribute_value_type_t type,
 		papi_attribute_value_t *value)
 {
 	papi_status_t result;
@@ -318,7 +319,7 @@ papiAttributeListAddInteger(papi_attribute_t ***list, int flags,
 
 papi_status_t
 papiAttributeListAddBoolean(papi_attribute_t ***list, int flags,
-			char *name, char boolean)
+			const char *name, char boolean)
 {
 	papi_attribute_value_t v;
 
@@ -402,7 +403,7 @@ papiAttributeListDelete(papi_attribute_t ***list, char *name)
 }
 
 papi_attribute_t *
-papiAttributeListFind(papi_attribute_t **list, char *name)
+papiAttributeListFind(papi_attribute_t **list, const char *name)
 {
 	int i;
 	if ((list == NULL) || (name == NULL))

@@ -20,6 +20,7 @@
  */
 
 /*
+ * Copyright 2014 Sonicle S.r.l.  All rights reserved.
  * Copyright 2008 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  *
@@ -256,7 +257,7 @@ extern char *papiServiceGetStatusMessage(papi_service_t handle);
 
 /*	Attribute related	 */
 extern papi_status_t papiAttributeListAddValue(papi_attribute_t ***attrs,
-					int flags, char *name,
+					int flags, const char *name,
 					papi_attribute_value_type_t type,
 					papi_attribute_value_t *value);
 extern papi_status_t papiAttributeListAddString(papi_attribute_t ***attrs,
@@ -264,7 +265,7 @@ extern papi_status_t papiAttributeListAddString(papi_attribute_t ***attrs,
 extern papi_status_t papiAttributeListAddInteger(papi_attribute_t ***attrs,
 					int flags, char *name, int integer);
 extern papi_status_t papiAttributeListAddBoolean(papi_attribute_t ***attrs,
-					int flags, char *name, char boolean);
+					int flags, const char *name, char boolean);
 extern papi_status_t papiAttributeListAddRange(papi_attribute_t ***attrs,
 					int flags, char *name,
 					int lower, int upper);
@@ -311,7 +312,7 @@ extern papi_status_t papiAttributeListGetMetadata(papi_attribute_t **list,
 					void **iterator, char *name,
 					papi_metadata_t *vptr);
 extern papi_attribute_t *papiAttributeListFind(papi_attribute_t **list,
-					char *name);
+					const char *name);
 extern papi_attribute_t *papiAttributeListGetNext(papi_attribute_t **list,
 					void **iterator);
 extern void papiAttributeListFree(papi_attribute_t **attributes);

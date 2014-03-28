@@ -19,6 +19,7 @@
 # CDDL HEADER END
 #
 #
+# Copyright 2014 Sonicle S.r.l.  All rights reserved.
 # Copyright 2010 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
 #
@@ -45,10 +46,14 @@ LIBS =			$(DYNLIB)
 SRCS = $(OBJECTS:%.o = %.c)
 
 
-CFLAGS +=	$(CCVERBOSE)
+APR_INC.cmd =  apr-1-config --includes
+APU_INC.cmd =  apu-1-config --includes
+CFLAGS +=      $(CCVERBOSE) -erroff=E_IMPLICIT_DECL_FUNC_RETURN_INT
 CPPFLAGS +=	-I../libipp-listener/common
 CPPFLAGS +=	-I../libipp-core/common
-CPPFLAGS +=	-I/usr/apache/include
+CPPFLAGS +=    -I/usr/apache2/2.2/include
+CPPFLAGS +=    $(APR_INC.cmd:sh)
+CPPFLAGS +=    $(APU_INC.cmd:sh)
 CPPFLAGS +=	-DEAPI
 ZDEFS =		$(ZNODEFS)
 
