@@ -19,6 +19,7 @@
 # CDDL HEADER END
 #
 #
+# Copyright 2014, Sonicle S.r.l. All rights reserved.
 # Copyright (c) 1990, 2010, Oracle and/or its affiliates. All rights reserved.
 # Copyright 2010 Nexenta Systems, Inc.  All rights reserved.
 #
@@ -52,8 +53,8 @@ clobber:
 
 motd:	FRC
 	@-$(ECHO) "rebuilding motd"
-	@$(RELEASE_BUILD)-$(ECHO) "The Illumos Project\tSunOS $(RELEASE)\t$(VERSION)\t$(RELEASE_DATE)" > motd
-	@$(NOT_RELEASE_BUILD)-$(ECHO) "The Illumos Project\tSunOS $(RELEASE)\t$(VERSION)\t`date +'%h. %d, %Y'`" > motd
+	@$(RELEASE_BUILD)-$(ECHO) "Sonicle $(VERSION) (powered by illumos) SunOS $(RELEASE) xs_$(ONNV_MAJBUILDNUM) $(RELEASE_DATE)" > motd
+	@$(NOT_RELEASE_BUILD)-$(ECHO) "Sonicle $(VERSION) (powered by illumos) SunOS $(RELEASE) xs_$(ONNV_MAJBUILDNUM) `date +'%h. %d, %Y'`" > motd
 	@$(NOT_RELEASE_BUILD)-$(ECHO) $(DEV_CM) | sed -e "s/@(#)//" >> motd
 	@-$(CAT) release_info >> motd
 
