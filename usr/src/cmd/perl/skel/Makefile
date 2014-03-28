@@ -33,7 +33,7 @@ STAGE = $(SRC)/cmd/perl/$(PERL_VERSION)/staging
 
 PERL=/usr/perl5/$(PERL_VERSION)/bin/perl
 
-PERL_MM_ARGS = INSTALLDIRS=perl CC='$(CC)' LD='$(CC)'
+PERL_MM_ARGS = INSTALLDIRS=perl CCFLAGS='-I$(ROOT)/usr/include'
 
 # Prefix for Solaris-specific extensions that are maintained by
 # Sun/Oracle.

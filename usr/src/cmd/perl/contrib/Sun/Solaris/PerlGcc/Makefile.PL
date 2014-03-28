@@ -20,6 +20,7 @@
 #
 
 #
+# Copyright 2014 Sonicle S.r.l.  All rights reserved.
 # Copyright (c) 2004, 2010, Oracle and/or its affiliates. All rights reserved.
 #
 
@@ -47,6 +48,9 @@ sub cmp_os_ver
 my $rel = qx{uname -r}; chomp($rel);
 my $arch = qx{uname -p}; chomp($arch);
 my $pver = sprintf('%vd', $^V);
+my ($vmajor, $vminor, $vmicro) = split('\.', $pver);
+
+$pver = $vmajor.".".$vminor;
 
 # Figure out the appropriate Config.pm.  Use an older version if necessary.
 my $perlarch = ($arch eq "sparc") ? "sun4-solaris-64int":"i86pc-solaris-64int";
