@@ -3,6 +3,7 @@
  *
  * hald.c : main startup for HAL daemon
  *
+ * Copyright (C) 2014 Sonicle S.r.l. All rights reserved.
  * Copyright (C) 2003 David Zeuthen, <david@fubar.dk>
  * Copyright (C) 2005 Danny Kukawka, <danny.kukawka@web.de>
  *
@@ -368,7 +369,9 @@ main (int argc, char *argv[])
 
 	openlog ("hald", LOG_PID, LOG_DAEMON);
 
+#if (GLIB_MAJOR_VERSION <= 2 && GLIB_MINOR_VERSION <= 35)
 	g_type_init ();
+#endif
 
 	if (getenv ("HALD_VERBOSE"))
 		hald_is_verbose = TRUE;
