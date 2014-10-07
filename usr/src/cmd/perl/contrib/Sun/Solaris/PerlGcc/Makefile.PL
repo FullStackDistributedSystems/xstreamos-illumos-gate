@@ -20,7 +20,7 @@
 #
 
 #
-# Copyright 2014 Sonicle S.r.l.  All rights reserved.
+# Copyright 2011 Nexenta Systems, Inc.  All rights reserved.
 # Copyright (c) 2004, 2010, Oracle and/or its affiliates. All rights reserved.
 #
 
@@ -51,6 +51,9 @@ my $pver = sprintf('%vd', $^V);
 my ($vmajor, $vminor, $vmicro) = split('\.', $pver);
 
 $pver = $vmajor.".".$vminor;
+
+# workaround for 5.10.0
+$pver = '5.10.0' if ($pver =~ /5.10/);
 
 # Figure out the appropriate Config.pm.  Use an older version if necessary.
 my $perlarch = ($arch eq "sparc") ? "sun4-solaris-64int":"i86pc-solaris-64int";

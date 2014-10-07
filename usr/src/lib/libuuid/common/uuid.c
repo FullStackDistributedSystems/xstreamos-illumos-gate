@@ -22,7 +22,8 @@
  * Copyright 2008 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  * Copyright 2012 Milan Jurik. All rights reserved.
- * Copyright 2013 Joyent, Inc. All rights reserved.
+ * Copyright 2014 Joyent, Inc. All rights reserved.
+ * Copyright 2014 Andrew Stormont.
  */
 
 /*
@@ -357,6 +358,35 @@ load_cache()
 		rcachep = NULL;
 }
 
+static void
+close_pre()
+{
+	(void) mutex_lock(&urandmtx);
+}
+
+static void
+close_parent()
+{
+	(void) mutex_unlock(&urandmtx);
+}
+
+static void
+close_child()
+{
+	if (fd_urand != -1) {
+		(void) close(fd_urand);
+		fd_urand = -1;
+	}
+	(void) mutex_unlock(&urandmtx);
+}
+
+#pragma init(cache_init)
+static void
+cache_init(void)
+{
+	(void) pthread_atfork(close_pre, close_parent, close_child);
+}
+
 /*
  * Fills buf with random numbers - nbytes is the number of bytes
  * to fill-in. Tries to use cached data from the /dev/urandom random number
@@ -371,7 +401,8 @@ fill_random_bytes(uchar_t *buf, int nbytes)
 		(void) mutex_lock(&urandmtx);
 		/* check again now that we have the mutex */
 		if (fd_urand == -1) {
-			if ((fd_urand = open(URANDOM_PATH, O_RDONLY)) >= 0)
+			if ((fd_urand = open(URANDOM_PATH,
+			    O_RDONLY | O_CLOEXEC)) >= 0)
 				load_cache();
 		}
 		(void) mutex_unlock(&urandmtx);
@@ -578,8 +609,8 @@ uuid_clear(uuid_t uu)
  * binary format into a 36-byte string (plus trailing null char)
  * and stores this value in the character string pointed to by out.
  */
-void
-uuid_unparse(uuid_t uu, char *out)
+static void
+uuid_unparse_common(uuid_t uu, char *out, boolean_t upper)
 {
 	struct uuid 	uuid;
 	uint16_t	clock_seq;
@@ -591,24 +622,42 @@ uuid_unparse(uuid_t uu, char *out)
 		return;
 	}
 
-	/* XXX user should have allocated enough memory */
-	/*
-	 * if (strlen(out) < UUID_PRINTABLE_STRING_LENGTH) {
-	 * return;
-	 * }
-	 */
 	string_to_struct(&uuid, uu);
 	clock_seq = uuid.clock_seq_hi_and_reserved;
 	clock_seq = (clock_seq  << 8) | uuid.clock_seq_low;
 	for (i = 0; i < 6; i++) {
-		(void) sprintf(&etheraddr[index++], "%.2x", uuid.node_addr[i]);
+		(void) sprintf(&etheraddr[index++], upper ? "%.2X" : "%.2x",
+		    uuid.node_addr[i]);
 		index++;
 	}
 	etheraddr[index] = '\0';
 
-	(void) snprintf(out, 25, "%08x-%04x-%04x-%04x-",
+	(void) snprintf(out, 25,
+	    upper ? "%08X-%04X-%04X-%04X-" : "%08x-%04x-%04x-%04x-",
 	    uuid.time_low, uuid.time_mid, uuid.time_hi_and_version, clock_seq);
 	(void) strlcat(out, etheraddr, UUID_PRINTABLE_STRING_LENGTH);
+}
+
+void
+uuid_unparse_upper(uuid_t uu, char *out)
+{
+	uuid_unparse_common(uu, out, B_TRUE);
+}
+
+void
+uuid_unparse_lower(uuid_t uu, char *out)
+{
+	uuid_unparse_common(uu, out, B_FALSE);
+}
+
+void
+uuid_unparse(uuid_t uu, char *out)
+{
+	/*
+	 * Historically uuid_unparse on Solaris returns lower case,
+	 * for compatibility we preserve this behaviour.
+	 */
+	uuid_unparse_common(uu, out, B_FALSE);
 }
 
 /*

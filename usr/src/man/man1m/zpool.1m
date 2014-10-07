@@ -1,7 +1,7 @@
 '\" te
 .\" Copyright (c) 2007, Sun Microsystems, Inc. All Rights Reserved.
 .\" Copyright 2011, Nexenta Systems, Inc. All Rights Reserved.
-.\" Copyright (c) 2012 by Delphix. All rights reserved.
+.\" Copyright (c) 2013 by Delphix. All rights reserved.
 .\" The contents of this file are subject to the terms of the Common Development
 .\" and Distribution License (the "License"). You may not use this file except
 .\" in compliance with the License. You can obtain a copy of the license at
@@ -61,7 +61,7 @@ zpool \- configures ZFS storage pools
 
 .LP
 .nf
-\fBzpool get\fR "\fIall\fR" | \fIproperty\fR[,...] \fIpool\fR ...
+\fBzpool get\fR [\fB-Hp\fR] [\fB-o \fR\fIfield\fR[,...]] "\fIall\fR" | \fIproperty\fR[,...] \fIpool\fR ...
 .fi
 
 .LP
@@ -93,7 +93,7 @@ zpool \- configures ZFS storage pools
 
 .LP
 .nf
-\fBzpool list\fR [\fB-T\fR \fBu\fR | \fBd\fR ] [\fB-Hv\fR] [\fB-o\fR \fIproperty\fR[,...]] [\fIpool\fR] ... [\fIinterval\fR[\fIcount\fR]]
+\fBzpool list\fR [\fB-T\fR \fBu\fR | \fBd\fR ] [\fB-Hpv\fR] [\fB-o\fR \fIproperty\fR[,...]] [\fIpool\fR] ... [\fIinterval\fR[\fIcount\fR]]
 .fi
 
 .LP
@@ -568,6 +568,15 @@ Amount of uninitialized space within the pool or device that can be used to
 increase the total capacity of the pool.  Uninitialized space consists of
 any space on an EFI labeled vdev which has not been brought online
 (i.e. zpool online -e).  This space occurs when a LUN is dynamically expanded.
+.RE
+
+.sp
+.ne 2
+.na
+\fB\fBfragmentation\fR\fR
+.ad
+.RS 20n
+The amount of fragmentation in the pool.
 .RE
 
 .sp
@@ -1151,7 +1160,8 @@ is currently being used. This may lead to potential data corruption.
 .sp
 .ne 2
 .na
-\fB\fBzpool get\fR "\fIall\fR" | \fIproperty\fR[,...] \fIpool\fR ...\fR
+\fB\fBzpool get\fR [\fB-Hp\fR] [\fB-o \fR\fIfield\fR[,...]]  "\fIall\fR" | \fIproperty\fR[,...]
+\fIpool\fR ...\fR
 .ad
 .sp .6
 .RS 4n
@@ -1161,7 +1171,7 @@ the following fields:
 .sp
 .in +2
 .nf
-       name          Name of storage pool
+        name          Name of storage pool
         property      Property name
         value         Property value
         source        Property source, either 'default' or 'local'.
@@ -1171,6 +1181,35 @@ the following fields:
 
 See the "Properties" section for more information on the available pool
 properties.
+
+.sp
+.ne 2
+.na
+\fB\fB-H\fR\fR
+.ad
+.RS 12n
+Scripted mode. Do not display headers, and separate fields by a single tab
+instead of arbitrary space.
+.RE
+
+.sp
+.ne 2
+.na
+\fB\fB-p\fR\fR
+.ad
+.RS 6n
+Display numbers in parsable (exact) values.
+.RE
+
+.sp
+.ne 2
+.na
+\fB\fB-o\fR \fIfield\fR\fR
+.ad
+.RS 6n
+A comma-separated list of columns to display. \fBname,property,value,source\fR
+is the default value.
+.RE
 .RE
 
 .sp
@@ -1604,12 +1643,21 @@ instead of arbitrary space.
 .sp
 .ne 2
 .na
+\fB\fB-p\fR\fR
+.ad
+.RS 12n
+Display numbers in parsable (exact) values.
+.RE
+
+.sp
+.ne 2
+.na
 \fB\fB-o\fR \fIprops\fR\fR
 .ad
 .RS 12n
 Comma-separated list of properties to display. See the "Properties" section for
 a list of valid properties. The default list is "name, size, used, available,
-expandsize, capacity, dedupratio, health, altroot"
+fragmentation, expandsize, capacity, dedupratio, health, altroot"
 .RE
 
 .sp
@@ -1996,10 +2044,10 @@ The results from this command are similar to the following:
 .in +2
 .nf
 # \fBzpool list\fR
-     NAME    SIZE  ALLOC   FREE  EXPANDSZ    CAP  DEDUP  HEALTH  ALTROOT
-     rpool  19.9G  8.43G  11.4G         -    42%  1.00x  ONLINE  -
-     tank   61.5G  20.0G  41.5G         -    32%  1.00x  ONLINE  -
-     zion       -      -      -         -      -      -  FAULTED -
+NAME    SIZE  ALLOC   FREE   FRAG  EXPANDSZ    CAP  DEDUP  HEALTH  ALTROOT
+rpool  19.9G  8.43G  11.4G    33%         -    42%  1.00x  ONLINE  -
+tank   61.5G  20.0G  41.5G    48%         -    32%  1.00x  ONLINE  -
+zion       -      -      -      -         -      -      -  FAULTED -
 .fi
 .in -2
 .sp
@@ -2220,7 +2268,7 @@ The command to remove the mirrored log \fBmirror-2\fR is:
 .LP
 The following command dipslays the detailed information for the \fIdata\fR
 pool. This pool is comprised of a single \fIraidz\fR vdev where one of its
-devices increased its capacity by 1GB. In this example, the pool will not
+devices increased its capacity by 10GB. In this example, the pool will not
 be able to utilized this extra capacity until all the devices under the
 \fIraidz\fR vdev have been expanded.
 
@@ -2228,12 +2276,12 @@ be able to utilized this extra capacity until all the devices under the
 .in +2
 .nf
 # \fBzpool list -v data\fR
-   NAME         SIZE  ALLOC   FREE  EXPANDSZ    CAP  DEDUP  HEALTH  ALTROOT
-   data        17.9G   174K  17.9G         -     0%  1.00x  ONLINE  -
-     raidz1    17.9G   174K  17.9G         -
-       c4t2d0      -      -      -        1G
-       c4t3d0      -      -      -         -
-       c4t4d0      -      -      -         - 
+NAME         SIZE  ALLOC   FREE   FRAG  EXPANDSZ    CAP  DEDUP  HEALTH  ALTROOT
+data        23.9G  14.6G  9.30G    48%         -    61%  1.00x  ONLINE  -
+  raidz1    23.9G  14.6G  9.30G    48%         -
+    c1t1d0      -      -      -      -         -
+    c1t2d0      -      -      -      -       10G
+    c1t3d0      -      -      -      -         -
 .fi
 .in -2
 

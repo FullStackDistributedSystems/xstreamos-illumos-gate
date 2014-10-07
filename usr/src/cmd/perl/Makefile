@@ -20,7 +20,8 @@
 #
 
 #
-# Copyright (c) 2014, Sonicle S.r.l. All rights reserved.
+# Copyright 2014 Sonicle S.r.l.  All rights reserved.
+# Copyright 2011 Nexenta Systems, Inc.  All rights reserved.
 # Copyright (c) 2001, 2010, Oracle and/or its affiliates. All rights reserved.
 #
 
@@ -32,7 +33,6 @@ clobber := TARGET = clobber
 clean	:= TARGET = clean
 test	:= TARGET = test
 
-# PERL_LEGACY is versions of Perl still delivered through ON
 PERL_VERSIONS = 5.12
 
 .PARALLEL: $(PERL_VERSIONS)
