@@ -24,6 +24,7 @@
 # Copyright (c) 2012 by Delphix. All rights reserved.
 # Copyright (c) 2012, Joyent, Inc. All rights reserved.
 # Copyright (c) 2013 Gary Mills
+# Copyright (c) 2014 Sonicle S.r.l.
 
 include ../Makefile.master
 
@@ -152,7 +153,6 @@ SUBDIRS += \
 	libunistat	\
 	libdscfg	\
 	librdc		\
-	libinstzones	\
 	libpkg		\
 	libpcidb
 
@@ -200,6 +200,7 @@ SUBDIRS += \
 	libxcurses2	\
 	libbrand	.WAIT   \
 	libzonecfg	\
+	libinstzones	\
 	libzoneinfo	\
 	libzonestat	\
 	libtsnet	\
@@ -640,6 +641,7 @@ libzfs_jni:	libdiskmgt libnvpair libzfs
 libzpool:	libavl libumem libnvpair libcmdutils
 libsec:		libavl libidmap
 brand:		libc libsocket
+brand:		libzonecfg libmapmalloc
 libshare:	libscf libzfs libuuid libfsmgt libsecdb libumem libsmbfs
 libexacct/demo:	libexacct libproject libsocket libnsl
 libtsalarm:	libpcp
