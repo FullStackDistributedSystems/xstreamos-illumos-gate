@@ -247,8 +247,8 @@ log_init(void)
 	/*
 	 * Now that logging is enabled, emit the SunOS banner.
 	 */
-	printf("\rSunOS Release %s Version %s %u-bit\n",
-	    utsname.release, utsname.version, NBBY * (uint_t)sizeof (void *));
+	printf("\rSunOS Release %s Version %s %u-bit xs_%s %s\n",
+	    utsname.release, utsname.version, NBBY * (uint_t)sizeof (void *),XS_MAJBUILDNUM,XS_RELEASE_DATE);
 /*      printf("Copyright (c) 1983, 2010, Oracle and/or its affiliates. "
             "All rights reserved.\n");*/
         printf("XStreamOS is mantained and distributed by Sonicle (http://www.sonicle.com).\n");
