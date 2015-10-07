@@ -20,6 +20,7 @@
  */
 /*
  * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright 2013 Nexenta Systems, Inc.  All rights reserved.
  */
 
 /*
@@ -185,15 +186,12 @@
  * ERRSRV/ERRerror
  */
 #include <sys/types.h>
-#include <sys/strsubr.h>
-#include <sys/socketvar.h>
 #include <sys/socket.h>
-#include <sys/random.h>
 #include <netinet/in.h>
 #include <smbsrv/smb_kproto.h>
 #include <smbsrv/smbinfo.h>
 
-static smb_xlate_t smb_dialect[] = {
+static const smb_xlate_t smb_dialect[] = {
 	{ DIALECT_UNKNOWN,		"DIALECT_UNKNOWN" },
 	{ PC_NETWORK_PROGRAM_1_0,	"PC NETWORK PROGRAM 1.0" },
 	{ PCLAN1_0,			"PCLAN1.0" },
@@ -229,7 +227,6 @@ static smb_xlate_t smb_dialect[] = {
 static uint32_t	smb_dos_tcp_rcvbuf = 8700;
 static uint32_t	smb_nt_tcp_rcvbuf = 1048560;	/* scale factor of 4 */
 
-static void smb_negotiate_genkey(smb_request_t *);
 static int smb_xlate_dialect(const char *);
 
 int smb_cap_passthru = 1;
@@ -287,7 +284,6 @@ smb_com_negotiate(smb_request_t *sr)
 	uint16_t		secmode;
 	uint16_t		rawmode = 0;
 	uint32_t		sesskey;
-	char			ipaddr_buf[INET6_ADDRSTRLEN];
 	char			*nbdomain;
 	uint8_t			*wcbuf;
 	int			wclen;
@@ -303,18 +299,20 @@ smb_com_negotiate(smb_request_t *sr)
 	sr->session->secmode = NEGOTIATE_SECURITY_CHALLENGE_RESPONSE |
 	    NEGOTIATE_SECURITY_USER_LEVEL;
 	secmode = sr->session->secmode;
-
-	smb_negotiate_genkey(sr);
 	sesskey = sr->session->sesskey;
 
 	(void) microtime(&negprot->ni_servertime);
 	negprot->ni_tzcorrection = sr->sr_gmtoff / 60;
 	negprot->ni_maxmpxcount = sr->sr_cfg->skc_maxworkers;
+	negprot->ni_keylen = SMB_CHALLENGE_SZ;
+	bcopy(&sr->session->challenge_key, negprot->ni_key, SMB_CHALLENGE_SZ);
 	nbdomain = sr->sr_cfg->skc_nbdomain;
 
 	/*
 	 * UNICODE support is required for long share names,
-	 * long file names and streams.
+	 * long file names and streams.  Note: CAP_RAW_MODE
+	 * is not supported because it does nothing to help
+	 * modern clients and causes nasty complications.
 	 */
 	negprot->ni_capabilities = CAP_LARGE_FILES
 	    | CAP_UNICODE
@@ -328,20 +326,12 @@ smb_com_negotiate(smb_request_t *sr)
 	    | CAP_LARGE_WRITEX
 	    | CAP_DFS;
 
-	if (smb_raw_mode) {
-		negprot->ni_capabilities |= CAP_RAW_MODE;
-		rawmode = 3;
-	}
-
 	if (smb_cap_passthru)
 		negprot->ni_capabilities |= CAP_INFOLEVEL_PASSTHRU;
 	else
 		cmn_err(CE_NOTE, "smbsrv: cap passthru is %s",
 		    (negprot->ni_capabilities & CAP_INFOLEVEL_PASSTHRU) ?
 		    "enabled" : "disabled");
-
-	(void) smb_inet_ntop(&sr->session->ipaddr, ipaddr_buf,
-	    SMB_IPSTRLEN(sr->session->ipaddr.a_family));
 
 	switch (negprot->ni_dialect) {
 	case PC_NETWORK_PROGRAM_1_0:	/* core */
@@ -484,27 +474,10 @@ smb_com_negotiate(smb_request_t *sr)
 	return (SDRC_SUCCESS);
 }
 
-static void
-smb_negotiate_genkey(smb_request_t *sr)
-{
-	smb_arg_negotiate_t	*negprot = sr->sr_negprot;
-	uint8_t			tmp_key[8];
-
-	(void) random_get_pseudo_bytes(tmp_key, 8);
-	bcopy(tmp_key, &sr->session->challenge_key, 8);
-	sr->session->challenge_len = 8;
-	negprot->ni_keylen = 8;
-	bcopy(tmp_key, negprot->ni_key, 8);
-
-	(void) random_get_pseudo_bytes(tmp_key, 4);
-	sr->session->sesskey = tmp_key[0] | tmp_key[1] << 8 |
-	    tmp_key[2] << 16 | tmp_key[3] << 24;
-}
-
 static int
 smb_xlate_dialect(const char *dialect)
 {
-	smb_xlate_t	*dp;
+	const smb_xlate_t *dp;
 	int		i;
 
 	for (i = 0; i < sizeof (smb_dialect) / sizeof (smb_dialect[0]); ++i) {

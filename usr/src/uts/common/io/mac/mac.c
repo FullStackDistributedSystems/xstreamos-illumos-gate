@@ -264,6 +264,13 @@
  * subflows before attempting a link property change.
  * Some of the above rules can be overridden by specifying additional command
  * line options while creating or modifying link or subflow properties.
+ *
+ * Datapath
+ * --------
+ *
+ * For information on the datapath, the world of soft rings, hardware rings, how
+ * it is structured, and the path of an mblk_t between a driver and a mac
+ * client, see mac_sched.c.
  */
 
 #include <sys/types.h>
@@ -4029,11 +4036,11 @@ mac_init_rings(mac_impl_t *mip, mac_ring_type_t rtype)
 		 * Driver must register group->mgi_addmac/remmac() for rx groups
 		 * to support multiple MAC addresses.
 		 */
-		if (rtype == MAC_RING_TYPE_RX) {
-			if ((group_info.mgi_addmac == NULL) ||
-			    (group_info.mgi_addmac == NULL)) {
-				goto bail;
-			}
+		if (rtype == MAC_RING_TYPE_RX &&
+		    ((group_info.mgi_addmac == NULL) ||
+		    (group_info.mgi_remmac == NULL))) {
+			err = EINVAL;
+			goto bail;
 		}
 
 		/* Cache driver-supplied information */

@@ -37,6 +37,7 @@ MANFILES= 	ASSERT.9f				\
 	 	atomic_ops.9f				\
 	 	atomic_or.9f				\
 	 	atomic_swap.9f				\
+		avl.9f					\
 	 	backq.9f				\
 	 	bcanput.9f				\
 	 	bcmp.9f					\
@@ -59,6 +60,7 @@ MANFILES= 	ASSERT.9f				\
 	 	bufcall.9f				\
 	 	bzero.9f				\
 	 	canput.9f				\
+	 	canputnext.9f				\
 	 	clrbuf.9f				\
 	 	cmn_err.9f				\
 	 	condvar.9f				\
@@ -627,6 +629,22 @@ MANLINKS=	SIZEOF_PTR.9f				\
 	 	atomic_swap_uint.9f			\
 	 	atomic_swap_ulong.9f			\
 	 	atomic_swap_ushort.9f			\
+		avl_add.9f				\
+		avl_create.9f				\
+		avl_destroy.9f				\
+		avl_destroy_nodes.9f			\
+		avl_find.9f 				\
+		avl_first.9f				\
+		avl_insert.9f				\
+		avl_insert_here.9f			\
+		avl_is_empty.9f				\
+		avl_last.9f				\
+		avl_nearest.9f				\
+		avl_numnodes.9f				\
+		avl_swap.9f				\
+		AVL_NEXT.9f				\
+		AVL_PREV.9f				\
+	 	bcanputnext.9f				\
 	 	crgetgid.9f				\
 	 	crgetgroups.9f				\
 	 	crgetngroups.9f				\
@@ -857,6 +875,7 @@ MANLINKS=	SIZEOF_PTR.9f				\
 	 	ddi_umem_unlock.9f			\
 	 	ddi_unmap_regs.9f			\
 	 	desballoc.9f				\
+	 	dev_err.9f				\
 	 	devmap_load.9f				\
 	 	devmap_umem_setup.9f			\
 	 	dlerrorack.9f				\
@@ -1158,6 +1177,7 @@ MANLINKS=	SIZEOF_PTR.9f				\
 	 	va_end.9f				\
 	 	va_start.9f				\
 	 	vcmn_err.9f				\
+	 	vzcmn_err.9f				\
 	 	wr.9f					\
 	 	zcmn_err.9f
 
@@ -1299,7 +1319,25 @@ atomic_swap_uint.9f			:= LINKSRC = atomic_swap.9f
 atomic_swap_ulong.9f			:= LINKSRC = atomic_swap.9f
 atomic_swap_ushort.9f			:= LINKSRC = atomic_swap.9f
 
+avl_add.9f				:= LINKSRC = avl.9f
+avl_create.9f				:= LINKSRC = avl.9f
+avl_destroy.9f				:= LINKSRC = avl.9f
+avl_destroy_nodes.9f			:= LINKSRC = avl.9f
+avl_find.9f 				:= LINKSRC = avl.9f
+avl_first.9f				:= LINKSRC = avl.9f
+avl_insert.9f				:= LINKSRC = avl.9f
+avl_insert_here.9f			:= LINKSRC = avl.9f
+avl_is_empty.9f				:= LINKSRC = avl.9f
+avl_last.9f				:= LINKSRC = avl.9f
+avl_nearest.9f				:= LINKSRC = avl.9f
+avl_numnodes.9f				:= LINKSRC = avl.9f
+avl_swap.9f				:= LINKSRC = avl.9f
+AVL_NEXT.9f				:= LINKSRC = avl.9f
+AVL_PREV.9f				:= LINKSRC = avl.9f
+
+dev_err.9f				:= LINKSRC = cmn_err.9f
 vcmn_err.9f				:= LINKSRC = cmn_err.9f
+vzcmn_err.9f				:= LINKSRC = cmn_err.9f
 zcmn_err.9f				:= LINKSRC = cmn_err.9f
 
 cv_broadcast.9f				:= LINKSRC = condvar.9f
@@ -1368,6 +1406,8 @@ ddi_ptob.9f				:= LINKSRC = ddi_btop.9f
 ddi_cb_unregister.9f			:= LINKSRC = ddi_cb_register.9f
 
 ddi_check_dma_handle.9f			:= LINKSRC = ddi_check_acc_handle.9f
+
+bcanputnext.9f				:= LINKSRC = canputnext.9f
 
 crgetgid.9f				:= LINKSRC = ddi_cred.9f
 crgetgroups.9f				:= LINKSRC = ddi_cred.9f

@@ -20,7 +20,7 @@
 #
 
 # Copyright (c) 1989, 2010, Oracle and/or its affiliates. All rights reserved.
-# Copyright 2010 Nexenta Systems, Inc.  All rights reserved.
+# Copyright 2015 Nexenta Systems, Inc.  All rights reserved.
 # Copyright (c) 2012 Joyent, Inc.  All rights reserved.
 # Copyright (c) 2012 by Delphix. All rights reserved.
 # Copyright (c) 2013 DEY Storage Systems, Inc. All rights reserved.
@@ -74,7 +74,6 @@ COMMON_SUBDIRS=		\
 	bc		\
 	bdiff		\
 	beadm		\
-	bfs		\
 	bnu		\
 	boot		\
 	busstat		\
@@ -216,7 +215,6 @@ COMMON_SUBDIRS=		\
 	iscsitsvc	\
 	isns		\
 	itadm		\
-	java		\
 	kbd		\
 	keyserv		\
 	killall		\
@@ -248,9 +246,10 @@ COMMON_SUBDIRS=		\
 	luxadm		\
 	lvm		\
 	mach		\
-	machid		\
 	mail		\
+	mailwrapper	\
 	mailx		\
+	make		\
 	makekey		\
 	man		\
 	mandoc		\
@@ -433,6 +432,7 @@ COMMON_SUBDIRS=		\
 	users		\
 	utmp_update	\
 	utmpd		\
+	uuidgen		\
 	valtools	\
 	vgrind		\
 	vi		\
@@ -448,7 +448,6 @@ COMMON_SUBDIRS=		\
 	whodo		\
 	wracct		\
 	write		\
-	wusbadm		\
 	xargs		\
 	xstr		\
 	yes		\
@@ -616,6 +615,7 @@ MSGSUBDIRS=		\
 	luxadm		\
 	lvm		\
 	mailx		\
+	make		\
 	man		\
 	mesg		\
 	mkdir		\
@@ -724,7 +724,6 @@ MSGSUBDIRS=		\
 	whodo		\
 	wracct		\
 	write		\
-	wusbadm		\
 	xargs		\
 	yppasswd	\
 	zdump		\
@@ -828,6 +827,7 @@ fs.d: fstyp
 ksh:	shcomp isaexec
 mdb:	terminfo
 print:	lp
+fmt:	mailx
 
 $(FIRST_SUBDIRS) $(BWOSDIRS) $(SUBDIRS) $(AUDITSUBDIRS): FRC
 	@if [ -f $@/Makefile  ]; then \

@@ -38,13 +38,12 @@
 #include <sys/callb.h>
 #include <sys/zfeature.h>
 
-int zfs_pd_blks_max = 100;
+int32_t zfs_pd_bytes_max = 50 * 1024 * 1024;	/* 50MB */
 
 typedef struct prefetch_data {
 	kmutex_t pd_mtx;
 	kcondvar_t pd_cv;
-	int pd_blks_max;
-	int pd_blks_fetched;
+	int32_t pd_bytes_fetched;
 	int pd_flags;
 	boolean_t pd_cancel;
 	boolean_t pd_exited;
@@ -59,6 +58,7 @@ typedef struct traverse_data {
 	int td_flags;
 	prefetch_data_t *td_pfd;
 	boolean_t td_paused;
+	uint64_t td_hole_birth_enabled_txg;
 	blkptr_cb_t *td_func;
 	void *td_arg;
 } traverse_data_t;
@@ -157,7 +157,7 @@ resume_skip_check(traverse_data_t *td, const dnode_phys_t *dnp,
 		 * If we already visited this bp & everything below,
 		 * don't bother doing it again.
 		 */
-		if (zbookmark_is_before(dnp, zb, td->td_resume))
+		if (zbookmark_subtree_completed(dnp, zb, td->td_resume))
 			return (RESUME_SKIP_ALL);
 
 		/*
@@ -177,7 +177,7 @@ static void
 traverse_prefetch_metadata(traverse_data_t *td,
     const blkptr_t *bp, const zbookmark_phys_t *zb)
 {
-	uint32_t flags = ARC_NOWAIT | ARC_PREFETCH;
+	arc_flags_t flags = ARC_FLAG_NOWAIT | ARC_FLAG_PREFETCH;
 
 	if (!(td->td_flags & TRAVERSE_PREFETCH_METADATA))
 		return;
@@ -229,35 +229,31 @@ traverse_visitbp(traverse_data_t *td, const dnode_phys_t *dnp,
 	}
 
 	if (bp->blk_birth == 0) {
-		if (spa_feature_is_active(td->td_spa, SPA_FEATURE_HOLE_BIRTH)) {
-			/*
-			 * Since this block has a birth time of 0 it must be a
-			 * hole created before the SPA_FEATURE_HOLE_BIRTH
-			 * feature was enabled.  If SPA_FEATURE_HOLE_BIRTH
-			 * was enabled before the min_txg for this traveral we
-			 * know the hole must have been created before the
-			 * min_txg for this traveral, so we can skip it. If
-			 * SPA_FEATURE_HOLE_BIRTH was enabled after the min_txg
-			 * for this traveral we cannot tell if the hole was
-			 * created before or after the min_txg for this
-			 * traversal, so we cannot skip it.
-			 */
-			uint64_t hole_birth_enabled_txg;
-			VERIFY(spa_feature_enabled_txg(td->td_spa,
-			    SPA_FEATURE_HOLE_BIRTH, &hole_birth_enabled_txg));
-			if (hole_birth_enabled_txg < td->td_min_txg)
-				return (0);
-		}
+		/*
+		 * Since this block has a birth time of 0 it must be a
+		 * hole created before the SPA_FEATURE_HOLE_BIRTH
+		 * feature was enabled.  If SPA_FEATURE_HOLE_BIRTH
+		 * was enabled before the min_txg for this traveral we
+		 * know the hole must have been created before the
+		 * min_txg for this traveral, so we can skip it. If
+		 * SPA_FEATURE_HOLE_BIRTH was enabled after the min_txg
+		 * for this traveral we cannot tell if the hole was
+		 * created before or after the min_txg for this
+		 * traversal, so we cannot skip it.
+		 */
+		if (td->td_hole_birth_enabled_txg < td->td_min_txg)
+			return (0);
 	} else if (bp->blk_birth <= td->td_min_txg) {
 		return (0);
 	}
 
 	if (pd != NULL && !pd->pd_exited && prefetch_needed(pd, bp)) {
+		uint64_t size = BP_GET_LSIZE(bp);
 		mutex_enter(&pd->pd_mtx);
-		ASSERT(pd->pd_blks_fetched >= 0);
-		while (pd->pd_blks_fetched == 0 && !pd->pd_exited)
+		ASSERT(pd->pd_bytes_fetched >= 0);
+		while (pd->pd_bytes_fetched < size && !pd->pd_exited)
 			cv_wait(&pd->pd_cv, &pd->pd_mtx);
-		pd->pd_blks_fetched--;
+		pd->pd_bytes_fetched -= size;
 		cv_broadcast(&pd->pd_cv);
 		mutex_exit(&pd->pd_mtx);
 	}
@@ -279,7 +275,7 @@ traverse_visitbp(traverse_data_t *td, const dnode_phys_t *dnp,
 	}
 
 	if (BP_GET_LEVEL(bp) > 0) {
-		uint32_t flags = ARC_WAIT;
+		arc_flags_t flags = ARC_FLAG_WAIT;
 		int i;
 		blkptr_t *cbp;
 		int epb = BP_GET_LSIZE(bp) >> SPA_BLKPTRSHIFT;
@@ -307,7 +303,7 @@ traverse_visitbp(traverse_data_t *td, const dnode_phys_t *dnp,
 				break;
 		}
 	} else if (BP_GET_TYPE(bp) == DMU_OT_DNODE) {
-		uint32_t flags = ARC_WAIT;
+		arc_flags_t flags = ARC_FLAG_WAIT;
 		int i;
 		int epb = BP_GET_LSIZE(bp) >> DNODE_SHIFT;
 
@@ -330,7 +326,7 @@ traverse_visitbp(traverse_data_t *td, const dnode_phys_t *dnp,
 				break;
 		}
 	} else if (BP_GET_TYPE(bp) == DMU_OT_OBJSET) {
-		uint32_t flags = ARC_WAIT;
+		arc_flags_t flags = ARC_FLAG_WAIT;
 		objset_phys_t *osp;
 		dnode_phys_t *dnp;
 
@@ -426,6 +422,17 @@ traverse_dnode(traverse_data_t *td, const dnode_phys_t *dnp,
 	int j, err = 0;
 	zbookmark_phys_t czb;
 
+	if (td->td_flags & TRAVERSE_PRE) {
+		SET_BOOKMARK(&czb, objset, object, ZB_DNODE_LEVEL,
+		    ZB_DNODE_BLKID);
+		err = td->td_func(td->td_spa, NULL, NULL, &czb, dnp,
+		    td->td_arg);
+		if (err == TRAVERSE_VISIT_NO_CHILDREN)
+			return (0);
+		if (err != 0)
+			return (err);
+	}
+
 	for (j = 0; j < dnp->dn_nblkptr; j++) {
 		SET_BOOKMARK(&czb, objset, object, dnp->dn_nlevels - 1, j);
 		err = traverse_visitbp(td, dnp, &dnp->dn_blkptr[j], &czb);
@@ -433,9 +440,20 @@ traverse_dnode(traverse_data_t *td, const dnode_phys_t *dnp,
 			break;
 	}
 
-	if (dnp->dn_flags & DNODE_FLAG_SPILL_BLKPTR) {
+	if (err == 0 && (dnp->dn_flags & DNODE_FLAG_SPILL_BLKPTR)) {
 		SET_BOOKMARK(&czb, objset, object, 0, DMU_SPILL_BLKID);
 		err = traverse_visitbp(td, dnp, &dnp->dn_spill, &czb);
+	}
+
+	if (err == 0 && (td->td_flags & TRAVERSE_POST)) {
+		SET_BOOKMARK(&czb, objset, object, ZB_DNODE_LEVEL,
+		    ZB_DNODE_BLKID);
+		err = td->td_func(td->td_spa, NULL, NULL, &czb, dnp,
+		    td->td_arg);
+		if (err == TRAVERSE_VISIT_NO_CHILDREN)
+			return (0);
+		if (err != 0)
+			return (err);
 	}
 	return (err);
 }
@@ -446,9 +464,11 @@ traverse_prefetcher(spa_t *spa, zilog_t *zilog, const blkptr_t *bp,
     const zbookmark_phys_t *zb, const dnode_phys_t *dnp, void *arg)
 {
 	prefetch_data_t *pfd = arg;
-	uint32_t aflags = ARC_NOWAIT | ARC_PREFETCH;
+	arc_flags_t aflags = ARC_FLAG_NOWAIT | ARC_FLAG_PREFETCH;
 
-	ASSERT(pfd->pd_blks_fetched >= 0);
+	ASSERT(pfd->pd_bytes_fetched >= 0);
+	if (bp == NULL)
+		return (0);
 	if (pfd->pd_cancel)
 		return (SET_ERROR(EINTR));
 
@@ -456,9 +476,9 @@ traverse_prefetcher(spa_t *spa, zilog_t *zilog, const blkptr_t *bp,
 		return (0);
 
 	mutex_enter(&pfd->pd_mtx);
-	while (!pfd->pd_cancel && pfd->pd_blks_fetched >= pfd->pd_blks_max)
+	while (!pfd->pd_cancel && pfd->pd_bytes_fetched >= zfs_pd_bytes_max)
 		cv_wait(&pfd->pd_cv, &pfd->pd_mtx);
-	pfd->pd_blks_fetched++;
+	pfd->pd_bytes_fetched += BP_GET_LSIZE(bp);
 	cv_broadcast(&pfd->pd_cv);
 	mutex_exit(&pfd->pd_mtx);
 
@@ -523,14 +543,20 @@ traverse_impl(spa_t *spa, dsl_dataset_t *ds, uint64_t objset, blkptr_t *rootbp,
 	td.td_flags = flags;
 	td.td_paused = B_FALSE;
 
-	pd.pd_blks_max = zfs_pd_blks_max;
+	if (spa_feature_is_active(spa, SPA_FEATURE_HOLE_BIRTH)) {
+		VERIFY(spa_feature_enabled_txg(spa,
+		    SPA_FEATURE_HOLE_BIRTH, &td.td_hole_birth_enabled_txg));
+	} else {
+		td.td_hole_birth_enabled_txg = 0;
+	}
+
 	pd.pd_flags = flags;
 	mutex_init(&pd.pd_mtx, NULL, MUTEX_DEFAULT, NULL);
 	cv_init(&pd.pd_cv, NULL, CV_DEFAULT, NULL);
 
 	/* See comment on ZIL traversal in dsl_scan_visitds. */
-	if (ds != NULL && !dsl_dataset_is_snapshot(ds) && !BP_IS_HOLE(rootbp)) {
-		uint32_t flags = ARC_WAIT;
+	if (ds != NULL && !ds->ds_is_snapshot && !BP_IS_HOLE(rootbp)) {
+		arc_flags_t flags = ARC_FLAG_WAIT;
 		objset_phys_t *osp;
 		arc_buf_t *buf;
 
@@ -576,7 +602,7 @@ traverse_dataset(dsl_dataset_t *ds, uint64_t txg_start, int flags,
     blkptr_cb_t func, void *arg)
 {
 	return (traverse_impl(ds->ds_dir->dd_pool->dp_spa, ds, ds->ds_object,
-	    &ds->ds_phys->ds_bp, txg_start, NULL, flags, func, arg));
+	    &dsl_dataset_phys(ds)->ds_bp, txg_start, NULL, flags, func, arg));
 }
 
 int
@@ -631,8 +657,8 @@ traverse_pool(spa_t *spa, uint64_t txg_start, int flags,
 					continue;
 				break;
 			}
-			if (ds->ds_phys->ds_prev_snap_txg > txg)
-				txg = ds->ds_phys->ds_prev_snap_txg;
+			if (dsl_dataset_phys(ds)->ds_prev_snap_txg > txg)
+				txg = dsl_dataset_phys(ds)->ds_prev_snap_txg;
 			err = traverse_dataset(ds, txg, flags, func, arg);
 			dsl_dataset_rele(ds, FTAG);
 			if (err != 0)

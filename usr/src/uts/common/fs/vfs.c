@@ -20,6 +20,8 @@
  */
 /*
  * Copyright (c) 1988, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, Joyent, Inc. All rights reserved.
+ * Copyright 2015 Nexenta Systems, Inc. All rights reserved.
  */
 
 /*	Copyright (c) 1983, 1984, 1985, 1986, 1987, 1988, 1989 AT&T	*/
@@ -1129,6 +1131,7 @@ domount(char *fsname, struct mounta *uap, vnode_t *vp, struct cred *credp,
 	struct pathname	pn, rpn;
 	vsk_anchor_t	*vskap;
 	char fstname[FSTYPSZ];
+	zone_t		*zone;
 
 	/*
 	 * The v_flag value for the mount point vp is permanently set
@@ -1590,9 +1593,24 @@ domount(char *fsname, struct mounta *uap, vnode_t *vp, struct cred *credp,
 	}
 
 	/*
-	 * Serialize with zone creations.
+	 * Serialize with zone state transitions.
+	 * See vfs_list_add; zone mounted into is:
+	 * 	zone_find_by_path(refstr_value(vfsp->vfs_mntpt))
+	 * not the zone doing the mount (curproc->p_zone), but if we're already
+	 * inside a NGZ, then we know what zone we are.
 	 */
-	mount_in_progress();
+	if (INGLOBALZONE(curproc)) {
+		zone = zone_find_by_path(mountpt);
+		ASSERT(zone != NULL);
+	} else {
+		zone = curproc->p_zone;
+		/*
+		 * zone_find_by_path does a hold, so do one here too so that
+		 * we can do a zone_rele after mount_completed.
+		 */
+		zone_hold(zone);
+	}
+	mount_in_progress(zone);
 	/*
 	 * Instantiate (or reinstantiate) the file system.  If appropriate,
 	 * splice it into the file system name space.
@@ -1761,7 +1779,8 @@ domount(char *fsname, struct mounta *uap, vnode_t *vp, struct cred *credp,
 
 		vfs_unlock(vfsp);
 	}
-	mount_completed();
+	mount_completed(zone);
+	zone_rele(zone);
 	if (splice)
 		vn_vfsunlock(vp);
 
@@ -4637,8 +4656,8 @@ getfsname(char *askfor, char *name, size_t namelen)
  * convention that the NFS V2 filesystem name is "nfs" (see vfs_conf.c)
  * we need to map "nfs" => "nfsdyn" and "nfs2" => "nfs".  The dynamic
  * nfs module will map the type back to either "nfs", "nfs3", or "nfs4".
- * This is only for root filesystems, all other uses such as cachefs
- * will expect that "nfs" == NFS V2.
+ * This is only for root filesystems, all other uses will expect
+ * that "nfs" == NFS V2.
  */
 static void
 getrootfs(char **fstypp, char **fsmodp)

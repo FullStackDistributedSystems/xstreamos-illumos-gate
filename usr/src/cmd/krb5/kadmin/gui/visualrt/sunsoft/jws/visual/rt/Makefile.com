@@ -23,11 +23,7 @@
 # Copyright (c) 1999-2000 by Sun Microsystems, Inc.
 # All rights reserved.
 #
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-#
 
-#under jdk1.7
-#JAVAFLAGS= -nowarn -O
 JAVAFLAGS = -source 1.5 -target 1.6 -nowarn -O
 JRE=$(JAVA_ROOT)/jre/lib
 VRT=$(SRC)/cmd/krb5/kadmin/gui/visualrt

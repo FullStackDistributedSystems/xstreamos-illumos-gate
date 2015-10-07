@@ -22,8 +22,6 @@
 /*
  * Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
- *
- * ident	"%Z%%M%	%I%	%E% SMI"
  */
 
 import org.opensolaris.os.dtrace.*;
@@ -51,8 +49,6 @@ public class TestStopLock {
 	    consumer.enable();
 	    consumer.go();
 	    try {
-		/*Thread.currentThread().sleep(500);*/
-		/* under jdk1.7 */
 		Thread.sleep(500);
 	    } catch (InterruptedException e) {
 		e.printStackTrace();

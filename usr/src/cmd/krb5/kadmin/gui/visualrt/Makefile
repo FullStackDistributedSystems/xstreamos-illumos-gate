@@ -23,8 +23,6 @@
 # Copyright 2004 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
 #
-# ident	"%Z%%M%	%I%	%E% SMI"
-#
 
 include $(SRC)/Makefile.master
 
@@ -38,8 +36,6 @@ check           :=      TARGET= check
 
 .KEEP_STATE:
 
-#under jdk1.7
-#JAVAFLAGS= -nowarn -O
 GUIDIR=$(SRC)/cmd/krb5/kadmin/gui
 CLASSPATH=$(GUIDIR)/visualrt:$(JAVA_ROOT)/jre/lib/rt.jar:$(JAVA_ROOT)/jre/lib/i18n.jar
 

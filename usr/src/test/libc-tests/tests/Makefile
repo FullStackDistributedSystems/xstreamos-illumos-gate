@@ -11,10 +11,20 @@
 
 #
 # Copyright (c) 2012 by Delphix. All rights reserved.
-# Copyright 2014 Garrett D'Amore <garrett@damore.org>
+# Copyright 2015 Garrett D'Amore <garrett@damore.org>
 #
 
-SUBDIRS = newlocale nl_langinfo wcsrtombs
+SUBDIRS = \
+	catopen \
+	fpround \
+	newlocale \
+	nl_langinfo \
+	priv_gettext \
+	random \
+	strerror \
+	symbols \
+	wcsrtombs \
+	wctype
 
 include $(SRC)/Makefile.master
 include $(SRC)/test/Makefile.com

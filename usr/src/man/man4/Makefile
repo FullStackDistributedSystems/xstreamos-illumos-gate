@@ -43,6 +43,7 @@ _MANFILES=	Intro.4				\
 		core.4				\
 		crypt.conf.4			\
 		crypto_certs.4			\
+		ctf.4				\
 		d_passwd.4			\
 		dacf.conf.4			\
 		dat.conf.4			\
@@ -56,9 +57,6 @@ _MANFILES=	Intro.4				\
 		devices.4			\
 		dfstab.4			\
 		dhcp_inittab.4			\
-		dhcp_network.4			\
-		dhcpsvc.conf.4			\
-		dhcptab.4			\
 		dialups.4			\
 		dir_ufs.4			\
 		driver.conf.4			\
@@ -103,6 +101,7 @@ _MANFILES=	Intro.4				\
 		logindevperm.4			\
 		loginlog.4			\
 		magic.4				\
+		mailer.conf.4			\
 		md.tab.4			\
 		mddb.cf.4			\
 		mech.4				\

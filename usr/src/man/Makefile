@@ -11,6 +11,7 @@
 
 #
 # Copyright 2011, Richard Lowe
+# Copyright (c) 2012, Igor Kozhukhov <ikozhukhov@gmail.com>
 # Copyright 2014 Nexenta Systems, Inc.  All rights reserved.
 #
 
@@ -19,8 +20,10 @@ SUBDIRS=	man1		\
 		man1c		\
 		man1has		\
 		man1m		\
+		man1s		\
 		man2		\
 		man3		\
+		man3avl		\
 		man3bsm		\
 		man3c		\
 		man3c_db	\
@@ -48,10 +51,12 @@ SUBDIRS=	man1		\
 		man3ldap	\
 		man3lgrp	\
 		man3lib		\
+		man3m		\
 		man3mail	\
 		man3malloc	\
 		man3mp		\
 		man3mpapi	\
+		man3mvec	\
 		man3nsl		\
 		man3nvpair	\
 		man3pam		\

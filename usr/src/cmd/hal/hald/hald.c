@@ -368,11 +368,9 @@ main (int argc, char *argv[])
 	char newpath[512];
 
 	openlog ("hald", LOG_PID, LOG_DAEMON);
-
-#if (GLIB_MAJOR_VERSION <= 2 && GLIB_MINOR_VERSION <= 35)
+#if !GLIB_CHECK_VERSION(2,35,0)
 	g_type_init ();
 #endif
-
 	if (getenv ("HALD_VERBOSE"))
 		hald_is_verbose = TRUE;
 	else

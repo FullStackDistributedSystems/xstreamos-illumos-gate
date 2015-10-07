@@ -298,24 +298,31 @@ zfs_ioctl(vnode_t *vp, int com, intptr_t data, int flag, cred_t *cred,
     int *rvalp, caller_context_t *ct)
 {
 	offset_t off;
+	offset_t ndata;
+	dmu_object_info_t doi;
 	int error;
 	zfsvfs_t *zfsvfs;
 	znode_t *zp;
 
 	switch (com) {
 	case _FIOFFS:
+	{
 		return (zfs_sync(vp->v_vfsp, 0, cred));
 
 		/*
 		 * The following two ioctls are used by bfu.  Faking out,
 		 * necessary to avoid bfu errors.
 		 */
+	}
 	case _FIOGDIO:
 	case _FIOSDIO:
+	{
 		return (0);
+	}
 
 	case _FIO_SEEK_DATA:
 	case _FIO_SEEK_HOLE:
+	{
 		if (ddi_copyin((void *)data, &off, sizeof (off), flag))
 			return (SET_ERROR(EFAULT));
 
@@ -332,6 +339,46 @@ zfs_ioctl(vnode_t *vp, int com, intptr_t data, int flag, cred_t *cred,
 		if (ddi_copyout(&off, (void *)data, sizeof (off), flag))
 			return (SET_ERROR(EFAULT));
 		return (0);
+	}
+	case _FIO_COUNT_FILLED:
+	{
+		/*
+		 * _FIO_COUNT_FILLED adds a new ioctl command which
+		 * exposes the number of filled blocks in a
+		 * ZFS object.
+		 */
+		zp = VTOZ(vp);
+		zfsvfs = zp->z_zfsvfs;
+		ZFS_ENTER(zfsvfs);
+		ZFS_VERIFY_ZP(zp);
+
+		/*
+		 * Wait for all dirty blocks for this object
+		 * to get synced out to disk, and the DMU info
+		 * updated.
+		 */
+		error = dmu_object_wait_synced(zfsvfs->z_os, zp->z_id);
+		if (error) {
+			ZFS_EXIT(zfsvfs);
+			return (error);
+		}
+
+		/*
+		 * Retrieve fill count from DMU object.
+		 */
+		error = dmu_object_info(zfsvfs->z_os, zp->z_id, &doi);
+		if (error) {
+			ZFS_EXIT(zfsvfs);
+			return (error);
+		}
+
+		ndata = doi.doi_fill_count;
+
+		ZFS_EXIT(zfsvfs);
+		if (ddi_copyout(&ndata, (void *)data, sizeof (ndata), flag))
+			return (SET_ERROR(EFAULT));
+		return (0);
+	}
 	}
 	return (SET_ERROR(ENOTTY));
 }
@@ -406,7 +453,6 @@ static int
 mappedread(vnode_t *vp, int nbytes, uio_t *uio)
 {
 	znode_t *zp = VTOZ(vp);
-	objset_t *os = zp->z_zfsvfs->z_os;
 	int64_t	start, off;
 	int len = nbytes;
 	int error = 0;
@@ -425,7 +471,8 @@ mappedread(vnode_t *vp, int nbytes, uio_t *uio)
 			zfs_unmap_page(pp, va);
 			page_unlock(pp);
 		} else {
-			error = dmu_read_uio(os, zp->z_id, uio, bytes);
+			error = dmu_read_uio_dbuf(sa_get_db(zp->z_sa_hdl),
+			    uio, bytes);
 		}
 		len -= bytes;
 		off = 0;
@@ -460,7 +507,6 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 {
 	znode_t		*zp = VTOZ(vp);
 	zfsvfs_t	*zfsvfs = zp->z_zfsvfs;
-	objset_t	*os;
 	ssize_t		n, nbytes;
 	int		error = 0;
 	rl_t		*rl;
@@ -468,7 +514,6 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 
 	ZFS_ENTER(zfsvfs);
 	ZFS_VERIFY_ZP(zp);
-	os = zfsvfs->z_os;
 
 	if (zp->z_pflags & ZFS_AV_QUARANTINED) {
 		ZFS_EXIT(zfsvfs);
@@ -558,10 +603,12 @@ zfs_read(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 		nbytes = MIN(n, zfs_read_chunk_size -
 		    P2PHASE(uio->uio_loffset, zfs_read_chunk_size));
 
-		if (vn_has_cached_data(vp))
+		if (vn_has_cached_data(vp)) {
 			error = mappedread(vp, nbytes, uio);
-		else
-			error = dmu_read_uio(os, zp->z_id, uio, nbytes);
+		} else {
+			error = dmu_read_uio_dbuf(sa_get_db(zp->z_sa_hdl),
+			    uio, nbytes);
+		}
 		if (error) {
 			/* convert checksum errors into IO errors */
 			if (error == ECKSUM)
@@ -817,8 +864,14 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 			uint64_t new_blksz;
 
 			if (zp->z_blksz > max_blksz) {
+				/*
+				 * File's blocksize is already larger than the
+				 * "recordsize" property.  Only let it grow to
+				 * the next power of 2.
+				 */
 				ASSERT(!ISP2(zp->z_blksz));
-				new_blksz = MIN(end_size, SPA_MAXBLOCKSIZE);
+				new_blksz = MIN(end_size,
+				    1 << highbit64(zp->z_blksz));
 			} else {
 				new_blksz = MIN(end_size, max_blksz);
 			}
@@ -2351,7 +2404,8 @@ zfs_readdir(vnode_t *vp, uio_t *uio, cred_t *cr, int *eofp,
 
 		/* Prefetch znode */
 		if (prefetch)
-			dmu_prefetch(os, objnum, 0, 0);
+			dmu_prefetch(os, objnum, 0, 0, 0,
+			    ZIO_PRIORITY_SYNC_READ);
 
 	skip_entry:
 		/*

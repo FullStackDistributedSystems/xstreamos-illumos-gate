@@ -76,10 +76,6 @@ MANIFESTS= $(APIMANI)
 APICLASSPATH=$(CLASSES):$(APIJAVASRC)
 
 # javac flags
-#JFLAGS= -g -d $(CLASSES) -sourcepath $(APICLASSPATH) -deprecation
-#JFLAGS += -target 1.5
-#JFLAGS += -Xlint
-# under jdk1.7
 JFLAGS= -g -d $(CLASSES) -sourcepath $(APICLASSPATH)
 JFLAGS += -source 1.5 -target 1.6
 JFLAGS += -Xlint:all,-rawtypes,-options
@@ -92,8 +88,6 @@ $(CLASSES)/$(PKGPATH)/%.class:	$(APIJAVASRC)/$(PKGPATH)/%.java
 
 # javah generated headers
 APIHDR= LocalConsumer.h
-#JNIHDRS=$(JNI)/$(APIHDRS)
-#under jdk1.7
 JNIHDRS=$(JNI)/$(APIHDR)
 
 # API classes with native methods

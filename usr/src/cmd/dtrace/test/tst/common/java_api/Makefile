@@ -23,7 +23,6 @@
 # Copyright 2008 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
 #
-#ident	"%Z%%M%	%I%	%E% SMI"
 
 include $(SRC)/Makefile.master
 
@@ -60,10 +59,6 @@ lint:
 
 install: all $(PROTO_TEST_JAR)
 
-#JFLAGS= -g -cp $(CLASSPATH) -d $(CLASSDIR) -deprecation
-#JFLAGS += -target 1.5
-#JFLAGS += -Xlint
-#under jdk1.7
 JFLAGS= -g -cp $(CLASSPATH) -d $(CLASSDIR)
 JFLAGS += -source 1.5 -target 1.6 -Xlint:all,-options,-rawtypes
 COMPILE.java=$(JAVAC) $(JFLAGS)

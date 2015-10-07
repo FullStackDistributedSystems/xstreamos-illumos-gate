@@ -18,9 +18,10 @@
  *
  * CDDL HEADER END
  */
+
 /*
+ * Copyright 2015 Nexenta Systems, Inc.  All rights reserved.
  * Copyright (c) 1990, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2014 Nexenta Systems, Inc.  All rights reserved.
  */
 
 /*
@@ -50,6 +51,7 @@
 #include <sys/utsname.h>
 #include <sys/sdt.h>
 #include <netinet/in.h>
+#include <sys/avl.h>
 
 #include <rpc/types.h>
 #include <rpc/auth.h>
@@ -69,6 +71,21 @@ treenode_t *ns_root;
 
 struct exportinfo *exptable_path_hash[PKP_HASH_SIZE];
 struct exportinfo *exptable[EXPTABLESIZE];
+
+/*
+ * exi_id support
+ *
+ * exi_id_next		The next exi_id available.
+ * exi_id_overflow	The exi_id_next already overflowed, so we should
+ *			thoroughly check for duplicates.
+ * exi_id_tree		AVL tree indexed by exi_id.
+ *
+ * All exi_id_next, exi_id_overflow, and exi_id_tree are protected by
+ * exported_lock.
+ */
+static int exi_id_next;
+static bool_t exi_id_overflow;
+avl_tree_t exi_id_tree;
 
 static int	unexport(exportinfo_t *);
 static void	exportfree(exportinfo_t *);
@@ -783,6 +800,8 @@ export_link(exportinfo_t *exi)
 {
 	exportinfo_t **bckt;
 
+	ASSERT(RW_WRITE_HELD(&exported_lock));
+
 	bckt = &exptable[exptablehash(&exi->exi_fsid, &exi->exi_fid)];
 	exp_hash_link(exi, fid_hash, bckt);
 
@@ -792,14 +811,65 @@ export_link(exportinfo_t *exi)
 }
 
 /*
+ * Helper functions for exi_id handling
+ */
+static int
+exi_id_compar(const void *v1, const void *v2)
+{
+	const struct exportinfo *e1 = v1;
+	const struct exportinfo *e2 = v2;
+
+	if (e1->exi_id < e2->exi_id)
+		return (-1);
+	if (e1->exi_id > e2->exi_id)
+		return (1);
+
+	return (0);
+}
+
+int
+exi_id_get_next(void)
+{
+	struct exportinfo e;
+	int ret = exi_id_next;
+
+	ASSERT(RW_WRITE_HELD(&exported_lock));
+
+	do {
+		exi_id_next++;
+		if (exi_id_next == 0)
+			exi_id_overflow = TRUE;
+
+		if (!exi_id_overflow)
+			break;
+
+		if (exi_id_next == ret)
+			cmn_err(CE_PANIC, "exi_id exhausted");
+
+		e.exi_id = exi_id_next;
+	} while (avl_find(&exi_id_tree, &e, NULL) != NULL);
+
+	return (ret);
+}
+
+/*
  * Initialization routine for export routines. Should only be called once.
  */
 int
 nfs_exportinit(void)
 {
 	int error;
+	int i;
 
 	rw_init(&exported_lock, NULL, RW_DEFAULT, NULL);
+
+	/*
+	 * exi_id handling initialization
+	 */
+	exi_id_next = 0;
+	exi_id_overflow = FALSE;
+	avl_create(&exi_id_tree, exi_id_compar, sizeof (struct exportinfo),
+	    offsetof(struct exportinfo, exi_id_link));
 
 	/*
 	 * Allocate the place holder for the public file handle, which
@@ -827,6 +897,18 @@ nfs_exportinit(void)
 		return (error);
 	}
 
+	/*
+	 * Initialize auth cache and auth cache lock
+	 */
+	for (i = 0; i < AUTH_TABLESIZE; i++) {
+		exi_root->exi_cache[i] = kmem_alloc(sizeof (avl_tree_t),
+		    KM_SLEEP);
+		avl_create(exi_root->exi_cache[i], nfsauth_cache_clnt_compar,
+		    sizeof (struct auth_cache_clnt),
+		    offsetof(struct auth_cache_clnt, authc_link));
+	}
+	rw_init(&exi_root->exi_cache_lock, NULL, RW_DEFAULT, NULL);
+
 	/* setup the fhandle template */
 	exi_root->exi_fh.fh_fsid = rootdir->v_vfsp->vfs_fsid;
 	exi_root->exi_fh.fh_xlen = exi_rootfid.fid_len;
@@ -834,10 +916,23 @@ nfs_exportinit(void)
 	    exi_rootfid.fid_len);
 	exi_root->exi_fh.fh_len = sizeof (exi_root->exi_fh.fh_data);
 
+	rw_enter(&exported_lock, RW_WRITER);
+
 	/*
 	 * Publish the exportinfo in the hash table
 	 */
 	export_link(exi_root);
+
+	/*
+	 * Initialize exi_id and exi_kstats
+	 */
+	exi_root->exi_id = exi_id_get_next();
+	avl_add(&exi_id_tree, exi_root);
+	exi_root->exi_kstats = exp_kstats_init(getzoneid(), exi_root->exi_id,
+	    exi_root->exi_export.ex_path, exi_root->exi_export.ex_pathlen,
+	    FALSE);
+
+	rw_exit(&exported_lock);
 
 	nfslog_init();
 	ns_root = NULL;
@@ -852,13 +947,37 @@ nfs_exportinit(void)
 void
 nfs_exportfini(void)
 {
+	int i;
+
+	rw_enter(&exported_lock, RW_WRITER);
+
+	exp_kstats_delete(exi_root->exi_kstats);
+	avl_remove(&exi_id_tree, exi_root);
+	export_unlink(exi_root);
+
+	rw_exit(&exported_lock);
+
 	/*
 	 * Deallocate the place holder for the public file handle.
 	 */
 	srv_secinfo_list_free(exi_root->exi_export.ex_secinfo,
 	    exi_root->exi_export.ex_seccnt);
 	mutex_destroy(&exi_root->exi_lock);
+
+	rw_destroy(&exi_root->exi_cache_lock);
+	for (i = 0; i < AUTH_TABLESIZE; i++) {
+		avl_destroy(exi_root->exi_cache[i]);
+		kmem_free(exi_root->exi_cache[i], sizeof (avl_tree_t));
+	}
+
+	exp_kstats_fini(exi_root->exi_kstats);
+
 	kmem_free(exi_root, sizeof (*exi_root));
+
+	/*
+	 * exi_id handling cleanup
+	 */
+	avl_destroy(&exi_id_tree);
 
 	rw_destroy(&exported_lock);
 }
@@ -1171,8 +1290,14 @@ exportfs(struct exportfs_args *args, model_t model, cred_t *cr)
 	exi->exi_dvp = dvp;
 
 	/*
-	 * Initialize auth cache lock
+	 * Initialize auth cache and auth cache lock
 	 */
+	for (i = 0; i < AUTH_TABLESIZE; i++) {
+		exi->exi_cache[i] = kmem_alloc(sizeof (avl_tree_t), KM_SLEEP);
+		avl_create(exi->exi_cache[i], nfsauth_cache_clnt_compar,
+		    sizeof (struct auth_cache_clnt),
+		    offsetof(struct auth_cache_clnt, authc_link));
+	}
 	rw_init(&exi->exi_cache_lock, NULL, RW_DEFAULT, NULL);
 
 	/*
@@ -1444,6 +1569,7 @@ exportfs(struct exportfs_args *args, model_t model, cred_t *cr)
 	 */
 	for (ex = exi->fid_hash.next; ex != NULL; ex = ex->fid_hash.next) {
 		if (ex != exi_root && VN_CMP(ex->exi_vp, vp)) {
+			avl_remove(&exi_id_tree, ex);
 			export_unlink(ex);
 			break;
 		}
@@ -1489,7 +1615,7 @@ exportfs(struct exportfs_args *args, model_t model, cred_t *cr)
 		if (error)
 			goto out7;
 	} else {
-	/* If it's a re-export update namespace tree */
+		/* If it's a re-export update namespace tree */
 		exi->exi_tree = ex->exi_tree;
 		exi->exi_tree->tree_exi = exi;
 	}
@@ -1538,6 +1664,22 @@ exportfs(struct exportfs_args *args, model_t model, cred_t *cr)
 		exi->exi_visible = ex->exi_visible;
 		ex->exi_visible = NULL;
 	}
+
+	/*
+	 * Initialize exi_id and exi_kstats
+	 */
+	if (ex != NULL) {
+		exi->exi_id = ex->exi_id;
+		exi->exi_kstats = ex->exi_kstats;
+		ex->exi_kstats = NULL;
+		exp_kstats_reset(exi->exi_kstats, kex->ex_path,
+		    kex->ex_pathlen, FALSE);
+	} else {
+		exi->exi_id = exi_id_get_next();
+		exi->exi_kstats = exp_kstats_init(getzoneid(), exi->exi_id,
+		    kex->ex_path, kex->ex_pathlen, FALSE);
+	}
+	avl_add(&exi_id_tree, exi);
 
 	DTRACE_PROBE(nfss__i__exported_lock3_stop);
 	rw_exit(&exported_lock);
@@ -1588,7 +1730,13 @@ out1:
 		VN_RELE(dvp);
 	mutex_destroy(&exi->exi_lock);
 	rw_destroy(&exi->exi_cache_lock);
+	for (i = 0; i < AUTH_TABLESIZE; i++) {
+		avl_destroy(exi->exi_cache[i]);
+		kmem_free(exi->exi_cache[i], sizeof (avl_tree_t));
+	}
+
 	kmem_free(exi, sizeof (*exi));
+
 	return (error);
 }
 
@@ -1621,6 +1769,8 @@ unexport(struct exportinfo *exi)
 		return (EINVAL);
 	}
 
+	exp_kstats_delete(exi->exi_kstats);
+	avl_remove(&exi_id_tree, exi);
 	export_unlink(exi);
 
 	/*
@@ -2484,6 +2634,7 @@ exportfree(struct exportinfo *exi)
 {
 	struct exportdata *ex;
 	struct charset_cache *cache;
+	int i;
 
 	ex = &exi->exi_export;
 
@@ -2531,6 +2682,17 @@ exportfree(struct exportinfo *exi)
 
 	mutex_destroy(&exi->exi_lock);
 	rw_destroy(&exi->exi_cache_lock);
+	/*
+	 * All nodes in the exi_cache AVL trees were removed and freed in the
+	 * nfsauth_cache_free() call above.  We will just destroy and free the
+	 * empty AVL trees here.
+	 */
+	for (i = 0; i < AUTH_TABLESIZE; i++) {
+		avl_destroy(exi->exi_cache[i]);
+		kmem_free(exi->exi_cache[i], sizeof (avl_tree_t));
+	}
+
+	exp_kstats_fini(exi->exi_kstats);
 
 	kmem_free(exi, sizeof (*exi));
 }
