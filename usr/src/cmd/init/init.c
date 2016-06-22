@@ -696,9 +696,13 @@ main(int argc, char *argv[])
 		console(B_FALSE,
 		    "\n\n%s Release %s Version %s %d-bit\r\n",
 		    un.sysname, un.release, un.version, bits);
-		console(B_FALSE,
+		/*console(B_FALSE,
 		    "Copyright (c) 1983, 2010, Oracle and/or its affiliates."
-		    " All rights reserved.\r\n");
+		    " All rights reserved.\r\n");*/
+        	console(B_FALSE,
+		    "XStreamOS is mantained and distributed by Sonicle (http://www.sonicle.com).\n");
+        	console(B_FALSE,
+		    "All other trademarks and copyrights are the property of their respective owners.\n");
 	}
 
 	/*
