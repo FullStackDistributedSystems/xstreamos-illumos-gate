@@ -700,9 +700,9 @@ main(int argc, char *argv[])
 		    "Copyright (c) 1983, 2010, Oracle and/or its affiliates."
 		    " All rights reserved.\r\n");*/
         	console(B_FALSE,
-		    "XStreamOS is mantained and distributed by Sonicle (http://www.sonicle.com).\n");
+		    "XStreamOS is mantained and distributed by Sonicle (http://www.sonicle.com).\r\n");
         	console(B_FALSE,
-		    "All other trademarks and copyrights are the property of their respective owners.\n");
+		    "All other trademarks and copyrights are the property of their respective owners.\r\n\r\n");
 	}
 
 	/*
