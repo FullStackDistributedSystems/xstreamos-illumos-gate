@@ -694,8 +694,8 @@ main(int argc, char *argv[])
 		}
 
 		console(B_FALSE,
-		    "\n\n%s Release %s Version %s %d-bit\r\n",
-		    un.sysname, un.release, un.version, bits);
+		    "\n\n%s Release %s Version %s %d-bit xs_%s %s\r\n",
+		    un.sysname, un.release, un.version, bits, XS_MAJBUILDNUM,XS_RELEASE_DATE);
 		/*console(B_FALSE,
 		    "Copyright (c) 1983, 2010, Oracle and/or its affiliates."
 		    " All rights reserved.\r\n");*/
