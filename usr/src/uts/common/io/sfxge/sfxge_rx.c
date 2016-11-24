@@ -1,27 +1,31 @@
 /*
- * CDDL HEADER START
+ * Copyright (c) 2008-2016 Solarflare Communications Inc.
+ * All rights reserved.
  *
- * The contents of this file are subject to the terms of the
- * Common Development and Distribution License (the "License").
- * You may not use this file except in compliance with the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
  *
- * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
- * See the License for the specific language governing permissions
- * and limitations under the License.
+ * 1. Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
  *
- * When distributing Covered Code, include this CDDL HEADER in each
- * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
- * If applicable, add the following below this CDDL HEADER, with the
- * fields enclosed by brackets "[]" replaced with your own identifying
- * information: Portions Copyright [yyyy] [name of copyright owner]
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
+ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * CDDL HEADER END
- */
-
-/*
- * Copyright 2008-2013 Solarflare Communications Inc.  All rights reserved.
- * Use is subject to license terms.
+ * The views and conclusions contained in the software and documentation are
+ * those of the authors and should not be interpreted as representing official
+ * policies, either expressed or implied, of the FreeBSD Project.
  */
 
 #include <sys/types.h>
@@ -52,6 +56,9 @@
 
 /* RXQ flush response timeout (in microseconds) */
 #define	SFXGE_RX_QFLUSH_USEC	(2000000)
+
+/* RXQ flush tries in the case of failure */
+#define	SFXGE_RX_QFLUSH_TRIES	(5)
 
 /* RXQ default packet buffer preallocation (number of packet buffers) */
 #define	SFXGE_RX_QPREALLOC	(0)
@@ -103,8 +110,7 @@ static ddi_dma_attr_t sfxge_rxq_dma_attr = {
 };
 
 /* Forward declaration */
-static int
-sfxge_rx_qpreallocate(sfxge_rxq_t *srp, int nprealloc);
+static void sfxge_rx_qpreallocate(sfxge_rxq_t *srp, int nprealloc);
 
 static int
 sfxge_rx_packet_ctor(void *buf, void *arg, int kmflags)
@@ -216,7 +222,7 @@ sfxge_rx_qctor(void *buf, void *arg, int kmflags)
 	/* Initialize the free packet pool */
 	srfppp = &(srp->sr_fpp);
 	if ((srfppp->srfpp_putp = kmem_zalloc(SFXGE_CPU_CACHE_SIZE *
-		SFXGE_RX_FPP_NSLOTS, kmflags)) == NULL) {
+	    SFXGE_RX_FPP_NSLOTS, kmflags)) == NULL) {
 		rc = ENOMEM;
 		goto fail5;
 	}
@@ -543,41 +549,6 @@ sfxge_rx_qpacket_destroy(sfxge_rxq_t *srp, sfxge_rx_packet_t *srpp)
 		atomic_add_64(&sp->s_rx_pkt_mem_alloc, -delta);
 }
 
-#ifdef _USE_XESBALLOC
-static void
-sfxge_rx_qpacket_free(void *arg, mblk_t *mp, boolean_t *recyclep)
-{
-	sfxge_rx_packet_t *srpp = arg;
-	sfxge_rxq_t *srp = srpp->srp_srp;
-
-	/*
-	 * WARNING "man -s 9f esballoc" states:
-	 * => runs async in a background context
-	 * => must not sleep, or access data structures that could be freed
-	 */
-	ASSERT3P(DB_BASE(mp), ==, srpp->srp_base);
-	ASSERT3P(MBLKSIZE(mp), ==, srpp->srp_mblksize);
-
-	/* Check whether we want to recycle the receive packets */
-	if (srpp->srp_recycle) {
-		ASSERT3P(DB_FRTNP(mp), ==, &(srpp->srp_free));
-
-		srpp->srp_mp = mp;
-
-		/* NORMAL recycled case */
-		sfxge_rx_qfpp_put(srp, srpp);
-		*recyclep = B_TRUE;
-		return;
-	}
-
-	srpp->srp_mp = NULL;
-
-	sfxge_rx_qpacket_destroy(srp, srpp);
-	*recyclep = B_FALSE;
-}
-#endif	/* _USE_XESBALLOC */
-
-#ifdef _USE_DESBALLOC
 static void
 sfxge_rx_qpacket_free(void *arg)
 {
@@ -620,7 +591,6 @@ sfxge_rx_qpacket_free(void *arg)
 
 	sfxge_rx_qpacket_destroy(srp, srpp);
 }
-#endif	/* _USE_DESBALLOC */
 
 static sfxge_rx_packet_t *
 sfxge_rx_qpacket_create(sfxge_rxq_t *srp)
@@ -728,21 +698,11 @@ sfxge_rx_qpacket_create(sfxge_rxq_t *srp)
 	freep->free_func = sfxge_rx_qpacket_free;
 	freep->free_arg  = (caddr_t)srpp;
 
-#ifdef _USE_XESBALLOC
-	if ((mp = xesballoc(srpp->srp_base, size, BPRI_HI, freep)) == NULL) {
-		srp->sr_kstat.srk_xesballoc_fail++;
-		rc = ENOMEM;
-		goto fail4;
-	}
-#endif	/* _USE_XESBALLOC */
-
-#ifdef _USE_DESBALLOC
 	if ((mp = desballoc(srpp->srp_base, size, BPRI_HI, freep)) == NULL) {
 		srp->sr_kstat.srk_desballoc_fail++;
 		rc = ENOMEM;
 		goto fail4;
 	}
-#endif	/* _USE_DESBALLOC */
 
 	srpp->srp_mp = mp;
 	srpp->srp_recycle = B_TRUE;
@@ -891,13 +851,7 @@ sfxge_rx_qrefill(sfxge_rxq_t *srp, unsigned int target)
 		srp->sr_added += batch;
 	}
 
-	/* Make the descriptors visible to the hardware */
-	(void) ddi_dma_sync(srp->sr_mem.esm_dma_handle,
-	    0,
-	    EFX_RXQ_SIZE(sp->s_rxq_size),
-	    DDI_DMA_SYNC_FORDEV);
-
-	efx_rx_qpush(srp->sr_erp, srp->sr_added);
+	efx_rx_qpush(srp->sr_erp, srp->sr_added, &srp->sr_pushed);
 
 out:
 	if (srfppp->srfpp_count < srfppp->srfpp_min)
@@ -905,7 +859,7 @@ out:
 }
 
 /* Preallocate packets and put them in the free packet pool */
-static int
+static void
 sfxge_rx_qpreallocate(sfxge_rxq_t *srp, int nprealloc)
 {
 	sfxge_rx_fpp_t *srfppp = &((srp)->sr_fpp);
@@ -917,7 +871,6 @@ sfxge_rx_qpreallocate(sfxge_rxq_t *srp, int nprealloc)
 			break;
 		sfxge_rx_qfpp_put(srp, srpp);
 	}
-	return (0);
 }
 
 /* Try to refill the RX descriptor ring by allocating new packets */
@@ -991,13 +944,7 @@ sfxge_rx_qfill(sfxge_rxq_t *srp, unsigned int target)
 		srp->sr_added += batch;
 	}
 
-	/* Make the descriptors visible to the hardware */
-	(void) ddi_dma_sync(srp->sr_mem.esm_dma_handle,
-	    0,
-	    EFX_RXQ_SIZE(sp->s_rxq_size),
-	    DDI_DMA_SYNC_FORDEV);
-
-	efx_rx_qpush(srp->sr_erp, srp->sr_added);
+	efx_rx_qpush(srp->sr_erp, srp->sr_added, &srp->sr_pushed);
 }
 
 void
@@ -1114,17 +1061,16 @@ sfxge_rx_qpoll(void *arg)
 	if ((sep->se_state != SFXGE_EVQ_STARTED) ||
 	    (srp->sr_state != SFXGE_RXQ_STARTED) ||
 	    (!sep->se_eep)) {
-		cmn_err(CE_WARN, SFXGE_CMN_ERR
-			"[%s%d] RXQ[%d] bad state in sfxge_rx_qpoll %d %d %p",
-			ddi_driver_name(sp->s_dip), ddi_get_instance(sp->s_dip),
-			index, sep->se_state, srp->sr_state, sep->se_eep);
+		dev_err(sp->s_dip, CE_WARN, SFXGE_CMN_ERR
+		    "RXQ[%d] bad state in sfxge_rx_qpoll %d %d %p",
+		    index, sep->se_state, srp->sr_state, sep->se_eep);
 		return;
 	}
 #endif
 	efx_ev_qpost(sep->se_eep, magic);
 
 	srp->sr_tid = timeout(sfxge_rx_qpoll, srp,
-		drv_usectohz(sp->s_rxq_poll_usec));
+	    drv_usectohz(sp->s_rxq_poll_usec));
 }
 
 static void
@@ -1195,12 +1141,7 @@ sfxge_rx_kstat_update(kstat_t *ksp, int rw)
 	knp++->value.ui32 = srp->sr_kstat.srk_dma_alloc_fail;
 	knp++->value.ui32 = srp->sr_kstat.srk_dma_bind_nomem;
 	knp++->value.ui32 = srp->sr_kstat.srk_dma_bind_fail;
-#ifdef _USE_XESBALLOC
-	knp++->value.ui32 = srp->sr_kstat.srk_xesballoc_fail;
-#endif
-#ifdef _USE_DESBALLOC
 	knp++->value.ui32 = srp->sr_kstat.srk_desballoc_fail;
-#endif
 	knp++->value.ui32 = srp->sr_kstat.srk_rxq_empty_discard;
 
 done:
@@ -1255,12 +1196,8 @@ sfxge_rx_kstat_init(sfxge_rxq_t *srp)
 	knp++;
 	kstat_named_init(knp, "dma_bind_fail", KSTAT_DATA_UINT32);
 	knp++;
-#ifdef _USE_XESBALLOC
-	kstat_named_init(knp, "xesballoc_fail", KSTAT_DATA_UINT32);
-#endif
-#ifdef _USE_DESBALLOC
 	kstat_named_init(knp, "desballoc_fail", KSTAT_DATA_UINT32);
-#endif
+	knp++;
 	kstat_named_init(knp, "rxq_empty_discard", KSTAT_DATA_UINT32);
 
 	kstat_install(ksp);
@@ -1280,22 +1217,28 @@ sfxge_rx_qinit(sfxge_t *sp, unsigned int index)
 
 	ASSERT3U(index, <, SFXGE_RX_SCALE_MAX);
 
-	srp = kmem_cache_alloc(sp->s_rqc, KM_SLEEP);
-
+	if ((srp = kmem_cache_alloc(sp->s_rqc, KM_SLEEP)) == NULL) {
+		rc = ENOMEM;
+		goto fail1;
+	}
 	ASSERT3U(srp->sr_state, ==, SFXGE_RXQ_UNINITIALIZED);
 
 	srp->sr_index = index;
 	sp->s_srp[index] = srp;
 
 	if ((rc = sfxge_rx_kstat_init(srp)) != 0)
-		goto fail1;
+		goto fail2;
 
 	srp->sr_state = SFXGE_RXQ_INITIALIZED;
 
 	return (0);
+
+fail2:
+	DTRACE_PROBE(fail2);
+	kmem_cache_free(sp->s_rqc, srp);
+
 fail1:
 	DTRACE_PROBE1(fail1, int, rc);
-	kmem_cache_free(sp->s_rqc, srp);
 
 	return (rc);
 }
@@ -1319,7 +1262,7 @@ sfxge_rx_qstart(sfxge_t *sp, unsigned int index)
 	ASSERT3U(sep->se_state, ==, SFXGE_EVQ_STARTED);
 
 	/* Zero the memory */
-	(void) memset(esmp->esm_base, 0, EFX_RXQ_SIZE(sp->s_rxq_size));
+	bzero(esmp->esm_base, EFX_RXQ_SIZE(sp->s_rxq_size));
 
 	/* Program the buffer table */
 	if ((rc = sfxge_sram_buf_tbl_set(sp, srp->sr_id, esmp,
@@ -1340,6 +1283,7 @@ sfxge_rx_qstart(sfxge_t *sp, unsigned int index)
 	srp->sr_lowat = srp->sr_hiwat / 2;
 
 	srp->sr_state = SFXGE_RXQ_STARTED;
+	srp->sr_flush = SFXGE_FLUSH_INACTIVE;
 
 	sfxge_rx_qpoll_start(srp);
 
@@ -1479,19 +1423,6 @@ sfxge_rx_qflow_add(sfxge_rxq_t *srp, sfxge_rx_flow_t *srfp,
 
 	ASSERT(mp->b_cont == NULL);
 
-#ifdef _USE_GLD_V3_SOL10
-	/*
-	 * The IP and UDP layers in Solaris 10 have slow paths for
-	 * handling mblks with more than 2 fragments.
-	 * UDP: see OpenSolaris CR 6305037
-	 * IP: see <http://www.mail-archive.com/networking-discuss@
-	 *   opensolaris.org/msg07366.html>
-	 */
-	if (srfp->srf_mp && srfp->srf_mp->b_cont) {
-		sfxge_rx_qflow_complete(srp, srfp);
-	}
-#endif
-
 	if (srfp->srf_mp == NULL) {
 		/* First packet in this flow */
 		srfp->srf_etherhp = etherhp;
@@ -1582,9 +1513,11 @@ sfxge_rx_qpacket_coalesce(sfxge_rxq_t *srp)
 		size_t off;
 		size_t size;
 		uint16_t ether_tci;
-		uint16_t hash;
+		uint32_t hash;
 		uint32_t tag;
 		mblk_t *next;
+		sfxge_packet_type_t pkt_type;
+		uint16_t sport, dport;
 
 		next = mp->b_next;
 		mp->b_next = NULL;
@@ -1609,8 +1542,9 @@ sfxge_rx_qpacket_coalesce(sfxge_rxq_t *srp)
 			goto reject;
 
 		/* Parse the TCP header */
-		sfxge_tcp_parse(mp, &etherhp, &iphp, &thp, &off,
-		    &size);
+		pkt_type = sfxge_pkthdr_parse(mp, &etherhp, &iphp, &thp, &off,
+		    &size, &sport, &dport);
+		ASSERT(pkt_type == SFXGE_PACKET_TYPE_IPV4_TCP);
 		ASSERT(etherhp != NULL);
 		ASSERT(iphp != NULL);
 		ASSERT(thp != NULL);
@@ -1684,19 +1618,20 @@ lookup:
 		 * otherwise calculate it.
 		 */
 		if (sp->s_rx_prefix_size != 0) {
-			hash = EFX_RX_HASH_VALUE(EFX_RX_HASHALG_LFSR,
+			hash = efx_psuedo_hdr_hash_get(sp->s_enp,
+			    EFX_RX_HASHALG_TOEPLITZ,
 			    DB_BASE(mp));
 		} else {
-			SFXGE_TCP_HASH(
-			    ntohl(iphp->ip_src.s_addr),
-			    ntohs(thp->th_sport),
-			    ntohl(iphp->ip_dst.s_addr),
-			    ntohs(thp->th_dport),
+			SFXGE_TCP_HASH(sp,
+			    &iphp->ip_src.s_addr,
+			    thp->th_sport,
+			    &iphp->ip_dst.s_addr,
+			    thp->th_dport,
 			    hash);
 		}
 
 		srfp = &(srp->sr_flow[(hash >> 6) % SFXGE_MAX_FLOW]);
-		tag = (uint32_t)hash + 1; /* Make sure it's not zero */
+		tag = hash + 1; /* Make sure it's not zero */
 
 		/*
 		 * If the flow we have found does not match the hash then
@@ -1776,6 +1711,7 @@ sfxge_rx_qcomplete(sfxge_rxq_t *srp, boolean_t eop)
 		mblk_t *mp;
 		size_t size;
 		uint16_t flags;
+		int rc;
 
 		id = completed++ & (sp->s_rxq_size - 1);
 
@@ -1808,6 +1744,20 @@ sfxge_rx_qcomplete(sfxge_rxq_t *srp, boolean_t eop)
 		if (srpp->srp_flags & (EFX_ADDR_MISMATCH | EFX_DISCARD))
 			goto discard;
 
+		/* Make the data visible to the kernel */
+		rc = ddi_dma_sync(srpp->srp_dma_handle, 0,
+		    sp->s_rx_buffer_size, DDI_DMA_SYNC_FORKERNEL);
+		ASSERT3P(rc, ==, DDI_SUCCESS);
+
+		/* Read the length from the psuedo header if required */
+		if (srpp->srp_flags & EFX_PKT_PREFIX_LEN) {
+			rc = efx_psuedo_hdr_pkt_length_get(sp->s_enp,
+			    mp->b_rptr,
+			    &srpp->srp_size);
+			ASSERT3P(rc, ==, 0);
+			srpp->srp_size += sp->s_rx_prefix_size;
+		}
+
 		/* Set up the packet length */
 		ASSERT3P(mp->b_rptr, ==, DB_BASE(mp));
 		mp->b_rptr += sp->s_rx_prefix_size;
@@ -1826,10 +1776,6 @@ sfxge_rx_qcomplete(sfxge_rxq_t *srp, boolean_t eop)
 
 		if (MBLKL(mp) > size)
 			goto discard;
-
-		/* Make the data visible to the kernel */
-		(void) ddi_dma_sync(srpp->srp_dma_handle, 0,
-		    (size_t)(srpp->srp_size), DDI_DMA_SYNC_FORKERNEL);
 
 		/* Check for loopback packets */
 		if (!(srpp->srp_flags & EFX_PKT_IPV4) &&
@@ -1912,7 +1858,7 @@ discard:
 		} while (srfp != NULL);
 	}
 
-	level = srp->sr_added - srp->sr_completed;
+	level = srp->sr_pushed - srp->sr_completed;
 
 	/* If there are any packets then pass them up the stack */
 	if (srp->sr_mp != NULL) {
@@ -1926,7 +1872,7 @@ discard:
 		if (level == 0) {
 			/* Try to refill ASAP */
 			sfxge_rx_qrefill(srp, EFX_RXQ_LIMIT(sp->s_rxq_size));
-			level = srp->sr_added - srp->sr_completed;
+			level = srp->sr_pushed - srp->sr_completed;
 		}
 
 		/*
@@ -1969,39 +1915,27 @@ discard:
 	}
 }
 
-static unsigned int
-sfxge_rx_qloopback(sfxge_t *sp, unsigned int index)
-{
-	sfxge_evq_t *sep = sp->s_sep[index];
-	sfxge_rxq_t *srp;
-	unsigned int count;
-
-	mutex_enter(&(sep->se_lock));
-	srp = sp->s_srp[index];
-	count = srp->sr_loopback;
-	srp->sr_loopback = 0;
-	mutex_exit(&(sep->se_lock));
-
-	return (count);
-}
-
 void
 sfxge_rx_qflush_done(sfxge_rxq_t *srp)
 {
 	sfxge_t *sp = srp->sr_sp;
 	unsigned int index = srp->sr_index;
 	sfxge_evq_t *sep = sp->s_sep[index];
+	boolean_t flush_pending;
 
 	ASSERT(mutex_owned(&(sep->se_lock)));
 
-	/* SFCbug22989: events may be delayed. EVQs are stopped after RXQs */
-	if ((srp->sr_state != SFXGE_RXQ_INITIALIZED) ||
-	    (srp->sr_flush == SFXGE_FLUSH_DONE))
-		return;
-
-	/* Flush successful: wakeup sfxge_rx_qstop() */
+	/*
+	 * Flush successful: wakeup sfxge_rx_qstop() if flush is pending.
+	 *
+	 * A delayed flush event received after RxQ stop has timed out
+	 * will be ignored, as then the flush state will not be PENDING
+	 * (see SFCbug22989).
+	 */
+	flush_pending = (srp->sr_flush == SFXGE_FLUSH_PENDING);
 	srp->sr_flush = SFXGE_FLUSH_DONE;
-	cv_broadcast(&(srp->sr_flush_kv));
+	if (flush_pending)
+		cv_broadcast(&(srp->sr_flush_kv));
 }
 
 void
@@ -2010,29 +1944,34 @@ sfxge_rx_qflush_failed(sfxge_rxq_t *srp)
 	sfxge_t *sp = srp->sr_sp;
 	unsigned int index = srp->sr_index;
 	sfxge_evq_t *sep = sp->s_sep[index];
+	boolean_t flush_pending;
 
 	ASSERT(mutex_owned(&(sep->se_lock)));
 
-	/* SFCbug22989: events may be delayed. EVQs are stopped after RXQs */
-	if ((srp->sr_state != SFXGE_RXQ_INITIALIZED) ||
-	    (srp->sr_flush == SFXGE_FLUSH_DONE))
-		return;
-
-	/* SFCbug22989: events may be delayed. EVQs are stopped after RXQs */
-	if (srp->sr_state != SFXGE_RXQ_STARTED)
-		return;
-
-	/* Flush failed, so retry until timeout in sfxge_rx_qstop() */
+	/*
+	 * Flush failed: wakeup sfxge_rx_qstop() if flush is pending.
+	 *
+	 * A delayed flush event received after RxQ stop has timed out
+	 * will be ignored, as then the flush state will not be PENDING
+	 * (see SFCbug22989).
+	 */
+	flush_pending = (srp->sr_flush == SFXGE_FLUSH_PENDING);
 	srp->sr_flush = SFXGE_FLUSH_FAILED;
-	efx_rx_qflush(srp->sr_erp);
+	if (flush_pending)
+		cv_broadcast(&(srp->sr_flush_kv));
 }
 
 static void
 sfxge_rx_qstop(sfxge_t *sp, unsigned int index)
 {
+	dev_info_t *dip = sp->s_dip;
 	sfxge_evq_t *sep = sp->s_sep[index];
 	sfxge_rxq_t *srp;
 	clock_t timeout;
+	unsigned int flush_tries = SFXGE_RX_QFLUSH_TRIES;
+	int rc;
+
+	ASSERT(mutex_owned(&(sp->s_state_lock)));
 
 	mutex_enter(&(sep->se_lock));
 
@@ -2041,32 +1980,42 @@ sfxge_rx_qstop(sfxge_t *sp, unsigned int index)
 
 	sfxge_rx_qpoll_stop(srp);
 
+	/* Further packets are discarded by sfxge_rx_qcomplete() */
 	srp->sr_state = SFXGE_RXQ_INITIALIZED;
 
-	if (sp->s_hw_err == SFXGE_HW_OK) {
-		/* Wait upto 2sec for queue flushing to complete */
-		srp->sr_flush = SFXGE_FLUSH_PENDING;
-		efx_rx_qflush(srp->sr_erp);
-	} else {
-		/* Do not attempt flush if indication of H/W failure */
+	if (sp->s_hw_err != SFXGE_HW_OK) {
+		/*
+		 * Flag indicates possible hardware failure.
+		 * Attempt flush but do not wait for it to complete.
+		 */
 		srp->sr_flush = SFXGE_FLUSH_DONE;
+		(void) efx_rx_qflush(srp->sr_erp);
 	}
 
+	/* Wait upto 2sec for queue flushing to complete */
 	timeout = ddi_get_lbolt() + drv_usectohz(SFXGE_RX_QFLUSH_USEC);
 
-	while (srp->sr_flush != SFXGE_FLUSH_DONE) {
+	while (srp->sr_flush != SFXGE_FLUSH_DONE && flush_tries-- > 0) {
+		if ((rc = efx_rx_qflush(srp->sr_erp)) != 0) {
+			if (rc == EALREADY)
+				srp->sr_flush = SFXGE_FLUSH_DONE;
+			else
+				srp->sr_flush = SFXGE_FLUSH_FAILED;
+			break;
+		}
+		srp->sr_flush = SFXGE_FLUSH_PENDING;
 		if (cv_timedwait(&(srp->sr_flush_kv), &(sep->se_lock),
-			timeout) < 0) {
-			/* Timeout waiting for successful flush */
-			dev_info_t *dip = sp->s_dip;
-
-				ddi_driver_name(sp->s_dip),
-			cmn_err(CE_NOTE,
-			    SFXGE_CMN_ERR "[%s%d] rxq[%d] flush timeout",
-			    ddi_driver_name(dip), ddi_get_instance(dip), index);
+		    timeout) < 0) {
+			/* Timeout waiting for successful or failed flush */
+			dev_err(dip, CE_NOTE,
+			    SFXGE_CMN_ERR "rxq[%d] flush timeout", index);
 			break;
 		}
 	}
+
+	if (srp->sr_flush == SFXGE_FLUSH_FAILED)
+		dev_err(dip, CE_NOTE,
+		    SFXGE_CMN_ERR "rxq[%d] flush failed", index);
 
 	DTRACE_PROBE1(flush, sfxge_flush_state_t, srp->sr_flush);
 	srp->sr_flush = SFXGE_FLUSH_DONE;
@@ -2089,6 +2038,7 @@ sfxge_rx_qstop(sfxge_t *sp, unsigned int index)
 	ASSERT3U(srp->sr_completed, ==, srp->sr_pending);
 
 	srp->sr_added = 0;
+	srp->sr_pushed = 0;
 	srp->sr_pending = 0;
 	srp->sr_completed = 0;
 	srp->sr_loopback = 0;
@@ -2146,13 +2096,10 @@ sfxge_rx_scale_kstat_update(kstat_t *ksp, int rw)
 	}
 
 	if ((freq = kmem_zalloc(sizeof (unsigned int) * sip->si_nalloc,
-				KM_NOSLEEP)) == NULL) {
+	    KM_NOSLEEP)) == NULL) {
 		rc = ENOMEM;
 		goto fail2;
 	}
-
-	for (index = 0; index < sip->si_nalloc; index++)
-		freq[index] = 0;
 
 	for (entry = 0; entry < SFXGE_RX_SCALE_MAX; entry++) {
 		index = srsp->srs_tbl[entry];
@@ -2245,8 +2192,7 @@ sfxge_rx_scale_prop_get(sfxge_t *sp)
 	int rx_scale;
 
 	rx_scale = ddi_prop_get_int(DDI_DEV_T_ANY, sp->s_dip,
-				    DDI_PROP_DONTPASS, "rx_scale_count",
-				    SFXGE_RX_SCALE_MAX);
+	    DDI_PROP_DONTPASS, "rx_scale_count", SFXGE_RX_SCALE_MAX);
 	/* 0 and all -ve numbers sets to number of logical CPUs */
 	if (rx_scale <= 0)
 		rx_scale = ncpus;
@@ -2266,11 +2212,6 @@ sfxge_rx_scale_init(sfxge_t *sp)
 
 	/* Create tables for CPU, core, cache and chip counts */
 	srsp->srs_cpu = kmem_zalloc(sizeof (unsigned int) * NCPU, KM_SLEEP);
-#ifdef	_USE_CPU_PHYSID
-	srsp->srs_core = kmem_zalloc(sizeof (unsigned int) * NCPU, KM_SLEEP);
-	srsp->srs_cache = kmem_zalloc(sizeof (unsigned int) * NCPU, KM_SLEEP);
-	srsp->srs_chip = kmem_zalloc(sizeof (unsigned int) * NCPU, KM_SLEEP);
-#endif
 
 	mutex_init(&(srsp->srs_lock), NULL, MUTEX_DRIVER, NULL);
 
@@ -2317,14 +2258,14 @@ sfxge_rx_scale_update(void *arg)
 	}
 
 	if ((tbl =  kmem_zalloc(sizeof (unsigned int) * SFXGE_RX_SCALE_MAX,
-			    KM_NOSLEEP)) == NULL) {
+	    KM_NOSLEEP)) == NULL) {
 		rc = ENOMEM;
 		goto fail2;
 	}
 
 	sip = &(sp->s_intr);
 	if ((rating = kmem_zalloc(sizeof (unsigned int) * sip->si_nalloc,
-			    KM_NOSLEEP)) == NULL) {
+	    KM_NOSLEEP)) == NULL) {
 		rc = ENOMEM;
 		goto fail3;
 	}
@@ -2339,20 +2280,6 @@ sfxge_rx_scale_update(void *arg)
 		ASSERT3U(sfxge_cpu[id], >=, srsp->srs_cpu[id]);
 		sfxge_cpu[id] -= srsp->srs_cpu[id];
 		srsp->srs_cpu[id] = 0;
-
-#ifdef	_USE_CPU_PHYSID
-		ASSERT3U(sfxge_core[id], >=, srsp->srs_core[id]);
-		sfxge_core[id] -= srsp->srs_core[id];
-		srsp->srs_core[id] = 0;
-
-		ASSERT3U(sfxge_cache[id], >=, srsp->srs_cache[id]);
-		sfxge_cache[id] -= srsp->srs_cache[id];
-		srsp->srs_cache[id] = 0;
-
-		ASSERT3U(sfxge_chip[id], >=, srsp->srs_chip[id]);
-		sfxge_chip[id] -= srsp->srs_chip[id];
-		srsp->srs_chip[id] = 0;
-#endif
 	}
 
 	ASSERT(srsp->srs_count != 0);
@@ -2375,17 +2302,6 @@ sfxge_rx_scale_update(void *arg)
 
 			id = sep->se_cpu_id;
 			rating[index] += sfxge_cpu[id];
-
-#ifdef	_USE_CPU_PHYSID
-			id = sep->se_core_id;
-			rating[index] += sfxge_core[id];
-
-			id = sep->se_cache_id;
-			rating[index] += sfxge_cache[id];
-
-			id = sep->se_chip_id;
-			rating[index] += sfxge_chip[id];
-#endif
 		}
 
 		/* Choose the queue with the lowest CPU contention */
@@ -2408,20 +2324,6 @@ sfxge_rx_scale_update(void *arg)
 		id = sep->se_cpu_id;
 		srsp->srs_cpu[id]++;
 		sfxge_cpu[id]++;
-
-#ifdef	_USE_CPU_PHYSID
-		id = sep->se_core_id;
-		srsp->srs_core[id]++;
-		sfxge_core[id]++;
-
-		id = sep->se_cache_id;
-		srsp->srs_cache[id]++;
-		sfxge_cache[id]++;
-
-		id = sep->se_chip_id;
-		srsp->srs_chip[id]++;
-		sfxge_chip[id]++;
-#endif
 	}
 
 	mutex_exit(&cpu_lock);
@@ -2461,7 +2363,6 @@ static int
 sfxge_rx_scale_start(sfxge_t *sp)
 {
 	sfxge_rx_scale_t *srsp = &(sp->s_rx_scale);
-	const efx_nic_cfg_t *encp;
 	int rc;
 
 	mutex_enter(&(srsp->srs_lock));
@@ -2474,10 +2375,7 @@ sfxge_rx_scale_start(sfxge_t *sp)
 	(void) efx_rx_scale_tbl_set(sp->s_enp, srsp->srs_tbl,
 	    SFXGE_RX_SCALE_MAX);
 
-	/* Make sure the LFSR hash is selected */
-	encp = efx_nic_cfg_get(sp->s_enp);
-	if ((rc = efx_rx_scale_mode_set(sp->s_enp, EFX_RX_HASHALG_LFSR, 0,
-	    (encp->enc_features & EFX_FEATURE_LFSR_HASH_INSERT))) != 0)
+	if ((rc = sfxge_toeplitz_hash_init(sp)) != 0)
 		goto fail1;
 
 	srsp->srs_state = SFXGE_RX_SCALE_STARTED;
@@ -2594,20 +2492,6 @@ sfxge_rx_scale_stop(sfxge_t *sp)
 		ASSERT3U(sfxge_cpu[id], >=, srsp->srs_cpu[id]);
 		sfxge_cpu[id] -= srsp->srs_cpu[id];
 		srsp->srs_cpu[id] = 0;
-
-#ifdef	_USE_CPU_PHYSID
-		ASSERT3U(sfxge_core[id], >=, srsp->srs_core[id]);
-		sfxge_core[id] -= srsp->srs_core[id];
-		srsp->srs_core[id] = 0;
-
-		ASSERT3U(sfxge_cache[id], >=, srsp->srs_cache[id]);
-		sfxge_cache[id] -= srsp->srs_cache[id];
-		srsp->srs_cache[id] = 0;
-
-		ASSERT3U(sfxge_chip[id], >=, srsp->srs_chip[id]);
-		sfxge_chip[id] -= srsp->srs_chip[id];
-		srsp->srs_chip[id] = 0;
-#endif
 	}
 
 	mutex_exit(&cpu_lock);
@@ -2638,25 +2522,16 @@ sfxge_rx_scale_fini(sfxge_t *sp)
 	mutex_destroy(&(srsp->srs_lock));
 
 	/* Destroy tables */
-#ifdef	_USE_CPU_PHYSID
-	kmem_free(srsp->srs_chip, sizeof (unsigned int) * NCPU);
-	srsp->srs_chip = NULL;
-
-	kmem_free(srsp->srs_cache, sizeof (unsigned int) * NCPU);
-	srsp->srs_cache = NULL;
-
-	kmem_free(srsp->srs_core, sizeof (unsigned int) * NCPU);
-	srsp->srs_core = NULL;
-#endif
 	kmem_free(srsp->srs_cpu, sizeof (unsigned int) * NCPU);
 	srsp->srs_cpu = NULL;
+
+	sfxge_toeplitz_hash_fini(sp);
 }
 
 int
 sfxge_rx_init(sfxge_t *sp)
 {
 	sfxge_intr_t *sip = &(sp->s_intr);
-	const efx_nic_cfg_t *encp;
 	char name[MAXNAMELEN];
 	int index;
 	int rc;
@@ -2666,7 +2541,6 @@ sfxge_rx_init(sfxge_t *sp)
 		goto fail1;
 	}
 
-	encp = efx_nic_cfg_get(sp->s_enp);
 	if ((rc = sfxge_rx_scale_init(sp)) != 0)
 		goto fail2;
 
@@ -2729,6 +2603,7 @@ sfxge_rx_start(sfxge_t *sp)
 	sfxge_mac_t *smp = &(sp->s_mac);
 	sfxge_intr_t *sip;
 	const efx_nic_cfg_t *encp;
+	size_t hdrlen, align;
 	int index;
 	int rc;
 
@@ -2738,10 +2613,21 @@ sfxge_rx_start(sfxge_t *sp)
 	sp->s_rx_buffer_size = EFX_MAC_PDU(sp->s_mtu);
 
 	encp = efx_nic_cfg_get(sp->s_enp);
-	if (encp->enc_features & EFX_FEATURE_LFSR_HASH_INSERT) {
-		size_t align;
 
-		sp->s_rx_prefix_size = EFX_RX_PREFIX_SIZE;
+	/* Packet buffer allocations are cache line aligned */
+	EFSYS_ASSERT3U(encp->enc_rx_buf_align_start, <=, SFXGE_CPU_CACHE_SIZE);
+
+	if (sp->s_family == EFX_FAMILY_HUNTINGTON) {
+		sp->s_rx_prefix_size = encp->enc_rx_prefix_size;
+
+		hdrlen = sp->s_rx_prefix_size + sizeof (struct ether_header);
+
+		/* Ensure IP headers are 32bit aligned */
+		sp->s_rx_buffer_align = P2ROUNDUP(hdrlen, 4) - hdrlen;
+		sp->s_rx_buffer_size += sp->s_rx_buffer_align;
+
+	} else if (encp->enc_features & EFX_FEATURE_LFSR_HASH_INSERT) {
+		sp->s_rx_prefix_size = encp->enc_rx_prefix_size;
 
 		/*
 		 * Place the start of the buffer a prefix length minus 2
@@ -2750,11 +2636,9 @@ sfxge_rx_start(sfxge_t *sp)
 		 * is located) are in the same cache line as the headers, and
 		 * the IP header is 32-bit aligned.
 		 */
-		align = SFXGE_CPU_CACHE_SIZE + SFXGE_IP_ALIGN -
-		    EFX_RX_PREFIX_SIZE;
-
-		sp->s_rx_buffer_align = align;
-		sp->s_rx_buffer_size += align;
+		sp->s_rx_buffer_align =
+		    SFXGE_CPU_CACHE_SIZE - (encp->enc_rx_prefix_size - 2);
+		sp->s_rx_buffer_size += sp->s_rx_buffer_align;
 	} else {
 		sp->s_rx_prefix_size = 0;
 
@@ -2763,10 +2647,16 @@ sfxge_rx_start(sfxge_t *sp)
 		 * boundary so that the headers fit into the cache line and
 		 * the IP header is 32-bit aligned.
 		 */
+		hdrlen = sp->s_rx_prefix_size + sizeof (struct ether_header);
 
-		sp->s_rx_buffer_align = SFXGE_IP_ALIGN;
-		sp->s_rx_buffer_size += SFXGE_IP_ALIGN;
+		sp->s_rx_buffer_align = P2ROUNDUP(hdrlen, 4) - hdrlen;
+		sp->s_rx_buffer_size += sp->s_rx_buffer_align;
 	}
+
+	/* Align end of packet buffer for RX DMA end padding */
+	align = MAX(1, encp->enc_rx_buf_align_end);
+	EFSYS_ASSERT(ISP2(align));
+	sp->s_rx_buffer_size = P2ROUNDUP(sp->s_rx_buffer_size, align);
 
 	/* Initialize the receive module */
 	if ((rc = efx_rx_init(sp->s_enp)) != 0)
@@ -2784,7 +2674,18 @@ sfxge_rx_start(sfxge_t *sp)
 			goto fail3;
 	}
 
+	ASSERT3U(sp->s_srp[0]->sr_state, ==, SFXGE_RXQ_STARTED);
+	/* It is sufficient to have Rx scale initialized */
+	ASSERT3U(sp->s_rx_scale.srs_state, ==, SFXGE_RX_SCALE_STARTED);
+	rc = efx_mac_filter_default_rxq_set(sp->s_enp, sp->s_srp[0]->sr_erp,
+	    sp->s_rx_scale.srs_count > 1);
+	if (rc != 0)
+		goto fail4;
+
 	return (0);
+
+fail4:
+	DTRACE_PROBE(fail4);
 
 fail3:
 	DTRACE_PROBE(fail3);
@@ -2844,60 +2745,24 @@ fail1:
 }
 
 void
-sfxge_rx_loopback(sfxge_t *sp, unsigned int *countp)
-{
-	sfxge_intr_t *sip = &(sp->s_intr);
-	int index;
-
-	*countp = 0;
-	for (index = 0; index < sip->si_nalloc; index++)
-		*countp += sfxge_rx_qloopback(sp, index);
-}
-
-int
-sfxge_rx_ioctl(sfxge_t *sp, sfxge_rx_ioc_t *srip)
-{
-	int rc;
-
-	switch (srip->sri_op) {
-	case SFXGE_RX_OP_LOOPBACK: {
-		unsigned int count;
-
-		sfxge_rx_loopback(sp, &count);
-
-		srip->sri_data = count;
-
-		break;
-	}
-	default:
-		rc = ENOTSUP;
-		goto fail1;
-	}
-
-	return (0);
-
-fail1:
-	DTRACE_PROBE1(fail1, int, rc);
-
-	return (rc);
-}
-
-void
 sfxge_rx_stop(sfxge_t *sp)
 {
 	sfxge_mac_t *smp = &(sp->s_mac);
 	sfxge_intr_t *sip = &(sp->s_intr);
 	efx_nic_t *enp = sp->s_enp;
-	const efx_nic_cfg_t *encp;
 	int index;
+
+	ASSERT(mutex_owned(&(sp->s_state_lock)));
+
+	efx_mac_filter_default_rxq_clear(enp);
 
 	/* Stop the receive queue(s) */
 	index = sip->si_nalloc;
-	while (--index >= 0)
+	while (--index >= 0) {
 		/* TBD: Flush RXQs in parallel; HW has limit + may need retry */
 		sfxge_rx_qstop(sp, index);
+	}
 
-	encp = efx_nic_cfg_get(sp->s_enp);
 	sfxge_rx_scale_stop(sp);
 
 	mutex_enter(&(smp->sm_lock));
@@ -2940,7 +2805,6 @@ void
 sfxge_rx_fini(sfxge_t *sp)
 {
 	sfxge_intr_t *sip = &(sp->s_intr);
-	const efx_nic_cfg_t *encp;
 	int index;
 
 	ASSERT3U(sip->si_state, ==, SFXGE_INTR_INITIALIZED);
@@ -2960,6 +2824,5 @@ sfxge_rx_fini(sfxge_t *sp)
 	kmem_cache_destroy(sp->s_rpc);
 	sp->s_rpc = NULL;
 
-	encp = efx_nic_cfg_get(sp->s_enp);
 	sfxge_rx_scale_fini(sp);
 }

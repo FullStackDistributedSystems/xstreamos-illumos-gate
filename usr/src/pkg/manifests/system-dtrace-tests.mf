@@ -21,7 +21,7 @@
 
 #
 # Copyright (c) 2010, Oracle and/or its affiliates. All rights reserved.
-# Copyright (c) 2012, 2014 by Delphix. All rights reserved.
+# Copyright (c) 2012, 2016 by Delphix. All rights reserved.
 #
 
 set name=pkg.fmri value=pkg:/system/dtrace/tests@$(PKGVERS)
@@ -39,6 +39,7 @@ dir path=opt/SUNWdtrt/lib/java
 dir path=opt/SUNWdtrt/tst
 dir path=opt/SUNWdtrt/tst/$(ARCH)
 dir path=opt/SUNWdtrt/tst/$(ARCH)/arrays
+$(i386_ONLY)dir path=opt/SUNWdtrt/tst/$(ARCH)/error
 $(i386_ONLY)dir path=opt/SUNWdtrt/tst/$(ARCH)/funcs
 dir path=opt/SUNWdtrt/tst/$(ARCH)/pid
 $(sparc_ONLY)dir path=opt/SUNWdtrt/tst/$(ARCH)/usdt
@@ -111,6 +112,7 @@ dir path=opt/SUNWdtrt/tst/common/stop
 dir path=opt/SUNWdtrt/tst/common/strlen
 dir path=opt/SUNWdtrt/tst/common/strtoll
 dir path=opt/SUNWdtrt/tst/common/struct
+dir path=opt/SUNWdtrt/tst/common/sugar
 dir path=opt/SUNWdtrt/tst/common/syscall
 dir path=opt/SUNWdtrt/tst/common/sysevent
 dir path=opt/SUNWdtrt/tst/common/tick-n
@@ -140,6 +142,8 @@ file path=opt/SUNWdtrt/bin/exception.lst mode=0444
 file path=opt/SUNWdtrt/bin/jdtrace mode=0555
 file path=opt/SUNWdtrt/lib/java/jdtrace.jar
 file path=opt/SUNWdtrt/tst/$(ARCH)/arrays/tst.uregsarray.d mode=0444
+$(i386_ONLY)file path=opt/SUNWdtrt/tst/$(ARCH)/error/tst.DTRACEFLT_DIVZERO.d \
+    mode=0444
 $(i386_ONLY)file path=opt/SUNWdtrt/tst/$(ARCH)/funcs/tst.badcopyin.d mode=0444
 $(i386_ONLY)file path=opt/SUNWdtrt/tst/$(ARCH)/funcs/tst.badcopyinstr.d \
     mode=0444
@@ -1035,6 +1039,10 @@ file path=opt/SUNWdtrt/tst/common/llquantize/tst.bases.d mode=0444
 file path=opt/SUNWdtrt/tst/common/llquantize/tst.bases.d.out mode=0444
 file path=opt/SUNWdtrt/tst/common/llquantize/tst.basic.d mode=0444
 file path=opt/SUNWdtrt/tst/common/llquantize/tst.basic.d.out mode=0444
+file path=opt/SUNWdtrt/tst/common/llquantize/tst.clear.d mode=0444
+file path=opt/SUNWdtrt/tst/common/llquantize/tst.clear.d.out mode=0444
+file path=opt/SUNWdtrt/tst/common/llquantize/tst.multiaggs.d mode=0444
+file path=opt/SUNWdtrt/tst/common/llquantize/tst.multiaggs.d.out mode=0444
 file path=opt/SUNWdtrt/tst/common/llquantize/tst.negorder.d mode=0444
 file path=opt/SUNWdtrt/tst/common/llquantize/tst.negorder.d.out mode=0444
 file path=opt/SUNWdtrt/tst/common/llquantize/tst.negvalue.d mode=0444
@@ -1575,6 +1583,8 @@ file path=opt/SUNWdtrt/tst/common/scalars/err.D_OP_INCOMPAT.dupttype.d \
 file path=opt/SUNWdtrt/tst/common/scalars/err.D_SYNTAX.declare.d mode=0444
 file path=opt/SUNWdtrt/tst/common/scalars/err.bigglobal.d mode=0444
 file path=opt/SUNWdtrt/tst/common/scalars/err.biglocal.d mode=0444
+file path=opt/SUNWdtrt/tst/common/scalars/tst.16kglobal.d mode=0444
+file path=opt/SUNWdtrt/tst/common/scalars/tst.16klocal.d mode=0444
 file path=opt/SUNWdtrt/tst/common/scalars/tst.basicvar.d mode=0444
 file path=opt/SUNWdtrt/tst/common/scalars/tst.basicvar.d.out mode=0444
 file path=opt/SUNWdtrt/tst/common/scalars/tst.localvar.d mode=0444
@@ -1813,6 +1823,13 @@ file path=opt/SUNWdtrt/tst/common/struct/tst.StructDataTypes.d mode=0444
 file path=opt/SUNWdtrt/tst/common/struct/tst.StructInside.d mode=0444
 file path=opt/SUNWdtrt/tst/common/struct/tst.clauselocal.d mode=0444
 file path=opt/SUNWdtrt/tst/common/struct/tst.clauselocal.d.out mode=0444
+file path=opt/SUNWdtrt/tst/common/sugar/tst.else.d mode=0444
+file path=opt/SUNWdtrt/tst/common/sugar/tst.if.d mode=0444
+file path=opt/SUNWdtrt/tst/common/sugar/tst.if2.d mode=0444
+file path=opt/SUNWdtrt/tst/common/sugar/tst.if_before_after.d mode=0444
+file path=opt/SUNWdtrt/tst/common/sugar/tst.if_nested.d mode=0444
+file path=opt/SUNWdtrt/tst/common/sugar/tst.if_trailing_semicolon.d mode=0444
+file path=opt/SUNWdtrt/tst/common/sugar/tst.if_trailing_semicolon2.d mode=0444
 file path=opt/SUNWdtrt/tst/common/syscall/tst.args.d mode=0444
 file path=opt/SUNWdtrt/tst/common/syscall/tst.args.exe mode=0555
 file path=opt/SUNWdtrt/tst/common/syscall/tst.openret.ksh mode=0444

@@ -638,6 +638,21 @@ trap(struct regs *rp, caddr_t addr, processorid_t cpuid)
 		}
 
 		/*
+		 * We need to check if SMAP is in play. If SMAP is in play, then
+		 * any access to a user page will show up as a protection
+		 * violation. To see if SMAP is enabled we first check if it's a
+		 * user address and whether we have the feature flag set. If we
+		 * do and the interrupted registers do not allow for user
+		 * accesses (PS_ACHK is not enabled), then we need to die
+		 * immediately.
+		 */
+		if (addr < (caddr_t)kernelbase &&
+		    is_x86_feature(x86_featureset, X86FSET_SMAP) == B_TRUE &&
+		    (rp->r_ps & PS_ACHK) == 0) {
+			(void) die(type, rp, addr, cpuid);
+		}
+
+		/*
 		 * See if we can handle as pagefault. Save lofault and onfault
 		 * across this. Here we assume that an address less than
 		 * KERNELBASE is a user fault.  We can do this as copy.s
@@ -1453,12 +1468,23 @@ trap(struct regs *rp, caddr_t addr, processorid_t cpuid)
 
 		ct->t_sig_check = 0;
 
-		mutex_enter(&p->p_lock);
+		/*
+		 * As in other code paths that check against TP_CHANGEBIND,
+		 * we perform the check first without p_lock held -- only
+		 * acquiring p_lock in the unlikely event that it is indeed
+		 * set.  This is safe because we are doing this after the
+		 * astoff(); if we are racing another thread setting
+		 * TP_CHANGEBIND on us, we will pick it up on a subsequent
+		 * lap through.
+		 */
 		if (curthread->t_proc_flag & TP_CHANGEBIND) {
-			timer_lwpbind();
-			curthread->t_proc_flag &= ~TP_CHANGEBIND;
+			mutex_enter(&p->p_lock);
+			if (curthread->t_proc_flag & TP_CHANGEBIND) {
+				timer_lwpbind();
+				curthread->t_proc_flag &= ~TP_CHANGEBIND;
+			}
+			mutex_exit(&p->p_lock);
 		}
-		mutex_exit(&p->p_lock);
 
 		/*
 		 * for kaio requests that are on the per-process poll queue,

@@ -1,27 +1,31 @@
 /*
- * CDDL HEADER START
+ * Copyright (c) 2008-2016 Solarflare Communications Inc.
+ * All rights reserved.
  *
- * The contents of this file are subject to the terms of the
- * Common Development and Distribution License (the "License").
- * You may not use this file except in compliance with the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
  *
- * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
- * See the License for the specific language governing permissions
- * and limitations under the License.
+ * 1. Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
  *
- * When distributing Covered Code, include this CDDL HEADER in each
- * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
- * If applicable, add the following below this CDDL HEADER, with the
- * fields enclosed by brackets "[]" replaced with your own identifying
- * information: Portions Copyright [yyyy] [name of copyright owner]
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
+ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * CDDL HEADER END
- */
-
-/*
- * Copyright 2008-2013 Solarflare Communications Inc.  All rights reserved.
- * Use is subject to license terms.
+ * The views and conclusions contained in the software and documentation are
+ * those of the authors and should not be interpreted as representing official
+ * policies, either expressed or implied, of the FreeBSD Project.
  */
 
 /*
@@ -72,7 +76,7 @@ _sfxge_mac_stat_update(sfxge_mac_t *smp, int tries, int delay_usec)
 {
 	sfxge_t *sp = smp->sm_sp;
 	efsys_mem_t *esmp = &(smp->sm_mem);
-	int rc, i;
+	int i;
 
 	ASSERT(mutex_owned(&(smp->sm_lock)));
 	ASSERT3U(smp->sm_state, !=, SFXGE_MAC_UNINITIALIZED);
@@ -82,23 +86,16 @@ _sfxge_mac_stat_update(sfxge_mac_t *smp, int tries, int delay_usec)
 		return;
 
 	for (i = 0; i < tries; i++) {
-		/* Synchronize the DMA memory for reading */
-		(void) ddi_dma_sync(smp->sm_mem.esm_dma_handle,
-		    0,
-		    EFX_MAC_STATS_SIZE,
-		    DDI_DMA_SYNC_FORKERNEL);
-
 		/* Try to update the cached counters */
-		if ((rc = efx_mac_stats_update(sp->s_enp, esmp, smp->sm_stat,
-		    NULL)) != EAGAIN)
+		if (efx_mac_stats_update(sp->s_enp, esmp, smp->sm_stat,
+		    NULL) != EAGAIN)
 			goto done;
 
 		drv_usecwait(delay_usec);
 	}
 
 	DTRACE_PROBE(mac_stat_timeout);
-	cmn_err(CE_NOTE, SFXGE_CMN_ERR "[%s%d] MAC stats timeout",
-	    ddi_driver_name(sp->s_dip), ddi_get_instance(sp->s_dip));
+	dev_err(sp->s_dip, CE_NOTE, SFXGE_CMN_ERR "MAC stats timeout");
 	return;
 
 done:
@@ -130,6 +127,8 @@ sfxge_mac_kstat_update(kstat_t *ksp, int rw)
 	sfxge_mac_t *smp = ksp->ks_private;
 	kstat_named_t *knp;
 	int rc;
+	unsigned int val;
+	sfxge_rx_coalesce_mode_t rxmode;
 
 	if (rw != KSTAT_READ) {
 		rc = EACCES;
@@ -153,6 +152,25 @@ sfxge_mac_kstat_update(kstat_t *ksp, int rw)
 	knp++;
 
 	knp->value.ui64 = smp->sm_link_duplex;
+	knp++;
+
+	knp->value.ui64 = (smp->sm_fcntl & EFX_FCNTL_GENERATE) ? 1 : 0;
+	knp++;
+
+	knp->value.ui64 = (smp->sm_fcntl & EFX_FCNTL_RESPOND) ? 1 : 0;
+	knp++;
+
+	sfxge_ev_moderation_get(smp->sm_sp, &val);
+	knp->value.ui64 = val;
+	knp++;
+
+	sfxge_rx_coalesce_mode_get(smp->sm_sp, &rxmode);
+	knp->value.ui64 = (uint64_t)rxmode;
+	knp++;
+
+	if (sfxge_rx_scale_count_get(smp->sm_sp, &val) != 0)
+		val = 0;
+	knp->value.ui64 = val;
 	knp++;
 
 done:
@@ -180,7 +198,7 @@ sfxge_mac_kstat_init(sfxge_t *sp)
 
 	if ((ksp = kstat_create((char *)ddi_driver_name(dip),
 	    ddi_get_instance(dip), name, "mac", KSTAT_TYPE_NAMED,
-	    EFX_MAC_NSTATS + 4, 0)) == NULL) {
+	    EFX_MAC_NSTATS + 8, 0)) == NULL) {
 		rc = ENOMEM;
 		goto fail1;
 	}
@@ -202,6 +220,11 @@ sfxge_mac_kstat_init(sfxge_t *sp)
 	kstat_named_init(knp++, "link_up", KSTAT_DATA_UINT64);
 	kstat_named_init(knp++, "link_speed", KSTAT_DATA_UINT64);
 	kstat_named_init(knp++, "link_duplex", KSTAT_DATA_UINT64);
+	kstat_named_init(knp++, "fcntl_generate", KSTAT_DATA_UINT64);
+	kstat_named_init(knp++, "fcntl_respond", KSTAT_DATA_UINT64);
+	kstat_named_init(knp++, "intr_moderation", KSTAT_DATA_UINT64);
+	kstat_named_init(knp++, "rx_coalesce_mode", KSTAT_DATA_UINT64);
+	kstat_named_init(knp++, "rx_scale_count", KSTAT_DATA_UINT64);
 
 	kstat_install(ksp);
 
@@ -270,7 +293,7 @@ sfxge_mac_poll(void *arg)
 			goto done;
 
 		/* Zero the memory */
-		(void) memset(esmp->esm_base, 0, EFX_MAC_STATS_SIZE);
+		bzero(esmp->esm_base, EFX_MAC_STATS_SIZE);
 
 		/* Trigger upload the MAC statistics counters */
 		if (smp->sm_link_up &&
@@ -282,7 +305,7 @@ sfxge_mac_poll(void *arg)
 		    SFXGE_MAC_POLL_PERIOD_MS);
 		while (smp->sm_state == SFXGE_MAC_STARTED) {
 			if (cv_timedwait(&(smp->sm_link_poll_kv),
-				&(smp->sm_lock), timeout) < 0) {
+			    &(smp->sm_lock), timeout) < 0) {
 				/* Timeout - poll if polling still enabled */
 				break;
 			}
@@ -320,7 +343,7 @@ sfxge_mac_poll_stop(sfxge_t *sp)
 	ddi_taskq_wait(smp->sm_tqp);
 	mutex_enter(&(smp->sm_lock));
 
-	/* Wait for any pending DMAed stats to complete */
+	/* Collect the final statistics. */
 	sfxge_mac_stat_update_wait(smp);
 }
 
@@ -333,9 +356,6 @@ sfxge_mac_init(sfxge_t *sp)
 	sfxge_dma_buffer_attr_t dma_attr;
 	const efx_nic_cfg_t *encp;
 	unsigned char *bytes;
-	char buf[8];	/* sufficient for "true" or "false" plus NULL */
-	char name[MAXNAMELEN];
-	int *ints;
 	unsigned int n;
 	int err, rc;
 
@@ -346,19 +366,16 @@ sfxge_mac_init(sfxge_t *sp)
 	smp->sm_sp = sp;
 	encp = efx_nic_cfg_get(sp->s_enp);
 	smp->sm_link_poll_reqd = (~encp->enc_features &
-				    EFX_FEATURE_LINK_EVENTS);
+	    EFX_FEATURE_LINK_EVENTS);
 	smp->sm_mac_stats_timer_reqd = (~encp->enc_features &
-				    EFX_FEATURE_PERIODIC_MAC_STATS);
+	    EFX_FEATURE_PERIODIC_MAC_STATS);
 
 	mutex_init(&(smp->sm_lock), NULL, MUTEX_DRIVER,
 	    DDI_INTR_PRI(sp->s_intr.si_intr_pri));
 	cv_init(&(smp->sm_link_poll_kv), NULL, CV_DRIVER, NULL);
 
 	/* Create link poll taskq */
-	(void) snprintf(name, MAXNAMELEN - 1, "%s_mac_tq",
-	    ddi_driver_name(dip));
-	smp->sm_tqp = ddi_taskq_create(dip, name, 1, TASKQ_DEFAULTPRI,
-	    DDI_SLEEP);
+	smp->sm_tqp = ddi_taskq_create(dip, "mac_tq", 1, TASKQ_DEFAULTPRI, 0);
 	if (smp->sm_tqp == NULL) {
 		rc = ENOMEM;
 		goto fail1;
@@ -380,12 +397,6 @@ sfxge_mac_init(sfxge_t *sp)
 	if ((rc = sfxge_dma_buffer_create(esmp, &dma_attr)) != 0)
 		goto fail3;
 
-	/*
-	 * Set the initial group hash to allow reception of only broadcast
-	 * packets.
-	 */
-	smp->sm_bucket[0xff] = 1;
-
 	/* Set the initial flow control values */
 	smp->sm_fcntl = EFX_FCNTL_RESPOND | EFX_FCNTL_GENERATE;
 
@@ -393,14 +404,10 @@ sfxge_mac_init(sfxge_t *sp)
 	 * Determine the 'burnt-in' MAC address:
 	 *
 	 * A: if the "mac-address" property is set on our device node use that.
-	 * B: otherwise, if the system property "local-mac-address?" is set to
-	 *    "false" then we use the system MAC address.
-	 * C: otherwise, if the "local-mac-address" property is set on our
-	 *    device node use that.
-	 * D: otherwise, use the value from NVRAM.
+	 * B: otherwise, use the value from NVRAM.
 	 */
 
-	/* A */
+	/* A: property  */
 	err = ddi_prop_lookup_byte_array(DDI_DEV_T_ANY, dip, DDI_PROP_DONTPASS,
 	    "mac-address", &bytes, &n);
 	switch (err) {
@@ -417,61 +424,7 @@ sfxge_mac_init(sfxge_t *sp)
 		break;
 	}
 
-	/* B */
-	n = sizeof (buf);
-	bzero(buf, n--);
-	(void) ddi_getlongprop_buf(DDI_DEV_T_ANY, dip, DDI_PROP_CANSLEEP,
-	    "local-mac-address?", buf, (int *)&n);
-
-	if (strcmp(buf, "false") == 0) {
-		struct ether_addr addr;
-
-		if (localetheraddr(NULL, &addr) != 0) {
-			bcopy((uint8_t *)&addr, smp->sm_bia, ETHERADDRL);
-			goto done;
-		}
-	}
-
-	/*
-	 * C
-	 *
-	 * NOTE: "local-mac_address" maybe coded as an integer or byte array.
-	 */
-	err = ddi_prop_lookup_int_array(DDI_DEV_T_ANY, dip, DDI_PROP_DONTPASS,
-	    "local-mac-address", &ints, &n);
-	switch (err) {
-	case DDI_PROP_SUCCESS:
-		if (n == ETHERADDRL) {
-			while (n-- != 0)
-				smp->sm_bia[n] = ints[n] & 0xff;
-
-			goto done;
-		}
-
-		ddi_prop_free(ints);
-		break;
-
-	default:
-		break;
-	}
-
-	err = ddi_prop_lookup_byte_array(DDI_DEV_T_ANY, dip, DDI_PROP_DONTPASS,
-	    "local-mac-address", &bytes, &n);
-	switch (err) {
-	case DDI_PROP_SUCCESS:
-		if (n == ETHERADDRL) {
-			bcopy(bytes, smp->sm_bia, ETHERADDRL);
-			goto done;
-		}
-
-		ddi_prop_free(bytes);
-		break;
-
-	default:
-		break;
-	}
-
-	/* D */
+	/* B: NVRAM */
 	bcopy(encp->enc_mac_addr, smp->sm_bia, ETHERADDRL);
 
 done:
@@ -515,7 +468,44 @@ fail1:
 
 	smp->sm_sp = NULL;
 
-	SFXGE_OBJ_CHECK(smp, sfxge_mac_t);
+	return (rc);
+}
+
+static int
+sfxge_mac_filter_apply(sfxge_t *sp)
+{
+	efx_nic_t *enp = sp->s_enp;
+	sfxge_mac_t *smp = &(sp->s_mac);
+	int rc;
+
+	ASSERT(mutex_owned(&(smp->sm_lock)));
+
+	if (smp->sm_state == SFXGE_MAC_STARTED) {
+		boolean_t all_unicst;
+		boolean_t mulcst;
+		boolean_t all_mulcst;
+		boolean_t brdcst;
+
+		all_unicst = (smp->sm_promisc == SFXGE_PROMISC_ALL_PHYS);
+		mulcst = (smp->sm_mcast_count > 0);
+		all_mulcst = (smp->sm_promisc >= SFXGE_PROMISC_ALL_MULTI);
+		brdcst = B_TRUE;
+
+		if ((rc = efx_mac_filter_set(enp, all_unicst, mulcst,
+		    all_mulcst, brdcst)) != 0) {
+			goto fail1;
+		}
+		if ((rc = efx_mac_multicast_list_set(enp,
+		    smp->sm_mcast_addr, smp->sm_mcast_count)) != 0)
+			goto fail2;
+	}
+
+	return (0);
+
+fail2:
+	DTRACE_PROBE(fail2);
+fail1:
+	DTRACE_PROBE1(fail1, int, rc);
 
 	return (rc);
 }
@@ -556,41 +546,19 @@ sfxge_mac_start(sfxge_t *sp, boolean_t restart)
 	    smp->sm_laa : smp->sm_bia)) != 0)
 		goto fail5;
 
-	/* Set the unicast filter */
-	if ((rc = efx_mac_filter_set(enp,
-	    (smp->sm_promisc == SFXGE_PROMISC_ALL_PHYS), B_TRUE)) != 0) {
+	if ((rc = sfxge_mac_filter_apply(sp)) != 0)
 		goto fail6;
-	};
-
-	/* Set the group hash */
-	if (smp->sm_promisc >= SFXGE_PROMISC_ALL_MULTI) {
-		unsigned int bucket[EFX_MAC_HASH_BITS];
-		unsigned int index;
-
-		for (index = 0; index < EFX_MAC_HASH_BITS; index++)
-			bucket[index] = 1;
-
-		if ((rc = efx_mac_hash_set(enp, bucket)) != 0)
-			goto fail7;
-	} else {
-		if ((rc = efx_mac_hash_set(enp, smp->sm_bucket)) != 0)
-			goto fail8;
-	}
 
 	if (!smp->sm_mac_stats_timer_reqd) {
 		if ((rc = efx_mac_stats_periodic(enp, esmp,
 		    SFXGE_MAC_POLL_PERIOD_MS, B_FALSE)) != 0)
-			goto fail9;
+			goto fail7;
 	}
 
 	if ((rc = efx_mac_drain(enp, B_FALSE)) != 0)
-		goto fail10;
+		goto fail8;
 
 	smp->sm_state = SFXGE_MAC_STARTED;
-
-#ifdef _USE_MAC_PRIV_PROP
-	sfxge_gld_priv_prop_rename(sp);
-#endif
 
 	/*
 	 * Start link state polling. For hardware that reports link change
@@ -601,13 +569,9 @@ sfxge_mac_start(sfxge_t *sp, boolean_t restart)
 	mutex_exit(&(smp->sm_lock));
 	return (0);
 
-fail10:
-	DTRACE_PROBE(fail10);
-	(void) efx_mac_stats_periodic(enp, esmp, 0, B_FALSE);
-fail9:
-	DTRACE_PROBE(fail9);
 fail8:
 	DTRACE_PROBE(fail8);
+	(void) efx_mac_stats_periodic(enp, esmp, 0, B_FALSE);
 fail7:
 	DTRACE_PROBE(fail7);
 fail6:
@@ -681,6 +645,11 @@ sfxge_mac_link_update_locked(sfxge_t *sp, efx_link_mode_t mode)
 		smp->sm_link_duplex = SFXGE_LINK_DUPLEX_FULL;
 		break;
 
+	case EFX_LINK_40000FDX:
+		smp->sm_link_speed = 40000;
+		smp->sm_link_duplex = SFXGE_LINK_DUPLEX_FULL;
+		break;
+
 	default:
 		ASSERT(B_FALSE);
 		break;
@@ -689,11 +658,10 @@ sfxge_mac_link_update_locked(sfxge_t *sp, efx_link_mode_t mode)
 	duplex = (smp->sm_link_duplex == SFXGE_LINK_DUPLEX_FULL) ?
 	    "full" : "half";
 	change = (smp->sm_link_up) ? "UP" : "DOWN";
-	snprintf(info, sizeof (info), ": now %dMbps %s duplex",
+	(void) snprintf(info, sizeof (info), ": now %dMbps %s duplex",
 	    smp->sm_link_speed, duplex);
 
-	cmn_err(CE_NOTE, SFXGE_CMN_ERR "[%s%d] Link %s%s",
-	    ddi_driver_name(sp->s_dip), ddi_get_instance(sp->s_dip),
+	dev_err(sp->s_dip, CE_NOTE, SFXGE_CMN_ERR "Link %s%s",
 	    change, smp->sm_link_up ? info : "");
 
 	/* Push link state update to the OS */
@@ -843,15 +811,40 @@ sfxge_mac_unicst_set(sfxge_t *sp, uint8_t *addr)
 {
 	sfxge_mac_t *smp = &(sp->s_mac);
 	efx_nic_t *enp = sp->s_enp;
+	boolean_t old_mac_valid;
+	uint8_t old_mac[ETHERADDRL];
 	int rc;
 
 	mutex_enter(&(smp->sm_lock));
+
+	old_mac_valid = smp->sm_laa_valid;
+	if (old_mac_valid)
+		bcopy(smp->sm_laa, old_mac, ETHERADDRL);
 
 	bcopy(addr, smp->sm_laa, ETHERADDRL);
 	smp->sm_laa_valid = B_TRUE;
 
 	if (smp->sm_state != SFXGE_MAC_STARTED)
 		goto done;
+
+	if (efx_nic_cfg_get(enp)->enc_allow_set_mac_with_installed_filters) {
+		if ((rc = efx_mac_addr_set(enp, smp->sm_laa)) != 0) {
+			dev_err(sp->s_dip, CE_NOTE, SFXGE_CMN_ERR
+			    "unable to set unicast MAC filter");
+			goto fail1;
+		}
+	} else {
+		/* Older EF10 firmware requires a device start */
+		mutex_exit(&smp->sm_lock);
+		sfxge_stop(sp);
+		if ((rc = sfxge_start(sp, B_TRUE)) != 0) {
+			dev_err(sp->s_dip, CE_NOTE, SFXGE_CMN_ERR
+			    "unable to restart with a new MAC");
+			mutex_enter(&(smp->sm_lock));
+			goto fail1;
+		}
+		mutex_enter(&smp->sm_lock);
+	}
 
 	if ((rc = efx_mac_addr_set(enp, smp->sm_laa)) != 0)
 		goto fail1;
@@ -862,6 +855,11 @@ done:
 	return (0);
 
 fail1:
+	if (old_mac_valid)
+		bcopy(old_mac, smp->sm_laa, ETHERADDRL);
+	else
+		smp->sm_laa_valid = B_FALSE;
+
 	DTRACE_PROBE1(fail1, int, rc);
 
 	mutex_exit(&(smp->sm_lock));
@@ -883,35 +881,63 @@ sfxge_mac_promisc_set(sfxge_t *sp, sfxge_promisc_type_t promisc)
 
 	smp->sm_promisc = promisc;
 
-	if (smp->sm_state != SFXGE_MAC_STARTED)
-		goto done;
-
-	if ((rc = efx_mac_filter_set(enp, (promisc == SFXGE_PROMISC_ALL_PHYS),
-	    B_TRUE)) != 0)
+	if ((rc = sfxge_mac_filter_apply(sp)) != 0)
 		goto fail1;
-
-	if (promisc >= SFXGE_PROMISC_ALL_MULTI) {
-		unsigned int bucket[EFX_MAC_HASH_BITS];
-		unsigned int index;
-
-		for (index = 0; index < EFX_MAC_HASH_BITS; index++)
-			bucket[index] = 1;
-
-		if ((rc = efx_mac_hash_set(enp, bucket)) != 0)
-			goto fail2;
-	} else {
-		if ((rc = efx_mac_hash_set(enp, smp->sm_bucket)) != 0)
-			goto fail3;
-	}
 
 done:
 	mutex_exit(&(smp->sm_lock));
 	return (0);
 
-fail3:
-	DTRACE_PROBE(fail3);
+fail1:
+	DTRACE_PROBE1(fail1, int, rc);
+	mutex_exit(&(smp->sm_lock));
+
+	return (rc);
+}
+
+int
+sfxge_mac_multicst_add(sfxge_t *sp, const uint8_t *addr)
+{
+	sfxge_mac_t *smp = &(sp->s_mac);
+	int i;
+	int rc;
+
+	mutex_enter(&(smp->sm_lock));
+
+	if ((addr[0] & 0x1) == 0) {
+		rc = EINVAL;
+		goto fail1;
+	}
+
+	/* Check if the address is already in the list */
+	i = 0;
+	while (i < smp->sm_mcast_count) {
+		if (bcmp(smp->sm_mcast_addr + (i * ETHERADDRL),
+		    addr, ETHERADDRL) == 0)
+			goto done;
+		else
+			i++;
+	}
+
+	if (smp->sm_mcast_count >= EFX_MAC_MULTICAST_LIST_MAX) {
+		rc = ENOENT;
+		goto fail1;
+	}
+
+	/* Add to the list */
+	bcopy(addr, smp->sm_mcast_addr + (smp->sm_mcast_count++ * ETHERADDRL),
+	    ETHERADDRL);
+
+	if ((rc = sfxge_mac_filter_apply(sp)) != 0)
+		goto fail2;
+
+done:
+	mutex_exit(&(smp->sm_lock));
+	return (0);
+
 fail2:
 	DTRACE_PROBE(fail2);
+	smp->sm_mcast_count--;
 fail1:
 	DTRACE_PROBE1(fail1, int, rc);
 	mutex_exit(&(smp->sm_lock));
@@ -920,118 +946,35 @@ fail1:
 }
 
 int
-sfxge_mac_multicst_add(sfxge_t *sp, uint8_t *addr)
+sfxge_mac_multicst_remove(sfxge_t *sp, const uint8_t *addr)
 {
 	sfxge_mac_t *smp = &(sp->s_mac);
-	efx_nic_t *enp = sp->s_enp;
-	uint32_t crc;
+	int i;
 	int rc;
 
 	mutex_enter(&(smp->sm_lock));
 
-	CRC32(crc, addr, ETHERADDRL, 0xffffffff, crc32_table);
-	smp->sm_bucket[crc % EFX_MAC_HASH_BITS]++;
-
-	if (smp->sm_state != SFXGE_MAC_STARTED)
-		goto done;
-
-	if (smp->sm_promisc >= SFXGE_PROMISC_ALL_MULTI)
-		goto done;
-
-	if ((rc = efx_mac_hash_set(enp, smp->sm_bucket)) != 0)
-		goto fail1;
-
-done:
-	mutex_exit(&(smp->sm_lock));
-	return (0);
-
-fail1:
-	DTRACE_PROBE1(fail1, int, rc);
-	mutex_exit(&(smp->sm_lock));
-
-	return (rc);
-}
-
-int
-sfxge_mac_multicst_remove(sfxge_t *sp, uint8_t *addr)
-{
-	sfxge_mac_t *smp = &(sp->s_mac);
-	efx_nic_t *enp = sp->s_enp;
-	uint32_t crc;
-	int rc;
-
-	mutex_enter(&(smp->sm_lock));
-
-	CRC32(crc, addr, ETHERADDRL, 0xffffffff, crc32_table);
-	ASSERT(smp->sm_bucket[crc % EFX_MAC_HASH_BITS] != 0);
-	smp->sm_bucket[crc % EFX_MAC_HASH_BITS]--;
-
-	if (smp->sm_state != SFXGE_MAC_STARTED)
-		goto done;
-
-	if (smp->sm_promisc >= SFXGE_PROMISC_ALL_MULTI)
-		goto done;
-
-	if ((rc = efx_mac_hash_set(enp, smp->sm_bucket)) != 0)
-		goto fail1;
-
-done:
-	mutex_exit(&(smp->sm_lock));
-	return (0);
-
-fail1:
-	DTRACE_PROBE1(fail1, int, rc);
-	mutex_exit(&(smp->sm_lock));
-
-	return (rc);
-}
-
-static int
-sfxge_mac_loopback_set(sfxge_t *sp, efx_loopback_type_t type)
-{
-	sfxge_mac_t *smp = &(sp->s_mac);
-	efx_nic_t *enp = sp->s_enp;
-	int rc;
-
-	mutex_enter(&(smp->sm_lock));
-	ASSERT3U(smp->sm_state, ==, SFXGE_MAC_STARTED);
-
-	if ((rc = efx_port_loopback_set(enp, EFX_LINK_UNKNOWN, type)) != 0)
-		goto fail1;
-
-	mutex_exit(&(smp->sm_lock));
-	return (0);
-
-fail1:
-	DTRACE_PROBE1(fail1, int, rc);
-	mutex_exit(&(smp->sm_lock));
-
-	return (rc);
-}
-
-int
-sfxge_mac_ioctl(sfxge_t *sp, sfxge_mac_ioc_t *smip)
-{
-	int rc;
-
-	switch (smip->smi_op) {
-	case SFXGE_MAC_OP_LOOPBACK: {
-		efx_loopback_type_t type = smip->smi_data;
-
-		if ((rc = sfxge_mac_loopback_set(sp, type)) != 0)
-			goto fail1;
-
-		break;
-	}
-	default:
-		rc = ENOTSUP;
-		goto fail1;
+	i = 0;
+	while (i < smp->sm_mcast_count) {
+		if (bcmp(smp->sm_mcast_addr + (i * ETHERADDRL),
+		    addr, ETHERADDRL) == 0) {
+			(void) memmove(smp->sm_mcast_addr + (i * ETHERADDRL),
+			    smp->sm_mcast_addr + ((i + 1) * ETHERADDRL),
+			    (smp->sm_mcast_count - (i + 1)) * ETHERADDRL);
+			smp->sm_mcast_count--;
+		} else
+			i++;
 	}
 
+	if ((rc = sfxge_mac_filter_apply(sp)) != 0)
+		goto fail1;
+
+	mutex_exit(&(smp->sm_lock));
 	return (0);
 
 fail1:
 	DTRACE_PROBE1(fail1, int, rc);
+	mutex_exit(&(smp->sm_lock));
 
 	return (rc);
 }
@@ -1066,7 +1009,6 @@ sfxge_mac_stop(sfxge_t *sp)
 
 	smp->sm_link_mode = EFX_LINK_UNKNOWN;
 
-
 	efx_port_fini(enp);
 
 	mutex_exit(&(smp->sm_lock));
@@ -1077,7 +1019,6 @@ sfxge_mac_fini(sfxge_t *sp)
 {
 	sfxge_mac_t *smp = &(sp->s_mac);
 	efsys_mem_t *esmp = &(smp->sm_mem);
-	unsigned int index;
 
 	ASSERT3U(smp->sm_state, ==, SFXGE_MAC_INITIALIZED);
 	ASSERT3P(smp->sm_sp, ==, sp);
@@ -1090,9 +1031,8 @@ sfxge_mac_fini(sfxge_t *sp)
 	smp->sm_link_mode = EFX_LINK_UNKNOWN;
 	smp->sm_promisc = SFXGE_PROMISC_OFF;
 
-	/* Clear the group hash */
-	for (index = 0; index < EFX_MAC_HASH_BITS; index++)
-		smp->sm_bucket[index] = 0;
+	bzero(smp->sm_mcast_addr, sizeof (smp->sm_mcast_addr));
+	smp->sm_mcast_count = 0;
 
 	bzero(smp->sm_laa, ETHERADDRL);
 	smp->sm_laa_valid = B_FALSE;
@@ -1114,6 +1054,4 @@ sfxge_mac_fini(sfxge_t *sp)
 	mutex_destroy(&(smp->sm_lock));
 
 	smp->sm_sp = NULL;
-
-	SFXGE_OBJ_CHECK(smp, sfxge_mac_t);
 }

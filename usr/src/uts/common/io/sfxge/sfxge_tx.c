@@ -1,27 +1,31 @@
 /*
- * CDDL HEADER START
+ * Copyright (c) 2008-2016 Solarflare Communications Inc.
+ * All rights reserved.
  *
- * The contents of this file are subject to the terms of the
- * Common Development and Distribution License (the "License").
- * You may not use this file except in compliance with the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
  *
- * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
- * See the License for the specific language governing permissions
- * and limitations under the License.
+ * 1. Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
  *
- * When distributing Covered Code, include this CDDL HEADER in each
- * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
- * If applicable, add the following below this CDDL HEADER, with the
- * fields enclosed by brackets "[]" replaced with your own identifying
- * information: Portions Copyright [yyyy] [name of copyright owner]
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
+ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * CDDL HEADER END
- */
-
-/*
- * Copyright 2008-2013 Solarflare Communications Inc.  All rights reserved.
- * Use is subject to license terms.
+ * The views and conclusions contained in the software and documentation are
+ * those of the authors and should not be interpreted as representing official
+ * policies, either expressed or implied, of the FreeBSD Project.
  */
 
 #include <sys/types.h>
@@ -48,7 +52,6 @@
 
 /* TXQ flush response timeout (in microseconds) */
 #define	SFXGE_TX_QFLUSH_USEC	(2000000)
-#define	EVQ_0 0
 
 /* See sfxge.conf.private for descriptions */
 #define	SFXGE_TX_DPL_GET_PKT_LIMIT_DEFAULT 4096
@@ -232,8 +235,6 @@ static void
 sfxge_tx_mapping_dtor(void *buf, void *arg)
 {
 	sfxge_tx_mapping_t *stmp = buf;
-
-	_NOTE(ARGUNUSED(arg))
 
 	ASSERT3P(stmp->stm_sp, ==, arg);
 
@@ -522,7 +523,7 @@ sfxge_tx_qfbp_put(sfxge_txq_t *stp, sfxge_tx_buffer_t *stbp)
 
 	ASSERT3P(stbp->stb_next, ==, NULL);
 	ASSERT3U(stbp->stb_off, ==, 0);
-	ASSERT3U(stbp->stb_esm.esm_size, ==, 0);
+	ASSERT3U(stbp->stb_esm.esm_used, ==, 0);
 
 	stbp->stb_next = stfp->stf_stbp;
 	stfp->stf_stbp = stbp;
@@ -795,7 +796,7 @@ sfxge_tx_qreap(sfxge_txq_t *stp)
 				next = stbp->stb_next;
 				stbp->stb_next = NULL;
 
-				stbp->stb_esm.esm_size = 0;
+				stbp->stb_esm.esm_used = 0;
 				stbp->stb_off = 0;
 
 				sfxge_tx_qfbp_put(stp, stbp);
@@ -849,7 +850,7 @@ sfxge_tx_qlist_abort(sfxge_txq_t *stp)
 		stbp->stb_next = NULL;
 
 		stbp->stb_off = 0;
-		stbp->stb_esm.esm_size = 0;
+		stbp->stb_esm.esm_used = 0;
 
 		sfxge_tx_qfbp_put(stp, stbp);
 
@@ -927,12 +928,6 @@ again:
 		ASSERT(stp->st_mp[id] == NULL);
 		stp->st_mp[id] = mp;
 	}
-
-	/* Make the descriptors visible to the hardware */
-	(void) ddi_dma_sync(stp->st_mem.esm_dma_handle,
-	    0,
-	    EFX_TXQ_SIZE(SFXGE_TX_NDESCS),
-	    DDI_DMA_SYNC_FORDEV);
 
 	/* Clear the list */
 	stp->st_n = 0;
@@ -1096,14 +1091,17 @@ sfxge_tx_qinit(sfxge_t *sp, unsigned int index, sfxge_txq_type_t type,
 	sfxge_tx_dpl_t *stdp;
 	int rc;
 
-	ASSERT3U(index, <, SFXGE_TXQ_NTYPES + SFXGE_RX_SCALE_MAX);
+	ASSERT3U(index, <, EFX_ARRAY_SIZE(sp->s_stp));
 	ASSERT3U(type, <, SFXGE_TXQ_NTYPES);
-	ASSERT3U(evq, <, SFXGE_RX_SCALE_MAX);
+	ASSERT3U(evq, <, EFX_ARRAY_SIZE(sp->s_sep));
 
-	stp = kmem_cache_alloc(sp->s_tqc, KM_SLEEP);
-	stdp = &(stp->st_dpl);
-
+	if ((stp = kmem_cache_alloc(sp->s_tqc, KM_SLEEP)) == NULL) {
+		rc = ENOMEM;
+		goto fail1;
+	}
 	ASSERT3U(stp->st_state, ==, SFXGE_TXQ_UNINITIALIZED);
+
+	stdp = &(stp->st_dpl);
 
 	stp->st_index = index;
 	stp->st_type = type;
@@ -1114,7 +1112,7 @@ sfxge_tx_qinit(sfxge_t *sp, unsigned int index, sfxge_txq_type_t type,
 
 	/* Initialize the statistics */
 	if ((rc = sfxge_tx_kstat_init(stp)) != 0)
-		goto fail1;
+		goto fail2;
 
 	stdp->get_pkt_limit = ddi_prop_get_int(DDI_DEV_T_ANY, sp->s_dip,
 	    DDI_PROP_DONTPASS, "tx_dpl_get_pkt_limit",
@@ -1123,6 +1121,10 @@ sfxge_tx_qinit(sfxge_t *sp, unsigned int index, sfxge_txq_type_t type,
 	stdp->put_pkt_limit = ddi_prop_get_int(DDI_DEV_T_ANY, sp->s_dip,
 	    DDI_PROP_DONTPASS, "tx_dpl_put_pkt_limit",
 	    SFXGE_TX_DPL_PUT_PKT_LIMIT_DEFAULT);
+
+	/* Allocate a per-EVQ label for events from this TXQ */
+	if ((rc = sfxge_ev_txlabel_alloc(sp, evq, stp, &(stp->st_label))) != 0)
+		goto fail2;
 
 	stp->st_state = SFXGE_TXQ_INITIALIZED;
 
@@ -1133,8 +1135,11 @@ sfxge_tx_qinit(sfxge_t *sp, unsigned int index, sfxge_txq_type_t type,
 
 	return (0);
 
-fail1:
-	DTRACE_PROBE1(fail1, int, rc);
+fail2:
+	DTRACE_PROBE(fail2);
+
+	sfxge_tx_kstat_fini(stp);
+
 
 	stp->st_evq = 0;
 	stp->st_type = 0;
@@ -1143,6 +1148,9 @@ fail1:
 	mutex_destroy(&(stp->st_lock));
 
 	kmem_cache_free(sp->s_tqc, stp);
+
+fail1:
+	DTRACE_PROBE1(fail1, int, rc);
 
 	return (rc);
 }
@@ -1156,6 +1164,7 @@ sfxge_tx_qstart(sfxge_t *sp, unsigned int index)
 	sfxge_evq_t *sep;
 	unsigned int evq;
 	unsigned int flags;
+	unsigned int desc_index;
 	int rc;
 
 	mutex_enter(&(stp->st_lock));
@@ -1168,7 +1177,7 @@ sfxge_tx_qstart(sfxge_t *sp, unsigned int index)
 	ASSERT3U(sep->se_state, ==, SFXGE_EVQ_STARTED);
 
 	/* Zero the memory */
-	(void) memset(esmp->esm_base, 0, EFX_TXQ_SIZE(SFXGE_TX_NDESCS));
+	bzero(esmp->esm_base, EFX_TXQ_SIZE(SFXGE_TX_NDESCS));
 
 	/* Program the buffer table */
 	if ((rc = sfxge_sram_buf_tbl_set(sp, stp->st_id, esmp,
@@ -1181,11 +1190,11 @@ sfxge_tx_qstart(sfxge_t *sp, unsigned int index)
 		break;
 
 	case SFXGE_TXQ_IP_CKSUM:
-		flags = EFX_CKSUM_IPV4;
+		flags = EFX_TXQ_CKSUM_IPV4;
 		break;
 
 	case SFXGE_TXQ_IP_TCP_UDP_CKSUM:
-		flags = EFX_CKSUM_IPV4 | EFX_CKSUM_TCPUDP;
+		flags = EFX_TXQ_CKSUM_IPV4 | EFX_TXQ_CKSUM_TCPUDP;
 		break;
 
 	default:
@@ -1196,9 +1205,16 @@ sfxge_tx_qstart(sfxge_t *sp, unsigned int index)
 	}
 
 	/* Create the transmit queue */
-	if ((rc = efx_tx_qcreate(enp, index, index, esmp, SFXGE_TX_NDESCS,
-	    stp->st_id, flags, sep->se_eep, &(stp->st_etp))) != 0)
+	if ((rc = efx_tx_qcreate(enp, index, stp->st_label, esmp,
+	    SFXGE_TX_NDESCS, stp->st_id, flags, sep->se_eep,
+	    &(stp->st_etp), &desc_index)) != 0)
 		goto fail2;
+
+	/* Initialise queue descriptor indexes */
+	stp->st_added = desc_index;
+	stp->st_pending = desc_index;
+	stp->st_completed = desc_index;
+	stp->st_reaped = desc_index;
 
 	/* Enable the transmit queue */
 	efx_tx_qenable(stp->st_etp);
@@ -1226,7 +1242,7 @@ fail1:
 
 static inline int
 sfxge_tx_qmapping_add(sfxge_txq_t *stp, sfxge_tx_mapping_t *stmp,
-size_t *offp, size_t *limitp)
+    size_t *offp, size_t *limitp)
 {
 	mblk_t *mp;
 	size_t mapping_off;
@@ -1254,8 +1270,7 @@ size_t *offp, size_t *limitp)
 		efx_buffer_t *ebp;
 
 		ASSERT3U(page, <, SFXGE_TX_MAPPING_NADDR);
-		ASSERT((stmp->stm_addr[page] &
-			SFXGE_TX_DESCMASK) != 0);
+		ASSERT((stmp->stm_addr[page] & SFXGE_TX_DESCMASK) != 0);
 
 		page_size = MIN(page_size, mapping_size);
 		page_size = MIN(page_size, *limitp);
@@ -1315,14 +1330,14 @@ sfxge_tx_qbuffer_add(sfxge_txq_t *stp, sfxge_tx_buffer_t *stbp, boolean_t eop)
 
 	ebp = &(stp->st_eb[stp->st_n++]);
 	ebp->eb_addr = stbp->stb_esm.esm_addr + stbp->stb_off;
-	ebp->eb_size = stbp->stb_esm.esm_size - stbp->stb_off;
+	ebp->eb_size = stbp->stb_esm.esm_used - stbp->stb_off;
 	ebp->eb_eop = eop;
 
 	(void) ddi_dma_sync(stbp->stb_esm.esm_dma_handle,
 	    stbp->stb_off, ebp->eb_size,
 	    DDI_DMA_SYNC_FORDEV);
 
-	stbp->stb_off = stbp->stb_esm.esm_size;
+	stbp->stb_off = stbp->stb_esm.esm_used;
 
 	DTRACE_PROBE5(tx_buffer_add,
 	    unsigned int, stp->st_index,
@@ -1354,7 +1369,7 @@ sfxge_tx_msgb_copy(mblk_t *mp, sfxge_tx_buffer_t *stbp, size_t *offp,
 	data_off = *offp;
 	data_size = MBLKL(mp) - *offp;
 
-	copy_off = stbp->stb_esm.esm_size;
+	copy_off = stbp->stb_esm.esm_used;
 	copy_size = SFXGE_TX_BUFFER_SIZE - copy_off;
 
 	copy_size = MIN(copy_size, data_size);
@@ -1363,8 +1378,8 @@ sfxge_tx_msgb_copy(mblk_t *mp, sfxge_tx_buffer_t *stbp, size_t *offp,
 	bcopy(mp->b_rptr + data_off,
 	    stbp->stb_esm.esm_base + copy_off, copy_size);
 
-	stbp->stb_esm.esm_size += copy_size;
-	ASSERT3U(stbp->stb_esm.esm_size, <=,
+	stbp->stb_esm.esm_used += copy_size;
+	ASSERT3U(stbp->stb_esm.esm_used, <=,
 	    SFXGE_TX_BUFFER_SIZE);
 
 	*offp += copy_size;
@@ -1393,7 +1408,7 @@ sfxge_tx_qpayload_fragment(sfxge_txq_t *stp, unsigned int id, mblk_t **mpp,
 	int rc;
 
 	stbp = stp->st_stbp[id];
-	ASSERT(stbp == NULL || (stbp->stb_esm.esm_size == stbp->stb_off));
+	ASSERT(stbp == NULL || (stbp->stb_esm.esm_used == stbp->stb_off));
 
 	stmp = stp->st_stmp[id];
 
@@ -1456,7 +1471,7 @@ sfxge_tx_qpayload_fragment(sfxge_txq_t *stp, unsigned int id, mblk_t **mpp,
 		 * If we have a partially filled buffer then we must add it to
 		 * the fragment list before adding the mapping.
 		 */
-		if (stbp != NULL && (stbp->stb_esm.esm_size > stbp->stb_off)) {
+		if (stbp != NULL && (stbp->stb_esm.esm_used > stbp->stb_off)) {
 			rc = sfxge_tx_qbuffer_add(stp, stbp, B_FALSE);
 			if (rc != 0)
 				goto fail1;
@@ -1482,7 +1497,7 @@ sfxge_tx_qpayload_fragment(sfxge_txq_t *stp, unsigned int id, mblk_t **mpp,
 
 copy:
 		if (stbp == NULL ||
-		    stbp->stb_esm.esm_size == SFXGE_TX_BUFFER_SIZE) {
+		    stbp->stb_esm.esm_used == SFXGE_TX_BUFFER_SIZE) {
 			/* Try to grab a buffer from the pool */
 			stbp = sfxge_tx_qfbp_get(stp);
 			if (stbp == NULL) {
@@ -1506,13 +1521,13 @@ copy:
 		eop = sfxge_tx_msgb_copy(mp, stbp, &off, &size);
 
 		ASSERT(off == MBLKL(mp) || size == 0 ||
-		    stbp->stb_esm.esm_size == SFXGE_TX_BUFFER_SIZE);
+		    stbp->stb_esm.esm_used == SFXGE_TX_BUFFER_SIZE);
 
 		/*
 		 * If we have reached the end of the packet, or the buffer is
 		 * full, then add the buffer to the fragment list.
 		 */
-		if (stbp->stb_esm.esm_size == SFXGE_TX_BUFFER_SIZE || eop) {
+		if (stbp->stb_esm.esm_used == SFXGE_TX_BUFFER_SIZE || eop) {
 			rc = sfxge_tx_qbuffer_add(stp, stbp, eop);
 			if (rc != 0)
 				goto fail4;
@@ -1665,7 +1680,7 @@ sfxge_tx_qlso_fragment(sfxge_txq_t *stp, sfxge_tx_packet_t *stpp,
 		}
 
 		if (stbp == NULL ||
-		    stbp->stb_esm.esm_size + hs > SFXGE_TX_BUFFER_SIZE) {
+		    stbp->stb_esm.esm_used + hs > SFXGE_TX_BUFFER_SIZE) {
 			/* Try to grab a buffer from the pool */
 			stbp = sfxge_tx_qfbp_get(stp);
 			if (stbp == NULL) {
@@ -1686,9 +1701,9 @@ sfxge_tx_qlso_fragment(sfxge_txq_t *stp, sfxge_tx_packet_t *stpp,
 		}
 
 		/* Copy in the headers */
-		ASSERT3U(stbp->stb_off, ==, stbp->stb_esm.esm_size);
+		ASSERT3U(stbp->stb_off, ==, stbp->stb_esm.esm_used);
 		bcopy(hp, stbp->stb_esm.esm_base + stbp->stb_off, hs);
-		stbp->stb_esm.esm_size += hs;
+		stbp->stb_esm.esm_used += hs;
 
 		/* Add the buffer to the fragment list */
 		rc = sfxge_tx_qbuffer_add(stp, stbp, B_FALSE);
@@ -1840,7 +1855,7 @@ sfxge_tx_qpacket_fragment(sfxge_txq_t *stp, sfxge_tx_packet_t *stpp,
 		 * If we have a partially filled buffer then we must add it to
 		 * the fragment list before adding the mapping.
 		 */
-		if (stbp != NULL && (stbp->stb_esm.esm_size > stbp->stb_off)) {
+		if (stbp != NULL && (stbp->stb_esm.esm_used > stbp->stb_off)) {
 			rc = sfxge_tx_qbuffer_add(stp, stbp, B_FALSE);
 			if (rc != 0)
 				goto fail1;
@@ -1860,7 +1875,7 @@ sfxge_tx_qpacket_fragment(sfxge_txq_t *stp, sfxge_tx_packet_t *stpp,
 
 copy:
 		if (stbp == NULL ||
-		    stbp->stb_esm.esm_size == SFXGE_TX_BUFFER_SIZE) {
+		    stbp->stb_esm.esm_used == SFXGE_TX_BUFFER_SIZE) {
 			/* Try to grab a buffer from the pool */
 			stbp = sfxge_tx_qfbp_get(stp);
 			if (stbp == NULL) {
@@ -1884,13 +1899,13 @@ copy:
 		eop = sfxge_tx_msgb_copy(mp, stbp, &off, &size);
 
 		ASSERT(off == MBLKL(mp) ||
-		    stbp->stb_esm.esm_size == SFXGE_TX_BUFFER_SIZE);
+		    stbp->stb_esm.esm_used == SFXGE_TX_BUFFER_SIZE);
 
 		/*
 		 * If we have reached the end of the packet, or the buffer is
 		 * full, then add the buffer to the fragment list.
 		 */
-		if (stbp->stb_esm.esm_size == SFXGE_TX_BUFFER_SIZE || eop) {
+		if (stbp->stb_esm.esm_used == SFXGE_TX_BUFFER_SIZE || eop) {
 			rc = sfxge_tx_qbuffer_add(stp, stbp, eop);
 			if (rc != 0)
 				goto fail4;
@@ -2148,7 +2163,7 @@ again:
 			goto defer;
 
 		if (stp->st_added - pushed >= SFXGE_TX_BATCH) {
-			efx_tx_qpush(stp->st_etp, stp->st_added);
+			efx_tx_qpush(stp->st_etp, stp->st_added, pushed);
 			pushed = stp->st_added;
 		}
 
@@ -2209,7 +2224,7 @@ defer:
 	}
 
 	if (stp->st_added != pushed)
-		efx_tx_qpush(stp->st_etp, stp->st_added);
+		efx_tx_qpush(stp->st_etp, stp->st_added, pushed);
 
 	ASSERT(stp->st_unblock != SFXGE_TXQ_NOT_BLOCKED ||
 	    stdp->std_count == 0);
@@ -2303,10 +2318,12 @@ sfxge_tx_qunblock(sfxge_txq_t *stp)
 
 	ASSERT(mutex_owned(&(sep->se_lock)));
 
-	if (stp->st_state != SFXGE_TXQ_STARTED)
-		return;
-
 	mutex_enter(&(stp->st_lock));
+
+	if (stp->st_state != SFXGE_TXQ_STARTED) {
+		mutex_exit(&(stp->st_lock));
+		return;
+	}
 
 	if (stp->st_unblock != SFXGE_TXQ_NOT_BLOCKED) {
 		unsigned int level;
@@ -2382,15 +2399,51 @@ void
 sfxge_tx_qflush_done(sfxge_txq_t *stp)
 {
 	sfxge_t *sp = stp->st_sp;
+	boolean_t flush_pending = B_FALSE;
 
 	ASSERT(mutex_owned(&(sp->s_sep[stp->st_evq]->se_lock)));
 
 	mutex_enter(&(stp->st_lock));
 
-	if (stp->st_flush == SFXGE_FLUSH_PENDING)
-		stp->st_flush = SFXGE_FLUSH_DONE;
+	switch (stp->st_state) {
+	case SFXGE_TXQ_INITIALIZED:
+		/* Ignore flush event after TxQ destroyed */
+		break;
+
+	case SFXGE_TXQ_FLUSH_PENDING:
+		flush_pending = B_TRUE;
+		stp->st_state = SFXGE_TXQ_FLUSH_DONE;
+		break;
+
+	case SFXGE_TXQ_FLUSH_FAILED:
+		/* MC may have rebooted before handling the flush request */
+		stp->st_state = SFXGE_TXQ_FLUSH_DONE;
+		break;
+
+	case SFXGE_TXQ_STARTED:
+		/*
+		 * MC initiated flush on MC reboot or because of bad Tx
+		 * descriptor
+		 */
+		stp->st_state = SFXGE_TXQ_FLUSH_DONE;
+		break;
+
+	case SFXGE_TXQ_FLUSH_DONE:
+		/* Ignore unexpected extra flush event */
+		ASSERT(B_FALSE);
+		break;
+
+	default:
+		ASSERT(B_FALSE);
+	}
+
 
 	mutex_exit(&(stp->st_lock));
+
+	if (flush_pending == B_FALSE) {
+		/* Flush was not pending */
+		return;
+	}
 
 	mutex_enter(&(sp->s_tx_flush_lock));
 	sp->s_tx_flush_pending--;
@@ -2402,30 +2455,35 @@ sfxge_tx_qflush_done(sfxge_txq_t *stp)
 }
 
 static void
-sfxge_tx_qflush(sfxge_t *sp, unsigned int index, boolean_t do_flush)
+sfxge_tx_qflush(sfxge_t *sp, unsigned int index, boolean_t wait_for_flush)
 {
 	sfxge_txq_t *stp = sp->s_stp[index];
+	int rc;
 
 	ASSERT(mutex_owned(&(sp->s_state_lock)));
+	ASSERT(mutex_owned(&(sp->s_tx_flush_lock)));
 
 	mutex_enter(&(stp->st_lock));
 
 	/* Prepare to flush and stop the queue */
-	if (stp->st_state == SFXGE_TXQ_STARTED)
-		stp->st_state = SFXGE_TXQ_INITIALIZED;
-	else
-		do_flush = B_FALSE; /* No hardware ring, so don't flush */
-
-	if (do_flush)
-		stp->st_flush = SFXGE_FLUSH_PENDING;
-	else
-		stp->st_flush = SFXGE_FLUSH_INACTIVE;
+	if (stp->st_state == SFXGE_TXQ_STARTED) {
+		/* Flush the transmit queue */
+		if ((rc = efx_tx_qflush(stp->st_etp)) == EALREADY) {
+			/* Already flushed, may be initiated by MC */
+			stp->st_state = SFXGE_TXQ_FLUSH_DONE;
+		} else if (rc != 0) {
+			/* Unexpected error */
+			stp->st_state = SFXGE_TXQ_FLUSH_FAILED;
+		} else if (wait_for_flush) {
+			stp->st_state = SFXGE_TXQ_FLUSH_PENDING;
+			sp->s_tx_flush_pending++;
+		} else {
+			/* Assume the flush is done */
+			stp->st_state = SFXGE_TXQ_FLUSH_DONE;
+		}
+	}
 
 	mutex_exit(&(stp->st_lock));
-
-	/* Flush the transmit queue */
-	if (do_flush)
-		efx_tx_qflush(stp->st_etp);
 }
 
 static void
@@ -2437,14 +2495,24 @@ sfxge_tx_qstop(sfxge_t *sp, unsigned int index)
 
 	mutex_enter(&(sep->se_lock));
 	mutex_enter(&(stp->st_lock));
-	ASSERT3U(stp->st_state, ==, SFXGE_TXQ_INITIALIZED);
+
+	if (stp->st_state == SFXGE_TXQ_INITIALIZED)
+		goto done;
+
+	ASSERT(stp->st_state == SFXGE_TXQ_FLUSH_PENDING ||
+	    stp->st_state == SFXGE_TXQ_FLUSH_DONE ||
+	    stp->st_state == SFXGE_TXQ_FLUSH_FAILED);
 
 	/* All queues should have been flushed */
-	ASSERT3S(stp->st_sp->s_tx_flush_pending, ==, 0);
-	ASSERT(stp->st_flush != SFXGE_FLUSH_FAILED);
-
-	/* in case of TX flush timeout */
-	stp->st_flush = SFXGE_FLUSH_DONE;
+	if (stp->st_sp->s_tx_flush_pending != 0) {
+		dev_err(sp->s_dip, CE_NOTE,
+		    SFXGE_CMN_ERR "txq[%d] stop with flush_pending=%d",
+		    index, stp->st_sp->s_tx_flush_pending);
+	}
+	if (stp->st_state == SFXGE_TXQ_FLUSH_FAILED) {
+		dev_err(sp->s_dip, CE_NOTE,
+		    SFXGE_CMN_ERR "txq[%d] flush failed", index);
+	}
 
 	/* Destroy the transmit queue */
 	efx_tx_qdestroy(stp->st_etp);
@@ -2478,6 +2546,9 @@ sfxge_tx_qstop(sfxge_t *sp, unsigned int index)
 	stp->st_completed = 0;
 	stp->st_reaped = 0;
 
+	stp->st_state = SFXGE_TXQ_INITIALIZED;
+
+done:
 	mutex_exit(&(stp->st_lock));
 	mutex_exit(&(sep->se_lock));
 }
@@ -2488,13 +2559,17 @@ sfxge_tx_qfini(sfxge_t *sp, unsigned int index)
 	sfxge_txq_t *stp = sp->s_stp[index];
 	sfxge_tx_dpl_t *stdp = &(stp->st_dpl);
 
+	ASSERT3U(stp->st_state, ==, SFXGE_TXQ_INITIALIZED);
+	stp->st_state = SFXGE_TXQ_UNINITIALIZED;
+
 	/* Detach the TXQ from the driver */
 	sp->s_stp[index] = NULL;
 	ASSERT(sp->s_tx_qcount > 0);
 	sp->s_tx_qcount--;
 
-	ASSERT3U(stp->st_state, ==, SFXGE_TXQ_INITIALIZED);
-	stp->st_state = SFXGE_TXQ_UNINITIALIZED;
+	/* Free the EVQ label for events from this TXQ */
+	(void) sfxge_ev_txlabel_free(sp, stp->st_evq, stp, stp->st_label);
+	stp->st_label = 0;
 
 	/* Tear down the statistics */
 	sfxge_tx_kstat_fini(stp);
@@ -2527,6 +2602,8 @@ sfxge_tx_init(sfxge_t *sp)
 {
 	sfxge_intr_t *sip = &(sp->s_intr);
 	char name[MAXNAMELEN];
+	sfxge_txq_type_t qtype;
+	unsigned int txq, evq;
 	int index;
 	int rc;
 
@@ -2562,34 +2639,39 @@ sfxge_tx_init(sfxge_t *sp)
 	    NULL, 0);
 	ASSERT(sp->s_tqc != NULL);
 
-	/* Initialize the special non-checksummed transmit queues */
+	/* Initialize the transmit queues. */
+	sp->s_tx_scale_max[SFXGE_TXQ_NON_CKSUM]		= sip->si_nalloc;
+	sp->s_tx_scale_max[SFXGE_TXQ_IP_CKSUM]		= 1;
+	sp->s_tx_scale_max[SFXGE_TXQ_IP_TCP_UDP_CKSUM]	= sip->si_nalloc;
 
-	/* NB sfxge_ev_qinit() is sensitive to using EVQ_0 */
-	if ((rc = sfxge_tx_qinit(sp, SFXGE_TXQ_NON_CKSUM,
-		    SFXGE_TXQ_NON_CKSUM, EVQ_0)) != 0)
-		goto fail1;
+	/* Ensure minimum queue counts required by sfxge_tx_packet_add(). */
+	if (sp->s_tx_scale_max[SFXGE_TXQ_NON_CKSUM] < 1)
+		sp->s_tx_scale_max[SFXGE_TXQ_NON_CKSUM] = 1;
 
-	/* NB sfxge_ev_qinit() is sensitive to using EVQ_0 */
-	if ((rc = sfxge_tx_qinit(sp, SFXGE_TXQ_IP_CKSUM,
-	    SFXGE_TXQ_IP_CKSUM, EVQ_0)) != 0)
-		goto fail2;
+	if (sp->s_tx_scale_max[SFXGE_TXQ_IP_CKSUM] < 1)
+		sp->s_tx_scale_max[SFXGE_TXQ_IP_CKSUM] = 1;
 
-	/* Initialize the normal transmit queues */
-	for (index = 0; index < sip->si_nalloc; index++) {
-		if ((rc = sfxge_tx_qinit(sp, SFXGE_TXQ_IP_TCP_UDP_CKSUM + index,
-		    SFXGE_TXQ_IP_TCP_UDP_CKSUM, index)) != 0)
-			goto fail3;
+	txq = 0;
+	for (qtype = 0; qtype < SFXGE_TXQ_NTYPES; qtype++) {
+		unsigned int tx_scale = sp->s_tx_scale_max[qtype];
+
+		if (txq + tx_scale > EFX_ARRAY_SIZE(sp->s_stp)) {
+			rc = EINVAL;
+			goto fail1;
+		}
+
+		sp->s_tx_scale_base[qtype] = txq;
+
+		for (evq = 0; evq < tx_scale; evq++) {
+			if ((rc = sfxge_tx_qinit(sp, txq, qtype, evq)) != 0) {
+				goto fail2;
+			}
+			txq++;
+		}
+		ASSERT3U(txq, <=, EFX_ARRAY_SIZE(sp->s_stp));
 	}
 
 	return (0);
-
-fail3:
-	DTRACE_PROBE(fail3);
-
-	while (--index >= 0)
-		sfxge_tx_qfini(sp, SFXGE_TXQ_IP_TCP_UDP_CKSUM + index);
-
-	sfxge_tx_qfini(sp, SFXGE_TXQ_IP_CKSUM);
 
 fail2:
 	DTRACE_PROBE(fail2);
@@ -2597,7 +2679,11 @@ fail2:
 fail1:
 	DTRACE_PROBE1(fail1, int, rc);
 
-	sfxge_tx_qfini(sp, SFXGE_TXQ_NON_CKSUM);
+	index = EFX_ARRAY_SIZE(sp->s_stp);
+	while (--index >= 0) {
+		if (sp->s_stp[index] != NULL)
+			sfxge_tx_qfini(sp, index);
+	}
 
 	kmem_cache_destroy(sp->s_tqc);
 	sp->s_tqc = NULL;
@@ -2625,9 +2711,10 @@ sfxge_tx_start(sfxge_t *sp)
 	if ((rc = efx_tx_init(enp)) != 0)
 		goto fail1;
 
-	for (index = 0; index < sp->s_tx_qcount; index++) {
-		if ((rc = sfxge_tx_qstart(sp, index)) != 0)
-			goto fail2;
+	for (index = 0; index < EFX_ARRAY_SIZE(sp->s_stp); index++) {
+		if (sp->s_stp[index] != NULL)
+			if ((rc = sfxge_tx_qstart(sp, index)) != 0)
+				goto fail2;
 	}
 
 	return (0);
@@ -2635,11 +2722,7 @@ sfxge_tx_start(sfxge_t *sp)
 fail2:
 	DTRACE_PROBE(fail2);
 
-	while (--index >= 0)
-		sfxge_tx_qstop(sp, index);
-
-	/* Tear down the transmit module */
-	efx_tx_fini(enp);
+	sfxge_tx_stop(sp);
 
 fail1:
 	DTRACE_PROBE1(fail1, int, rc);
@@ -2669,8 +2752,12 @@ sfxge_tx_packet_add(sfxge_t *sp, mblk_t *mp)
 	size_t size;
 	size_t mss;
 	sfxge_txq_t *stp;
+	unsigned int txq;
+	int index;
 	boolean_t locked;
 	sfxge_tx_packet_t *stpp;
+	sfxge_packet_type_t pkt_type;
+	uint16_t sport, dport;
 	int rc = 0;
 
 	ASSERT3P(mp->b_next, ==, NULL);
@@ -2706,9 +2793,11 @@ sfxge_tx_packet_add(sfxge_t *sp, mblk_t *mp)
 			goto fail1;
 		}
 
-		sfxge_tcp_parse(mp, &etherhp, &iphp, &thp, &off, &size);
+		pkt_type = sfxge_pkthdr_parse(mp, &etherhp, &iphp, &thp,
+		    &off, &size, &sport, &dport);
 
-		if (etherhp == NULL ||
+		if (pkt_type != SFXGE_PACKET_TYPE_IPV4_TCP ||
+		    etherhp == NULL ||
 		    iphp == NULL ||
 		    thp == NULL ||
 		    off == 0) {
@@ -2722,8 +2811,7 @@ sfxge_tx_packet_add(sfxge_t *sp, mblk_t *mp)
 		sfxge_rx_scale_t *srsp = &(sp->s_rx_scale);
 
 		if (srsp->srs_state == SFXGE_RX_SCALE_STARTED) {
-			uint16_t hash;
-			int index;
+			uint32_t hash;
 
 			if (srsp->srs_count > 1) {
 				/*
@@ -2731,22 +2819,36 @@ sfxge_tx_packet_add(sfxge_t *sp, mblk_t *mp)
 				 * for LSO segmentation then we need to do it
 				 * now so we can calculate the hash.
 				 */
-				if (thp == NULL)
-					sfxge_tcp_parse(mp, &etherhp, &iphp,
-					    &thp, &off, &size);
+				if (thp == NULL) {
+					(void) sfxge_pkthdr_parse(mp, &etherhp,
+					    &iphp, &thp, &off, &size,
+					    &sport, &dport);
+				}
 
 				if (thp != NULL) {
-					SFXGE_TCP_HASH(
-					    ntohl(iphp->ip_dst.s_addr),
-					    ntohs(thp->th_dport),
-					    ntohl(iphp->ip_src.s_addr),
-					    ntohs(thp->th_sport), hash);
+					SFXGE_TCP_HASH(sp,
+					    &iphp->ip_dst.s_addr,
+					    thp->th_dport,
+					    &iphp->ip_src.s_addr,
+					    thp->th_sport, hash);
+
+					index = srsp->srs_tbl[hash %
+					    SFXGE_RX_SCALE_MAX];
+				} else if (iphp != NULL) {
+					/*
+					 * Calculate IPv4 4-tuple hash, with
+					 * TCP/UDP/SCTP src/dest ports. Ports
+					 * are zero for other IPv4 protocols.
+					 */
+					SFXGE_IP_HASH(sp,
+					    &iphp->ip_dst.s_addr, dport,
+					    &iphp->ip_src.s_addr, sport, hash);
 
 					index = srsp->srs_tbl[hash %
 					    SFXGE_RX_SCALE_MAX];
 				} else {
 					/*
-					 * Non-TCP traffix always goes to the
+					 * Other traffic always goes to the
 					 * the queue in the zero-th entry of
 					 * the RSS table.
 					 */
@@ -2765,16 +2867,70 @@ sfxge_tx_packet_add(sfxge_t *sp, mblk_t *mp)
 			 * Find the event queue corresponding to the hash in
 			 * the RSS table.
 			 */
-			stp = sp->s_stp[SFXGE_TXQ_IP_TCP_UDP_CKSUM + index];
+			txq = sp->s_tx_scale_base[SFXGE_TXQ_IP_TCP_UDP_CKSUM] +
+			    index;
+			stp = sp->s_stp[txq];
 			ASSERT3U(stp->st_evq, ==, index);
 		} else {
-			stp = sp->s_stp[SFXGE_TXQ_IP_TCP_UDP_CKSUM];
+			index = 0;
+			txq = sp->s_tx_scale_base[SFXGE_TXQ_IP_TCP_UDP_CKSUM] +
+			    index;
+			stp = sp->s_stp[txq];
 		}
 	} else if (DB_CKSUMFLAGS(mp) & HCK_IPV4_HDRCKSUM) {
-		stp = sp->s_stp[SFXGE_TXQ_IP_CKSUM];
+		ASSERT3U(sp->s_tx_scale_max[SFXGE_TXQ_IP_CKSUM], >=, 1);
+		index = 0;
+		txq = sp->s_tx_scale_base[SFXGE_TXQ_IP_CKSUM] + index;
+		stp = sp->s_stp[txq];
 	} else {
-		if ((stp = sp->s_stp[SFXGE_TXQ_NON_CKSUM]) == NULL)
-			stp = sp->s_stp[SFXGE_TXQ_IP_CKSUM];
+		/*
+		 * No hardware checksum offload requested.
+		 */
+		sfxge_rx_scale_t *srsp = &(sp->s_rx_scale);
+
+		if (srsp->srs_state == SFXGE_RX_SCALE_STARTED) {
+			uint32_t hash = 0;
+
+			if (srsp->srs_count > 1) {
+				if (iphp == NULL) {
+					(void) sfxge_pkthdr_parse(mp, &etherhp,
+					    &iphp, &thp, &off, &size,
+					    &sport, &dport);
+				}
+
+				if (iphp != NULL) {
+					/*
+					 * Calculate IPv4 4-tuple hash, with
+					 * TCP/UDP/SCTP src/dest ports. Ports
+					 * are zero for other IPv4 protocols.
+					 */
+					SFXGE_IP_HASH(sp,
+					    &iphp->ip_dst.s_addr, dport,
+					    &iphp->ip_src.s_addr, sport, hash);
+
+					hash = hash % SFXGE_RX_SCALE_MAX;
+				}
+			}
+			index = srsp->srs_tbl[hash];
+
+			/*
+			 * The RSS table (indexed by hash) gives the RXQ index,
+			 * (mapped 1:1 with EVQs). Find the TXQ that results in
+			 * using the same EVQ as for the RX data path.
+			 */
+			ASSERT3U(sp->s_tx_scale_max[SFXGE_TXQ_NON_CKSUM],
+			    >, index);
+			txq = sp->s_tx_scale_base[SFXGE_TXQ_NON_CKSUM] + index;
+			stp = sp->s_stp[txq];
+			ASSERT3U(stp->st_evq, ==, index);
+		} else {
+			ASSERT3U(sp->s_tx_scale_max[SFXGE_TXQ_NON_CKSUM], >, 0);
+			index = 0;
+			txq = sp->s_tx_scale_base[SFXGE_TXQ_NON_CKSUM] + index;
+			stp = sp->s_stp[txq];
+		}
+
+
 	}
 	ASSERT(stp != NULL);
 
@@ -2855,118 +3011,12 @@ fail1:
 	return (rc);
 }
 
-int
-sfxge_tx_loopback(sfxge_t *sp, unsigned int count)
-{
-	uint8_t unicst[ETHERADDRL];
-	size_t mtu;
-	mblk_t *mp;
-	struct ether_header *etherhp;
-	unsigned int byte;
-	int rc;
-
-	if (count == 0) {
-		rc = EINVAL;
-		goto fail1;
-	}
-
-	rc = sfxge_mac_unicst_get(sp, SFXGE_UNICST_LAA, unicst);
-
-	if (rc == ENOENT)
-		rc = sfxge_mac_unicst_get(sp, SFXGE_UNICST_BIA, unicst);
-
-	if (rc != 0)
-		goto fail2;
-
-	mtu = sp->s_mtu;
-
-	if ((mp = allocb(sizeof (struct ether_header) + mtu,
-	    BPRI_HI)) == NULL) {
-		rc = ENOMEM;
-		goto fail3;
-	}
-
-	mp->b_wptr = mp->b_rptr + sizeof (struct ether_header);
-	bzero(mp->b_rptr, MBLKL(mp));
-
-	/*LINTED*/
-	etherhp = (struct ether_header *)(mp->b_rptr);
-	bcopy(sfxge_brdcst, &(etherhp->ether_dhost), ETHERADDRL);
-	bcopy(unicst, &(etherhp->ether_shost), ETHERADDRL);
-	etherhp->ether_type = htons(SFXGE_ETHERTYPE_LOOPBACK);
-
-	for (byte = 0; byte < 30; byte++)
-		*(mp->b_wptr++) = (byte & 1) ? 0xaa : 0x55;
-
-	do {
-		mblk_t *nmp;
-
-		if ((nmp = dupb(mp)) == NULL) {
-			rc = ENOMEM;
-			goto fail4;
-		}
-
-		rc = sfxge_tx_packet_add(sp, nmp);
-		if (rc != 0) {
-			freeb(nmp);
-			goto fail5;
-		}
-
-	} while (--count != 0);
-
-	freeb(mp);
-	return (0);
-
-fail5:
-	DTRACE_PROBE(fail5);
-fail4:
-	DTRACE_PROBE(fail4);
-
-	freeb(mp);
-
-fail3:
-	DTRACE_PROBE(fail3);
-fail2:
-	DTRACE_PROBE(fail2);
-fail1:
-	DTRACE_PROBE1(fail1, int, rc);
-
-	return (rc);
-}
-
-int
-sfxge_tx_ioctl(sfxge_t *sp, sfxge_tx_ioc_t *stip)
-{
-	int rc;
-
-	switch (stip->sti_op) {
-	case SFXGE_TX_OP_LOOPBACK: {
-		unsigned int count = stip->sti_data;
-
-		if ((rc = sfxge_tx_loopback(sp, count)) != 0)
-			goto fail1;
-
-		break;
-	}
-	default:
-		rc = ENOTSUP;
-		goto fail1;
-	}
-
-	return (0);
-
-fail1:
-	DTRACE_PROBE1(fail1, int, rc);
-
-	return (rc);
-}
-
 void
 sfxge_tx_stop(sfxge_t *sp)
 {
 	efx_nic_t *enp = sp->s_enp;
 	clock_t timeout;
-	boolean_t do_flush;
+	boolean_t wait_for_flush;
 	int index;
 
 	ASSERT(mutex_owned(&(sp->s_state_lock)));
@@ -2975,18 +3025,23 @@ sfxge_tx_stop(sfxge_t *sp)
 
 	/* Flush all the queues */
 	if (sp->s_hw_err == SFXGE_HW_OK) {
-		sp->s_tx_flush_pending = sp->s_tx_qcount;
-		do_flush = B_TRUE;
+		wait_for_flush = B_TRUE;
 	} else {
-		sp->s_tx_flush_pending = 0;
-		do_flush = B_FALSE;
+		/*
+		 * Flag indicates possible hardware failure.
+		 * Attempt flush but do not wait for it to complete.
+		 */
+		wait_for_flush = B_FALSE;
 	}
 
 	/* Prepare queues to stop and flush the hardware ring */
-	for (index = 0; index < sp->s_tx_qcount; index++)
-		sfxge_tx_qflush(sp, index, do_flush);
+	index = EFX_ARRAY_SIZE(sp->s_stp);
+	while (--index >= 0) {
+		if (sp->s_stp[index] != NULL)
+			sfxge_tx_qflush(sp, index, wait_for_flush);
+	}
 
-	if (do_flush == B_FALSE)
+	if (wait_for_flush == B_FALSE)
 		goto flush_done;
 
 	/* Wait upto 2sec for queue flushing to complete */
@@ -2994,25 +3049,27 @@ sfxge_tx_stop(sfxge_t *sp)
 
 	while (sp->s_tx_flush_pending > 0) {
 		if (cv_timedwait(&(sp->s_tx_flush_kv), &(sp->s_tx_flush_lock),
-			timeout) < 0) {
+		    timeout) < 0) {
 			/* Timeout waiting for queues to flush */
 			dev_info_t *dip = sp->s_dip;
 
 			DTRACE_PROBE(timeout);
-			cmn_err(CE_NOTE,
-			    SFXGE_CMN_ERR "[%s%d] tx qflush timeout",
-			    ddi_driver_name(dip), ddi_get_instance(dip));
+			dev_err(dip, CE_NOTE,
+			    SFXGE_CMN_ERR "tx qflush timeout");
 			break;
 		}
 	}
-	sp->s_tx_flush_pending = 0;
 
 flush_done:
+	sp->s_tx_flush_pending = 0;
 	mutex_exit(&(sp->s_tx_flush_lock));
 
 	/* Stop all the queues */
-	for (index = 0; index < sp->s_tx_qcount; index++)
-		sfxge_tx_qstop(sp, index);
+	index = EFX_ARRAY_SIZE(sp->s_stp);
+	while (--index >= 0) {
+		if (sp->s_stp[index] != NULL)
+			sfxge_tx_qstop(sp, index);
+	}
 
 	/* Tear down the transmit module */
 	efx_tx_fini(enp);
@@ -3023,9 +3080,11 @@ sfxge_tx_fini(sfxge_t *sp)
 {
 	int index;
 
-	index = sp->s_tx_qcount;
-	while (--index >= 0)
-		sfxge_tx_qfini(sp, index);
+	index = EFX_ARRAY_SIZE(sp->s_stp);
+	while (--index >= 0) {
+		if (sp->s_stp[index] != NULL)
+			sfxge_tx_qfini(sp, index);
+	}
 
 	kmem_cache_destroy(sp->s_tqc);
 	sp->s_tqc = NULL;

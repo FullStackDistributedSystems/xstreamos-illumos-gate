@@ -1,27 +1,31 @@
 /*
- * CDDL HEADER START
+ * Copyright (c) 2008-2016 Solarflare Communications Inc.
+ * All rights reserved.
  *
- * The contents of this file are subject to the terms of the
- * Common Development and Distribution License (the "License").
- * You may not use this file except in compliance with the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
  *
- * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
- * See the License for the specific language governing permissions
- * and limitations under the License.
+ * 1. Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
  *
- * When distributing Covered Code, include this CDDL HEADER in each
- * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
- * If applicable, add the following below this CDDL HEADER, with the
- * fields enclosed by brackets "[]" replaced with your own identifying
- * information: Portions Copyright [yyyy] [name of copyright owner]
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
+ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * CDDL HEADER END
- */
-
-/*
- * Copyright 2008-2013 Solarflare Communications Inc.  All rights reserved.
- * Use is subject to license terms.
+ * The views and conclusions contained in the software and documentation are
+ * those of the authors and should not be interpreted as representing official
+ * policies, either expressed or implied, of the FreeBSD Project.
  */
 
 #include <sys/types.h>
@@ -30,12 +34,18 @@
 #include <sys/pci.h>
 #include <sys/pcie.h>
 
-/* PCIe 2.0 link speeds */
-#ifndef PCIE_LINKCAP_MAX_SPEED_5_0
-#define	PCIE_LINKCAP_MAX_SPEED_5_0	0x2
+/* PCIe 3.0 link speeds */
+#ifndef PCIE_LINKCAP_MAX_SPEED_5
+#define	PCIE_LINKCAP_MAX_SPEED_5	0x2
 #endif
-#ifndef PCIE_LINKSTS_SPEED_5_0
-#define	PCIE_LINKSTS_SPEED_5_0		0x2
+#ifndef PCIE_LINKSTS_SPEED_5
+#define	PCIE_LINKSTS_SPEED_5		0x2
+#endif
+#ifndef PCIE_LINKCAP_MAX_SPEED_8
+#define	PCIE_LINKCAP_MAX_SPEED_8	0x3
+#endif
+#ifndef PCIE_LINKSTS_SPEED_8
+#define	PCIE_LINKSTS_SPEED_8		0x3
 #endif
 
 #include "sfxge.h"
@@ -87,6 +97,31 @@ sfxge_pci_init(sfxge_t *sp)
 	uint16_t max_payload_size;
 	uint16_t max_read_request;
 	int rc;
+#if EFSYS_OPT_MCDI_LOGGING
+	int *pci_regs;
+	uint_t pci_nregs = 0;
+
+	/*
+	 * We need the PCI bus address to format MCDI logging output in the
+	 * same way as on other platforms.
+	 * It appears there's no straightforward way to extract the address
+	 * from a "dev_info_t" structure, though.
+	 * The "reg" property is supported by all PCIe devices, and contains
+	 * an arbitrary length array of elements describing logical
+	 * resources. Each element contains a 5-tuple of 32bit values,
+	 * where the first 32bit value contains the bus/dev/fn slot
+	 * information.
+	 * See pci(4) and the definition of "struct pci_phys_spec" in sys/pci.h
+	 */
+	if (ddi_prop_lookup_int_array(DDI_DEV_T_ANY, sp->s_dip,
+	    DDI_PROP_DONTPASS, "reg", (int **)&pci_regs, &pci_nregs) !=
+	    DDI_PROP_SUCCESS) {
+		rc = ENODEV;
+		goto fail1;
+	}
+	sp->s_bus_addr = pci_regs[0];
+	ddi_prop_free(pci_regs);
+#endif
 
 	if (pci_config_setup(sp->s_dip, &(sp->s_pci_handle)) != DDI_SUCCESS) {
 		rc = ENODEV;
@@ -133,8 +168,12 @@ sfxge_pci_init(sfxge_t *sp)
 		sp->s_pcie_linkspeed = 1;
 		break;
 
-	case PCIE_LINKSTS_SPEED_5_0:
+	case PCIE_LINKSTS_SPEED_5:
 		sp->s_pcie_linkspeed = 2;
+		break;
+
+	case PCIE_LINKSTS_SPEED_8:
+		sp->s_pcie_linkspeed = 3;
 		break;
 
 	default:
@@ -150,12 +189,13 @@ sfxge_pci_init(sfxge_t *sp)
 	max_read_request = (devctl & PCIE_DEVCTL_MAX_READ_REQ_MASK)
 	    >> PCIE_DEVCTL_MAX_READ_REQ_SHIFT;
 
-	cmn_err(CE_NOTE,
+	dev_err(sp->s_dip, CE_NOTE,
 	    SFXGE_CMN_ERR "PCIe MRR: %d TLP: %d Link: %s Lanes: x%d",
 	    128 << max_read_request,
 	    128 << max_payload_size,
 	    (sp->s_pcie_linkspeed == 1) ? "2.5G" :
 	    (sp->s_pcie_linkspeed == 2) ? "5.0G" :
+	    (sp->s_pcie_linkspeed == 3) ? "8.0G" :
 	    "UNKNOWN",
 	    sp->s_pcie_nlanes);
 
@@ -177,48 +217,18 @@ fail1:
 
 void
 sfxge_pcie_check_link(sfxge_t *sp, unsigned int full_nlanes,
-	unsigned int full_speed)
+    unsigned int full_speed)
 {
 	if ((sp->s_pcie_linkspeed < full_speed) ||
 	    (sp->s_pcie_nlanes    < full_nlanes))
-		cmn_err(CE_NOTE,
-		    SFXGE_CMN_ERR "The %s%d device requires %d PCIe lanes "
+		dev_err(sp->s_dip, CE_NOTE,
+		    SFXGE_CMN_ERR "This device requires %d PCIe lanes "
 		    "at %s link speed to reach full bandwidth.",
-		    ddi_driver_name(sp->s_dip),
-		    ddi_get_instance(sp->s_dip),
 		    full_nlanes,
 		    (full_speed == 1) ? "2.5G" :
 		    (full_speed == 2) ? "5.0G" :
+		    (full_speed == 3) ? "8.0G" :
 		    "UNKNOWN");
-}
-
-int
-sfxge_pci_ioctl(sfxge_t *sp, sfxge_pci_ioc_t *spip)
-{
-	int rc;
-
-	switch (spip->spi_op) {
-	case SFXGE_PCI_OP_READ:
-		spip->spi_data = pci_config_get8(sp->s_pci_handle,
-		    spip->spi_addr);
-		break;
-
-	case SFXGE_PCI_OP_WRITE:
-		pci_config_put8(sp->s_pci_handle,
-		    spip->spi_addr, spip->spi_data);
-		break;
-
-	default:
-		rc = ENOTSUP;
-		goto fail1;
-	}
-
-	return (0);
-
-fail1:
-	DTRACE_PROBE1(fail1, int, rc);
-
-	return (0);
 }
 
 void

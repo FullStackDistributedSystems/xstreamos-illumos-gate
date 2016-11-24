@@ -1,27 +1,31 @@
 /*
- * CDDL HEADER START
+ * Copyright (c) 2008-2016 Solarflare Communications Inc.
+ * All rights reserved.
  *
- * The contents of this file are subject to the terms of the
- * Common Development and Distribution License (the "License").
- * You may not use this file except in compliance with the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
  *
- * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
- * See the License for the specific language governing permissions
- * and limitations under the License.
+ * 1. Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
  *
- * When distributing Covered Code, include this CDDL HEADER in each
- * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
- * If applicable, add the following below this CDDL HEADER, with the
- * fields enclosed by brackets "[]" replaced with your own identifying
- * information: Portions Copyright [yyyy] [name of copyright owner]
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
+ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * CDDL HEADER END
- */
-
-/*
- * Copyright 2008-2013 Solarflare Communications Inc.  All rights reserved.
- * Use is subject to license terms.
+ * The views and conclusions contained in the software and documentation are
+ * those of the authors and should not be interpreted as representing official
+ * policies, either expressed or implied, of the FreeBSD Project.
  */
 
 #include <sys/types.h>
@@ -37,6 +41,10 @@
 #include "sfxge.h"
 
 #include "efx.h"
+
+
+/* Timeout to wait for DRIVER_EV_START event at EVQ startup */
+#define	SFXGE_EV_QSTART_TIMEOUT_USEC	(2000000)
 
 
 /* Event queue DMA attributes */
@@ -74,6 +82,8 @@ _sfxge_ev_qctor(sfxge_t *sp, sfxge_evq_t *sep, int kmflags, uint16_t evq_size)
 	    sizeof (sep->__se_u1.__se_pad));
 	EFX_STATIC_ASSERT(sizeof (sep->__se_u2.__se_s2) <=
 	    sizeof (sep->__se_u2.__se_pad));
+	EFX_STATIC_ASSERT(sizeof (sep->__se_u3.__se_s3) <=
+	    sizeof (sep->__se_u3.__se_pad));
 
 	bzero(sep, sizeof (sfxge_evq_t));
 
@@ -176,11 +186,17 @@ sfxge_ev_initialized(void *arg)
 	sfxge_evq_t *sep = arg;
 
 	ASSERT(mutex_owned(&(sep->se_lock)));
+
+	/* Init done events may be duplicated on 7xxx (see SFCbug31631) */
+	if (sep->se_state == SFXGE_EVQ_STARTED)
+		goto done;
+
 	ASSERT3U(sep->se_state, ==, SFXGE_EVQ_STARTING);
 	sep->se_state = SFXGE_EVQ_STARTED;
 
 	cv_broadcast(&(sep->se_init_kv));
 
+done:
 	return (B_FALSE);
 }
 
@@ -225,8 +241,9 @@ sfxge_ev_rx(void *arg, uint32_t label, uint32_t id, uint32_t size,
 	sfxge_t *sp = sep->se_sp;
 	sfxge_rxq_t *srp;
 	sfxge_rx_packet_t *srpp;
-	unsigned int expected;
 	unsigned int prefetch;
+	unsigned int stop;
+	unsigned int delta;
 
 	ASSERT(mutex_owned(&(sep->se_lock)));
 
@@ -242,21 +259,34 @@ sfxge_ev_rx(void *arg, uint32_t label, uint32_t id, uint32_t size,
 
 	/*
 	 * Note that in sfxge_stop() EVQ stopped after RXQ, and will be reset
-	 * So the return missing srp->sr_pending++ is safe
+	 * So the return missing srp->sr_pending increase is safe
 	 */
 	if (srp->sr_state != SFXGE_RXQ_STARTED)
 		goto done;
 
-	expected = srp->sr_pending++ & (sp->s_rxq_size - 1);
-	if (id != expected) {
-		sep->se_exception = B_TRUE;
+	stop = (id + 1) & (sp->s_rxq_size - 1);
+	id = srp->sr_pending & (sp->s_rxq_size - 1);
 
-		DTRACE_PROBE(restart_ev_rx_id);
-		/* sfxge_evq_t->se_lock held */
-		(void) sfxge_restart_dispatch(sp, DDI_SLEEP, SFXGE_HW_ERR,
-		    "Out of order RX event", id - expected);
+	delta = (stop >= id) ? (stop - id) : (sp->s_rxq_size - id + stop);
+	srp->sr_pending += delta;
 
-		goto done;
+	if (delta != 1) {
+		if ((!efx_nic_cfg_get(sp->s_enp)->enc_rx_batching_enabled) ||
+		    (delta == 0) ||
+		    (delta > efx_nic_cfg_get(sp->s_enp)->enc_rx_batch_max)) {
+			/*
+			 * FIXME: This does not take into account scatter
+			 * aborts.  See Bug40811
+			 */
+			sep->se_exception = B_TRUE;
+
+			DTRACE_PROBE(restart_ev_rx_id);
+			/* sfxge_evq_t->se_lock held */
+			(void) sfxge_restart_dispatch(sp, DDI_SLEEP,
+			    SFXGE_HW_ERR, "Out of order RX event", delta);
+
+			goto done;
+		}
 	}
 
 	prefetch = (id + 4) & (sp->s_rxq_size - 1);
@@ -265,14 +295,18 @@ sfxge_ev_rx(void *arg, uint32_t label, uint32_t id, uint32_t size,
 
 	srpp = srp->sr_srpp[id];
 	ASSERT(srpp != NULL);
-
-	ASSERT3U(srpp->srp_flags, ==, EFX_DISCARD);
-	srpp->srp_flags = flags;
-
-	ASSERT3U(size, <, (1 << 16));
-	srpp->srp_size = (uint16_t)size;
-
 	prefetch_read_many(srpp->srp_mp);
+
+	for (; id != stop; id = (id + 1) & (sp->s_rxq_size - 1)) {
+		srpp = srp->sr_srpp[id];
+		ASSERT(srpp != NULL);
+
+		ASSERT3U(srpp->srp_flags, ==, EFX_DISCARD);
+		srpp->srp_flags = flags;
+
+		ASSERT3U(size, <, (1 << 16));
+		srpp->srp_size = (uint16_t)size;
+	}
 
 	sep->se_rx++;
 
@@ -312,28 +346,36 @@ sfxge_ev_exception(void *arg, uint32_t code, uint32_t data)
 }
 
 static boolean_t
-sfxge_ev_rxq_flush_done(void *arg, uint32_t label)
+sfxge_ev_rxq_flush_done(void *arg, uint32_t rxq_index)
 {
 	sfxge_evq_t *sep_targetq, *sep = arg;
 	sfxge_t *sp = sep->se_sp;
 	sfxge_rxq_t *srp;
 	unsigned int index;
+	unsigned int label;
 	uint16_t magic;
 
 	ASSERT(mutex_owned(&(sep->se_lock)));
 
 	/* Ensure RXQ exists, as events may arrive after RXQ was destroyed */
-	srp = sp->s_srp[label];
+	srp = sp->s_srp[rxq_index];
 	if (srp == NULL)
 		goto done;
 
-	/* Resend a software event on the correct queue */
+	/* Process right now if it is the correct event queue */
 	index = srp->sr_index;
+	if (index == sep->se_index) {
+		sfxge_rx_qflush_done(srp);
+		goto done;
+	}
+
+	/* Resend a software event on the correct queue */
 	sep_targetq = sp->s_sep[index];
 
 	if (sep_targetq->se_state != SFXGE_EVQ_STARTED)
 		goto done; /* TBD: state test not under the lock */
 
+	label = rxq_index;
 	ASSERT((label & SFXGE_MAGIC_DMAQ_LABEL_MASK) == label);
 	magic = SFXGE_MAGIC_RX_QFLUSH_DONE | label;
 
@@ -344,25 +386,33 @@ done:
 }
 
 static boolean_t
-sfxge_ev_rxq_flush_failed(void *arg, uint32_t label)
+sfxge_ev_rxq_flush_failed(void *arg, uint32_t rxq_index)
 {
 	sfxge_evq_t *sep_targetq, *sep = arg;
 	sfxge_t *sp = sep->se_sp;
 	sfxge_rxq_t *srp;
 	unsigned int index;
+	unsigned int label;
 	uint16_t magic;
 
 	ASSERT(mutex_owned(&(sep->se_lock)));
 
 	/* Ensure RXQ exists, as events may arrive after RXQ was destroyed */
-	srp = sp->s_srp[label];
+	srp = sp->s_srp[rxq_index];
 	if (srp == NULL)
 		goto done;
 
-	/* Resend a software event on the correct queue */
+	/* Process right now if it is the correct event queue */
 	index = srp->sr_index;
+	if (index == sep->se_index) {
+		sfxge_rx_qflush_failed(srp);
+		goto done;
+	}
+
+	/* Resend a software event on the correct queue */
 	sep_targetq = sp->s_sep[index];
 
+	label = rxq_index;
 	ASSERT((label & SFXGE_MAGIC_DMAQ_LABEL_MASK) == label);
 	magic = SFXGE_MAGIC_RX_QFLUSH_FAILED | label;
 
@@ -379,14 +429,13 @@ static boolean_t
 sfxge_ev_tx(void *arg, uint32_t label, uint32_t id)
 {
 	sfxge_evq_t *sep = arg;
-	sfxge_t *sp = sep->se_sp;
 	sfxge_txq_t *stp;
 	unsigned int stop;
 	unsigned int delta;
 
 	ASSERT(mutex_owned(&(sep->se_lock)));
 
-	stp = sp->s_stp[label];
+	stp = sep->se_label_stp[label];
 	if (stp == NULL)
 		goto done;
 
@@ -395,10 +444,10 @@ sfxge_ev_tx(void *arg, uint32_t label, uint32_t id)
 
 	ASSERT3U(sep->se_index, ==, stp->st_evq);
 
-	stop = (id + 1) & (SFXGE_NDESCS - 1);
-	id = stp->st_pending & (SFXGE_NDESCS - 1);
+	stop = (id + 1) & (SFXGE_TX_NDESCS - 1);
+	id = stp->st_pending & (SFXGE_TX_NDESCS - 1);
 
-	delta = (stop >= id) ? (stop - id) : (SFXGE_NDESCS - id + stop);
+	delta = (stop >= id) ? (stop - id) : (SFXGE_TX_NDESCS - id + stop);
 	stp->st_pending += delta;
 
 	sep->se_tx++;
@@ -421,26 +470,33 @@ done:
 }
 
 static boolean_t
-sfxge_ev_txq_flush_done(void *arg, uint32_t label)
+sfxge_ev_txq_flush_done(void *arg, uint32_t txq_index)
 {
 	sfxge_evq_t *sep = arg;
 	sfxge_t *sp = sep->se_sp;
 	sfxge_txq_t *stp;
 	unsigned int evq;
+	unsigned int label;
 	uint16_t magic;
 
 	ASSERT(mutex_owned(&(sep->se_lock)));
 
 	/* Ensure TXQ exists, as events may arrive after TXQ was destroyed */
-	stp = sp->s_stp[label];
+	stp = sp->s_stp[txq_index];
 	if (stp == NULL)
 		goto done;
 
-	ASSERT3U(stp->st_state, ==, SFXGE_TXQ_INITIALIZED);
+	/* Process right now if it is the correct event queue */
+	evq = stp->st_evq;
+	if (evq == sep->se_index) {
+		sfxge_tx_qflush_done(stp);
+		goto done;
+	}
 
 	/* Resend a software event on the correct queue */
-	evq = stp->st_evq;
 	sep = sp->s_sep[evq];
+
+	label = stp->st_label;
 
 	ASSERT((label & SFXGE_MAGIC_DMAQ_LABEL_MASK) == label);
 	magic = SFXGE_MAGIC_TX_QFLUSH_DONE | label;
@@ -502,7 +558,7 @@ sfxge_ev_software(void *arg, uint16_t magic)
 		break;
 	}
 	case SFXGE_MAGIC_TX_QFLUSH_DONE: {
-		sfxge_txq_t *stp = sp->s_stp[label];
+		sfxge_txq_t *stp = sep->se_label_stp[label];
 
 		if (stp != NULL) {
 			ASSERT3U(sep->se_index, ==, stp->st_evq);
@@ -512,9 +568,8 @@ sfxge_ev_software(void *arg, uint16_t magic)
 		break;
 	}
 	default:
-		cmn_err(CE_NOTE,
-			SFXGE_CMN_ERR "[%s%d] unknown software event 0x%x",
-			ddi_driver_name(dip), ddi_get_instance(dip), magic);
+		dev_err(dip, CE_NOTE,
+		    SFXGE_CMN_ERR "unknown software event 0x%x", magic);
 		break;
 	}
 
@@ -559,14 +614,6 @@ static boolean_t
 sfxge_ev_wake_up(void *arg, uint32_t index)
 {
 	_NOTE(ARGUNUSED(arg, index))
-
-	return (B_FALSE);
-}
-
-static boolean_t
-sfxge_ev_monitor(void *arg, efx_mon_stat_t id, efx_mon_stat_value_t value)
-{
-	_NOTE(ARGUNUSED(arg, id, value))
 
 	return (B_FALSE);
 }
@@ -689,6 +736,10 @@ sfxge_ev_qinit(sfxge_t *sp, unsigned int index, unsigned int ev_batch)
 	ASSERT3U(index, <, SFXGE_RX_SCALE_MAX);
 
 	sep = kmem_cache_alloc(index ? sp->s_eqXc : sp->s_eq0c, KM_SLEEP);
+	if (sep == NULL) {
+		rc = ENOMEM;
+		goto fail1;
+	}
 	ASSERT3U(sep->se_state, ==, SFXGE_EVQ_UNINITIALIZED);
 
 	sep->se_index = index;
@@ -700,16 +751,16 @@ sfxge_ev_qinit(sfxge_t *sp, unsigned int index, unsigned int ev_batch)
 
 	/* Initialize the statistics */
 	if ((rc = sfxge_ev_kstat_init(sep)) != 0)
-		goto fail1;
+		goto fail2;
 
 	sep->se_state = SFXGE_EVQ_INITIALIZED;
-	sep->se_ev_batch = ev_batch;
+	sep->se_ev_batch = (uint16_t)ev_batch;
 	sp->s_sep[index] = sep;
 
 	return (0);
 
-fail1:
-	DTRACE_PROBE1(fail1, int, rc);
+fail2:
+	DTRACE_PROBE(fail2);
 
 	sep->se_index = 0;
 
@@ -717,6 +768,9 @@ fail1:
 	mutex_destroy(&(sep->se_lock));
 
 	kmem_cache_free(index ? sp->s_eqXc : sp->s_eq0c, sep);
+
+fail1:
+	DTRACE_PROBE1(fail1, int, rc);
 
 	return (rc);
 }
@@ -760,7 +814,6 @@ sfxge_ev_qstart(sfxge_t *sp, unsigned int index)
 	eecp->eec_wake_up = sfxge_ev_wake_up;
 	eecp->eec_timer = sfxge_ev_timer;
 	eecp->eec_link_change = sfxge_ev_link_change;
-	eecp->eec_monitor = sfxge_ev_monitor;
 
 	/* Create the event queue */
 	if ((rc = efx_ev_qcreate(enp, index, esmp, evq_size, sep->se_id,
@@ -784,17 +837,17 @@ sfxge_ev_qstart(sfxge_t *sp, unsigned int index)
 		goto fail5;
 
 	/* Wait for the initialization event */
-	timeout = ddi_get_lbolt() + drv_usectohz(2000000);
+	timeout = ddi_get_lbolt() + drv_usectohz(SFXGE_EV_QSTART_TIMEOUT_USEC);
 	while (sep->se_state != SFXGE_EVQ_STARTED) {
 		if (cv_timedwait(&(sep->se_init_kv), &(sep->se_lock),
-			timeout) < 0) {
+		    timeout) < 0) {
 			/* Timeout waiting for initialization */
 			dev_info_t *dip = sp->s_dip;
 
 			DTRACE_PROBE(timeout);
-			cmn_err(CE_NOTE,
-			    SFXGE_CMN_ERR "[%s%d] ev qstart timeout",
-			    ddi_driver_name(dip), ddi_get_instance(dip));
+			dev_err(dip, CE_NOTE,
+			    SFXGE_CMN_ERR "evq[%d] qstart timeout", index);
+
 			rc = ETIMEDOUT;
 			goto fail6;
 		}
@@ -858,17 +911,7 @@ sfxge_ev_qpoll(sfxge_t *sp, unsigned int index)
 	cpu_id = CPU->cpu_id;
 
 	if (cpu_id != sep->se_cpu_id) {
-#ifdef	_USE_CPU_PHYSID
-		cpu_physid_t *cpp = CPU->cpu_physid;
-#endif
-
 		sep->se_cpu_id = cpu_id;
-
-#ifdef	_USE_CPU_PHYSID
-		sep->se_core_id = cpp->cpu_coreid;
-		sep->se_cache_id = cpp->cpu_cacheid;
-		sep->se_chip_id = cpp->cpu_chipid;
-#endif
 
 		/* sfxge_evq_t->se_lock held */
 		(void) ddi_taskq_dispatch(sp->s_tqp, sfxge_rx_scale_update, sp,
@@ -969,12 +1012,6 @@ sfxge_ev_qstop(sfxge_t *sp, unsigned int index)
 	evq_size = index ? sp->s_evqX_size : sp->s_evq0_size;
 
 	/* Clear the CPU information */
-#ifdef	_USE_CPU_PHYSID
-	sep->se_cache_id = 0;
-	sep->se_core_id = 0;
-	sep->se_chip_id = 0;
-#endif
-
 	sep->se_cpu_id = 0;
 
 	/* Clear the event count */
@@ -1015,6 +1052,92 @@ sfxge_ev_qfini(sfxge_t *sp, unsigned int index)
 	sep->se_index = 0;
 
 	kmem_cache_free(index ? sp->s_eqXc : sp->s_eq0c, sep);
+}
+
+int
+sfxge_ev_txlabel_alloc(sfxge_t *sp, unsigned int evq, sfxge_txq_t *stp,
+    unsigned int *labelp)
+{
+	sfxge_evq_t *sep = sp->s_sep[evq];
+	sfxge_txq_t **stpp;
+	unsigned int label;
+	int rc;
+
+	mutex_enter(&(sep->se_lock));
+
+	if (stp == NULL || labelp == NULL) {
+		rc = EINVAL;
+		goto fail1;
+	}
+
+	stpp = NULL;
+	for (label = 0; label < SFXGE_TX_NLABELS; label++) {
+		if (sep->se_label_stp[label] == stp) {
+			rc = EEXIST;
+			goto fail2;
+		}
+		if ((stpp == NULL) && (sep->se_label_stp[label] == NULL)) {
+			stpp = &sep->se_label_stp[label];
+		}
+	}
+	if (stpp == NULL) {
+		rc = ENOSPC;
+		goto fail3;
+	}
+	*stpp = stp;
+	label = stpp - sep->se_label_stp;
+
+	ASSERT3U(label, <, SFXGE_TX_NLABELS);
+	*labelp = label;
+
+	mutex_exit(&(sep->se_lock));
+	return (0);
+
+fail3:
+	DTRACE_PROBE(fail3);
+fail2:
+	DTRACE_PROBE(fail2);
+fail1:
+	DTRACE_PROBE1(fail1, int, rc);
+
+	mutex_exit(&(sep->se_lock));
+
+	return (rc);
+}
+
+
+int
+sfxge_ev_txlabel_free(sfxge_t *sp, unsigned int evq, sfxge_txq_t *stp,
+    unsigned int label)
+{
+	sfxge_evq_t *sep = sp->s_sep[evq];
+	int rc;
+
+	mutex_enter(&(sep->se_lock));
+
+	if (stp == NULL || label > SFXGE_TX_NLABELS) {
+		rc = EINVAL;
+		goto fail1;
+	}
+
+	if (sep->se_label_stp[label] != stp) {
+		rc = EINVAL;
+		goto fail2;
+	}
+	sep->se_label_stp[label] = NULL;
+
+	mutex_exit(&(sep->se_lock));
+
+	return (0);
+
+fail2:
+	DTRACE_PROBE(fail2);
+fail1:
+	DTRACE_PROBE1(fail1, int, rc);
+
+	mutex_exit(&(sep->se_lock));
+
+	return (rc);
 }
 
 

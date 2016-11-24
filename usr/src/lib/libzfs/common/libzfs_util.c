@@ -22,7 +22,8 @@
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2013, Joyent, Inc. All rights reserved.
- * Copyright (c) 2011, 2014 by Delphix. All rights reserved.
+ * Copyright (c) 2011, 2015 by Delphix. All rights reserved.
+ * Copyright 2016 Igor Kozhukhov <ikozhukhov@gmail.com>
  */
 
 /*
@@ -688,7 +689,7 @@ zfs_get_pool_handle(const zfs_handle_t *zhp)
  * Given a name, determine whether or not it's a valid path
  * (starts with '/' or "./").  If so, walk the mnttab trying
  * to match the device number.  If not, treat the path as an
- * fs/vol/snap name.
+ * fs/vol/snap/bkmark name.
  */
 zfs_handle_t *
 zfs_path_to_zhandle(libzfs_handle_t *hdl, char *path, zfs_type_t argtype)
@@ -967,7 +968,7 @@ zprop_print_one_property(const char *name, zprop_get_cbdata_t *cbp,
     const char *source, const char *recvd_value)
 {
 	int i;
-	const char *str;
+	const char *str = NULL;
 	char buf[128];
 
 	/*
@@ -1019,6 +1020,10 @@ zprop_print_one_property(const char *name, zprop_get_cbdata_t *cbp,
 			case ZPROP_SRC_RECEIVED:
 				str = "received";
 				break;
+
+			default:
+				str = NULL;
+				assert(!"unhandled zprop_source_t");
 			}
 			break;
 
@@ -1518,7 +1523,8 @@ zprop_iter(zprop_func func, void *cb, boolean_t show_all, boolean_t ordered,
  * and bs are undefined.
  */
 int
-zfs_get_hole_count(const char *path, uint64_t *count, uint64_t *bs) {
+zfs_get_hole_count(const char *path, uint64_t *count, uint64_t *bs)
+{
 	int fd, err;
 	struct stat64 ss;
 	uint64_t fill;

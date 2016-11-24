@@ -12,7 +12,9 @@
 #
 # Copyright 2011, Richard Lowe
 # Copyright 2015 Nexenta Systems, Inc.  All rights reserved.
-# Copyright 2014 Garrett D'Amore <garrett@damore.org>
+# Copyright 2016 Garrett D'Amore <garrett@damore.org>
+# Copyright 2016 Joyent, Inc.
+# Copyright 2016 Hans Rosenfeld <rosenfeld@grumpf.hope-2000.org>
 #
 
 include		$(SRC)/Makefile.master
@@ -209,12 +211,14 @@ i386_MANFILES=	ahci.7d		\
 		ecpp.7d		\
 		elxl.7d		\
 		heci.7d		\
+		i40e.7d		\
 		i915.7d		\
 		ipmi.7d		\
 		iprb.7d		\
 		ipw.7d		\
 		iwh.7d		\
 		iwi.7d		\
+		iwn.7d		\
 		mega_sas.7d	\
 		npe.7d		\
 		ntxn.7d		\
@@ -229,8 +233,9 @@ i386_MANFILES=	ahci.7d		\
 		rwn.7d		\
 		sda.7d		\
 		sdhost.7d	\
+		sfxge.7d	\
 		si3124.7d	\
- 	 	skd.7d		\
+		skd.7d		\
 		smbios.7d	\
 		uath.7d		\
 		ural.7d		\

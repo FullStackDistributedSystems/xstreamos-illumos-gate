@@ -1,30 +1,32 @@
 /*
- * CDDL HEADER START
+ * Copyright (c) 2008-2016 Solarflare Communications Inc.
+ * All rights reserved.
  *
- * The contents of this file are subject to the terms of the
- * Common Development and Distribution License (the "License").
- * You may not use this file except in compliance with the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
  *
- * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
- * See the License for the specific language governing permissions
- * and limitations under the License.
+ * 1. Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
  *
- * When distributing Covered Code, include this CDDL HEADER in each
- * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
- * If applicable, add the following below this CDDL HEADER, with the
- * fields enclosed by brackets "[]" replaced with your own identifying
- * information: Portions Copyright [yyyy] [name of copyright owner]
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
+ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * CDDL HEADER END
+ * The views and conclusions contained in the software and documentation are
+ * those of the authors and should not be interpreted as representing official
+ * policies, either expressed or implied, of the FreeBSD Project.
  */
-
-/*
- * Copyright 2008-2013 Solarflare Communications Inc.  All rights reserved.
- * Use is subject to license terms.
- */
-
-#ifdef _USE_GLD_V3
 
 #include <sys/types.h>
 #include <sys/ddi.h>
@@ -33,24 +35,14 @@
 #include <sys/strsun.h>
 #include <sys/strsubr.h>
 #include <sys/dlpi.h>
-#ifndef _USE_GLD_V3_SOL10
-#include <sys/dld.h>
-#endif
 #include <sys/ksynch.h>
 #include <sys/cpuvar.h>
 #include <sys/cpu.h>
+#include <sys/vlan.h>
 
 #include <inet/tcp.h>
 
 #include "sfxge.h"
-
-#ifndef MAC_VERSION_V1
-/* GLDv3 interface version for sol10 (u8/u9) */
-#define	MAC_VERSION_V1 MAC_VERSION
-#endif
-
-/* A vlan tag is 4 bytes */
-#define	SFXGE_VLAN_TAGSZ 4
 
 void
 sfxge_gld_link_update(sfxge_t *sp)
@@ -77,6 +69,8 @@ sfxge_gld_mtu_update(sfxge_t *sp)
 {
 #ifdef _USE_MTU_UPDATE
 	(void) mac_maxsdu_update(sp->s_mh, sp->s_mtu);
+#else
+	_NOTE(ARGUNUSED(sp));
 #endif
 }
 
@@ -163,11 +157,12 @@ sfxge_gld_getstat(void *arg, unsigned int id, uint64_t *valp)
 		break;
 	}
 
-#ifdef ETHER_STAT_CAP_10GFDX
+	case ETHER_STAT_CAP_40GFDX:
+		*valp = sfxge_phy_dfl_cap_test64(sp, EFX_PHY_CAP_40000FDX);
+		break;
 	case ETHER_STAT_CAP_10GFDX:
 		*valp = sfxge_phy_dfl_cap_test64(sp, EFX_PHY_CAP_10000FDX);
 		break;
-#endif
 	case ETHER_STAT_CAP_1000FDX:
 		*valp = sfxge_phy_dfl_cap_test64(sp, EFX_PHY_CAP_1000FDX);
 		break;
@@ -195,12 +190,12 @@ sfxge_gld_getstat(void *arg, unsigned int id, uint64_t *valp)
 	case ETHER_STAT_CAP_AUTONEG:
 		*valp = sfxge_phy_dfl_cap_test64(sp, EFX_PHY_CAP_AN);
 		break;
-
-#ifdef ETHER_STAT_ADV_CAP_10GFDX
+	case ETHER_STAT_ADV_CAP_40GFDX:
+		*valp = sfxge_phy_cur_cap_test64(sp, EFX_PHY_CAP_40000FDX);
+		break;
 	case ETHER_STAT_ADV_CAP_10GFDX:
 		*valp = sfxge_phy_cur_cap_test64(sp, EFX_PHY_CAP_10000FDX);
 		break;
-#endif
 	case ETHER_STAT_ADV_CAP_1000FDX:
 		*valp = sfxge_phy_cur_cap_test64(sp, EFX_PHY_CAP_1000FDX);
 		break;
@@ -228,12 +223,12 @@ sfxge_gld_getstat(void *arg, unsigned int id, uint64_t *valp)
 	case ETHER_STAT_ADV_CAP_AUTONEG:
 		*valp = sfxge_phy_cur_cap_test64(sp, EFX_PHY_CAP_AN);
 		break;
-
-#ifdef ETHER_STAT_LP_CAP_10GFDX
+	case ETHER_STAT_LP_CAP_40GFDX:
+		*valp = sfxge_phy_lp_cap_test64(sp, EFX_PHY_CAP_40000FDX);
+		break;
 	case ETHER_STAT_LP_CAP_10GFDX:
 		*valp = sfxge_phy_lp_cap_test64(sp, EFX_PHY_CAP_10000FDX);
 		break;
-#endif
 	case ETHER_STAT_LP_CAP_1000FDX:
 		*valp = sfxge_phy_lp_cap_test64(sp, EFX_PHY_CAP_1000FDX);
 		break;
@@ -380,10 +375,10 @@ sfxge_gld_multicst(void *arg, boolean_t add, const uint8_t *addr)
 	int rc;
 
 	if (add) {
-		if ((rc = sfxge_mac_multicst_add(sp, (uint8_t *)addr)) != 0)
+		if ((rc = sfxge_mac_multicst_add(sp, addr)) != 0)
 			goto fail1;
 	} else {
-		if ((rc = sfxge_mac_multicst_remove(sp, (uint8_t *)addr)) != 0)
+		if ((rc = sfxge_mac_multicst_remove(sp, addr)) != 0)
 			goto fail2;
 	}
 
@@ -417,23 +412,8 @@ static void
 sfxge_gld_ioctl(void *arg, queue_t *wq, mblk_t *mp)
 {
 	sfxge_t *sp = arg;
-	struct iocblk *iocp = (struct iocblk *)mp->b_rptr;
 
-	switch (iocp->ioc_cmd) {
-#ifdef _USE_NDD_PROPS
-	case ND_GET:
-	case ND_SET:
-		if (!nd_getset(wq, sp->s_ndh, mp))
-			miocnak(wq, mp, 0, EINVAL);
-		else
-			qreply(wq, mp);
-		break;
-#endif
-
-	default:
-		sfxge_ioctl(sp, wq, mp);
-		break;
-	}
+	sfxge_ioctl(sp, wq, mp);
 }
 
 
@@ -464,7 +444,11 @@ sfxge_gld_tx(void *arg, mblk_t *mp)
 	return (NULL);
 }
 
-static boolean_t	sfxge_lso = B_TRUE;
+/*
+ * This must not be static, in order to be tunable by /etc/system.
+ * (Static declarations may be optmized away by the compiler.)
+ */
+boolean_t	sfxge_lso = B_TRUE;
 
 static boolean_t
 sfxge_gld_getcapab(void *arg, mac_capab_t cap, void *cap_arg)
@@ -510,74 +494,56 @@ fail1:
 	return (B_FALSE);
 }
 
-#ifdef _USE_MAC_PRIV_PROP
-
 /*
  * GLDv3 driver-private property names must be preceded by an underscore - see
  * mc_getprop(9E).
  */
 #define	SFXGE_PRIV_PROP_NAME(s) ("_" #s)
 
-/* Return the index of the named phy property. Return -1 if not found. */
-static int
-sfxge_gld_priv_prop_phy_find(sfxge_t *sp, const char *name)
-{
-	efx_nic_t *enp = sp->s_enp;
-	sfxge_mac_priv_prop_t *mac_priv_props;
-	unsigned int id;
-	unsigned int nprops;
-
-	mac_priv_props = sp->s_mac_priv_props;
-	nprops = efx_nic_cfg_get(enp)->enc_phy_nprops;
-
-	for (id = 0; id < nprops; id++) {
-		if (strncmp(name, *mac_priv_props, MAXLINKPROPNAME) == 0)
-			return (id);
-		mac_priv_props++;
-	}
-	return (-1);
-}
-
 #define	SFXGE_XSTR(s) SFXGE_STR(s)
 #define	SFXGE_STR(s) #s
 
 static void
 sfxge_gld_priv_prop_info(sfxge_t *sp, const char *name,
-mac_prop_info_handle_t handle)
+    mac_prop_info_handle_t handle)
 {
-	/*
-	 * Using mac_prop_info_set_default_str rather than the the corresponding
-	 * mac_prop_info_set_default_uint32 etc as it gives readable output in
-	 * "dladm show-linkprop" commands for private properties. Note this does
-	 * not break "dladm reset-linkprop" as might have been expected.
-	 */
-	/* Treat all the phy properties the same */
-	if (sfxge_gld_priv_prop_phy_find(sp, name) > 0) {
-		mac_prop_info_set_default_str(handle, "0");
-		mac_prop_info_set_perm(handle, MAC_PROP_PERM_RW);
-		return;
-	}
-
 	if (strcmp(name, SFXGE_PRIV_PROP_NAME(rx_coalesce_mode)) == 0) {
-		mac_prop_info_set_default_str(handle,
-		    SFXGE_XSTR(SFXGE_RX_COALESCE_OFF));
+		mac_prop_info_set_default_uint32(handle,
+		    SFXGE_RX_COALESCE_OFF);
 		mac_prop_info_set_perm(handle, MAC_PROP_PERM_RW);
 		return;
 	}
 
 	if (strcmp(name, SFXGE_PRIV_PROP_NAME(rx_scale_count)) == 0) {
-		mac_prop_info_set_default_str(handle,
-		    SFXGE_XSTR(SFXGE_RX_SCALE_MAX));
+		mac_prop_info_set_default_uint32(handle, ncpus);
+		mac_prop_info_set_range_uint32(handle, 1,
+		    (uint32_t)sp->s_intr.si_nalloc);
 		mac_prop_info_set_perm(handle, MAC_PROP_PERM_RW);
 		return;
 	}
 
 	if (strcmp(name, SFXGE_PRIV_PROP_NAME(intr_moderation)) == 0) {
-		mac_prop_info_set_default_str(handle,
-		    SFXGE_XSTR(SFXGE_DEFAULT_MODERATION));
+		mac_prop_info_set_default_uint32(handle,
+		    SFXGE_DEFAULT_MODERATION);
+		mac_prop_info_set_range_uint32(handle,
+		    0, efx_nic_cfg_get(sp->s_enp)->enc_evq_timer_max_us);
 		mac_prop_info_set_perm(handle, MAC_PROP_PERM_RW);
 		return;
 	}
+
+	if (strcmp(name, SFXGE_PRIV_PROP_NAME(mon_polling)) == 0) {
+		mac_prop_info_set_default_uint8(handle, 0);
+		mac_prop_info_set_perm(handle, MAC_PROP_PERM_RW);
+		return;
+	}
+
+#if EFSYS_OPT_MCDI_LOGGING
+	if (strcmp(name, SFXGE_PRIV_PROP_NAME(mcdi_logging)) == 0) {
+		mac_prop_info_set_default_uint8(handle, 0);
+		mac_prop_info_set_perm(handle, MAC_PROP_PERM_RW);
+		return;
+	}
+#endif
 	DTRACE_PROBE(unknown_priv_prop);
 }
 
@@ -586,15 +552,8 @@ static int
 sfxge_gld_priv_prop_get(sfxge_t *sp, const char *name,
     unsigned int size, void *valp)
 {
-	int id;
 	long val;
 	int rc;
-
-	if ((id = sfxge_gld_priv_prop_phy_find(sp, name)) > 0) {
-		if ((rc = sfxge_phy_prop_get(sp, id, 0, (uint32_t *)&val)) != 0)
-			goto fail1;
-		goto done;
-	}
 
 	if (strcmp(name, SFXGE_PRIV_PROP_NAME(rx_coalesce_mode)) == 0) {
 		sfxge_rx_coalesce_mode_t mode;
@@ -624,16 +583,25 @@ sfxge_gld_priv_prop_get(sfxge_t *sp, const char *name,
 		goto done;
 	}
 
+	if (strcmp(name, SFXGE_PRIV_PROP_NAME(mon_polling)) == 0) {
+		val = (long)sp->s_mon.sm_polling;
+		goto done;
+	}
+
+#if EFSYS_OPT_MCDI_LOGGING
+	if (strcmp(name, SFXGE_PRIV_PROP_NAME(mcdi_logging)) == 0) {
+		val = (long)sp->s_mcdi_logging;
+		goto done;
+	}
+#endif
+
 	rc = ENOTSUP;
-	goto fail2;
+	goto fail1;
 
 done:
 	(void) snprintf(valp, size, "%ld", val);
 
 	return (0);
-
-fail2:
-	DTRACE_PROBE(fail2);
 
 fail1:
 	DTRACE_PROBE1(fail1, int, rc);
@@ -646,7 +614,6 @@ static int
 sfxge_gld_priv_prop_set(sfxge_t *sp, const char *name, unsigned int size,
     const void *valp)
 {
-	int id;
 	long val;
 	int rc = 0;
 
@@ -654,16 +621,9 @@ sfxge_gld_priv_prop_set(sfxge_t *sp, const char *name, unsigned int size,
 
 	(void) ddi_strtol(valp, (char **)NULL, 0, &val);
 
-	if ((id = sfxge_gld_priv_prop_phy_find(sp, name)) > 0) {
-		if ((rc = sfxge_phy_prop_set(sp, id, (uint32_t)val)) != 0)
-			goto fail1;
-		goto done;
-	}
-
-
 	if (strcmp(name, SFXGE_PRIV_PROP_NAME(rx_coalesce_mode)) == 0) {
 		if ((rc = sfxge_rx_coalesce_mode_set(sp,
-			    (sfxge_rx_coalesce_mode_t)val)) != 0)
+		    (sfxge_rx_coalesce_mode_t)val)) != 0)
 			goto fail1;
 
 		goto done;
@@ -677,11 +637,24 @@ sfxge_gld_priv_prop_set(sfxge_t *sp, const char *name, unsigned int size,
 	}
 
 	if (strcmp(name, SFXGE_PRIV_PROP_NAME(intr_moderation)) == 0) {
-		if ((rc = sfxge_ev_moderation_set(sp, (unsigned int) val) != 0))
+		if ((rc = sfxge_ev_moderation_set(sp, (unsigned int) val)) != 0)
 			goto fail1;
 
 		goto done;
 	}
+
+	if (strcmp(name, SFXGE_PRIV_PROP_NAME(mon_polling)) == 0) {
+		sp->s_mon.sm_polling = (int)val;
+		goto done;
+	}
+
+#if EFSYS_OPT_MCDI_LOGGING
+	if (strcmp(name, SFXGE_PRIV_PROP_NAME(mcdi_logging)) == 0) {
+		sp->s_mcdi_logging = (int)val;
+		goto done;
+	}
+#endif
+
 
 	rc = ENOTSUP;
 	goto fail1;
@@ -695,65 +668,34 @@ fail1:
 	return (rc);
 }
 
-/*
- * The renaming of properties is necessary as efx_phy_prop_name needs to be
- * called after efx_port_init().  See bug 18074 and sfxge_phy.c for notes on the
- * locking strategy.
- */
-void
-sfxge_gld_priv_prop_rename(sfxge_t *sp)
-{
-	sfxge_mac_t *smp = &(sp->s_mac);
-	sfxge_mac_priv_prop_t *mac_priv_props = sp->s_mac_priv_props;
-	efx_nic_t *enp = sp->s_enp;
-	unsigned int nprops;
-	int id;
 
-	ASSERT(mutex_owned(&(smp->sm_lock)));
-
-	nprops = efx_nic_cfg_get(enp)->enc_phy_nprops;
-
-	for (id = 0; id < nprops; id++) {
-		(void) snprintf(*mac_priv_props, MAXLINKPROPNAME - 1, "_%s",
-				efx_phy_prop_name(enp, id));
-		mac_priv_props++;
-	}
-}
-
+#if EFSYS_OPT_MCDI_LOGGING
+#define	SFXGE_N_NAMED_PROPS	4
+#else
+#define	SFXGE_N_NAMED_PROPS	3
+#endif
 
 static void
 sfxge_gld_priv_prop_init(sfxge_t *sp)
 {
-	efx_nic_t *enp = sp->s_enp;
 	sfxge_mac_priv_prop_t *mac_priv_props;
-	unsigned int nprops;
-	unsigned int id;
-	int nnamed_props = 3;
-
-	nprops = efx_nic_cfg_get(enp)->enc_phy_nprops;
+	unsigned int nprops = 0;
 
 	/*
-	 * We have nprops phy properties, nnamed_props (3) named properties and
-	 * the structure must be finished by a NULL pointer.
+	 * We have named_props (3 or 4) named properties and the structure must
+	 * be finished by a NULL pointer.
 	 */
-	sp->s_mac_priv_props_alloc = nprops + nnamed_props + 1;
+	sp->s_mac_priv_props_alloc = SFXGE_N_NAMED_PROPS + 1;
 	sp->s_mac_priv_props = kmem_zalloc(sizeof (sfxge_mac_priv_prop_t) *
 	    sp->s_mac_priv_props_alloc,
 	    KM_SLEEP);
 
 	/*
 	 * Driver-private property names start with an underscore - see
-	 * mc_getprop(9E).  Phy property names are only available later - see
-	 * bug 18074. Siena does not have these phy properties.
+	 * mc_getprop(9E).
 	 */
 
 	mac_priv_props = sp->s_mac_priv_props;
-	for (id = 0; id < nprops; id++) {
-		*mac_priv_props = kmem_zalloc(MAXLINKPROPNAME, KM_SLEEP);
-		(void) snprintf(*mac_priv_props, MAXLINKPROPNAME - 1,
-		    SFXGE_PRIV_PROP_NAME(phyprop%d), id);
-		mac_priv_props++;
-	}
 
 	*mac_priv_props = kmem_zalloc(MAXLINKPROPNAME, KM_SLEEP);
 	(void) snprintf(*mac_priv_props, MAXLINKPROPNAME - 1,
@@ -773,25 +715,29 @@ sfxge_gld_priv_prop_init(sfxge_t *sp)
 	mac_priv_props++;
 	nprops++;
 
+#if EFSYS_OPT_MCDI_LOGGING
+	*mac_priv_props = kmem_zalloc(MAXLINKPROPNAME, KM_SLEEP);
+	(void) snprintf(*mac_priv_props, MAXLINKPROPNAME - 1,
+	    SFXGE_PRIV_PROP_NAME(mcdi_logging));
+	mac_priv_props++;
+	nprops++;
+#endif
+
 	ASSERT3U((nprops + 1), ==, sp->s_mac_priv_props_alloc);
 
 	/* Terminated by a NULL pointer */
 	*mac_priv_props = NULL;
 }
 
-
 static void
 sfxge_gld_priv_prop_fini(sfxge_t *sp)
 {
-	efx_nic_t *enp = sp->s_enp;
-	unsigned int nprops;
 	char **mac_priv_props;
 	unsigned int id;
 
-	nprops = efx_nic_cfg_get(enp)->enc_phy_nprops;
 	mac_priv_props = sp->s_mac_priv_props;
 
-	for (id = 0; id < nprops + 3; id++) {
+	for (id = 0; id < SFXGE_N_NAMED_PROPS; id++) {
 		kmem_free(*mac_priv_props, MAXLINKPROPNAME);
 		mac_priv_props++;
 	}
@@ -800,10 +746,8 @@ sfxge_gld_priv_prop_fini(sfxge_t *sp)
 	    sp->s_mac_priv_props_alloc);
 	sp->s_mac_priv_props = NULL;
 }
-#endif /* _USE_MAC_PRIV_PROP */
 
 
-#ifdef _USE_GLD_V3_PROPS
 static int
 sfxge_gld_getprop(void *arg, const char *name, mac_prop_id_t id,
     unsigned int size, void *valp)
@@ -842,6 +786,8 @@ sfxge_gld_getprop(void *arg, const char *name, mac_prop_id_t id,
 		break;
 	case MAC_PROP_EN_AUTONEG:
 	case MAC_PROP_AUTONEG:
+	case MAC_PROP_EN_40GFDX_CAP:
+	case MAC_PROP_ADV_40GFDX_CAP:
 	case MAC_PROP_EN_10GFDX_CAP:
 	case MAC_PROP_ADV_10GFDX_CAP:
 	case MAC_PROP_EN_1000FDX_CAP:
@@ -861,15 +807,12 @@ sfxge_gld_getprop(void *arg, const char *name, mac_prop_id_t id,
 			goto fail1;
 		}
 		break;
-#ifdef _USE_MAC_PRIV_PROP
 	case MAC_PROP_PRIVATE:
 		/* sfxge_gld_priv_prop_get should do any size checking */
 		break;
-#endif
 	default:
 		rc = ENOTSUP;
 		goto fail1;
-		break;
 	}
 
 	switch (id) {
@@ -920,6 +863,10 @@ sfxge_gld_getprop(void *arg, const char *name, mac_prop_id_t id,
 	case MAC_PROP_EN_AUTONEG:
 	case MAC_PROP_AUTONEG:
 		*v8 = sfxge_phy_cap_test(sp, flag, EFX_PHY_CAP_AN, NULL);
+		break;
+	case MAC_PROP_EN_40GFDX_CAP:
+	case MAC_PROP_ADV_40GFDX_CAP:
+		*v8 = sfxge_phy_cap_test(sp, flag, EFX_PHY_CAP_40000FDX, NULL);
 		break;
 	case MAC_PROP_EN_10GFDX_CAP:
 	case MAC_PROP_ADV_10GFDX_CAP:
@@ -981,16 +928,13 @@ sfxge_gld_getprop(void *arg, const char *name, mac_prop_id_t id,
 		}
 		break;
 	}
-#ifdef _USE_MAC_PRIV_PROP
 	case MAC_PROP_PRIVATE:
 		if ((rc = sfxge_gld_priv_prop_get(sp, name, size, valp)) != 0)
 			goto fail2;
 		break;
-#endif
 	default:
 		rc = ENOTSUP;
 		goto fail3;
-		break;
 	}
 
 	return (0);
@@ -998,20 +942,16 @@ sfxge_gld_getprop(void *arg, const char *name, mac_prop_id_t id,
 fail3:
 	DTRACE_PROBE(fail3);
 
-#ifdef _USE_MAC_PRIV_PROP
 fail2:
 	DTRACE_PROBE(fail2);
-#endif
 
 fail1:
 	DTRACE_PROBE1(fail1, int, rc);
 
 	return (rc);
 }
-#endif
 
 
-#ifdef _USE_GLD_V3_PROPS
 static int
 sfxge_gld_setprop(void *arg, const char *name, mac_prop_id_t id,
     unsigned int size, const void *valp)
@@ -1030,6 +970,7 @@ sfxge_gld_setprop(void *arg, const char *name, mac_prop_id_t id,
 	 */
 	case MAC_PROP_AUTONEG:
 	case MAC_PROP_EN_AUTONEG:
+	case MAC_PROP_EN_40GFDX_CAP:
 	case MAC_PROP_EN_10GFDX_CAP:
 	case MAC_PROP_EN_1000FDX_CAP:
 	case MAC_PROP_EN_1000HDX_CAP:
@@ -1054,15 +995,12 @@ sfxge_gld_setprop(void *arg, const char *name, mac_prop_id_t id,
 			goto fail1;
 		}
 		break;
-#ifdef _USE_MAC_PRIV_PROP
 	case MAC_PROP_PRIVATE:
 		/* sfxge_gld_priv_prop_set should do any size checking */
 		break;
-#endif
 	default:
 		rc = ENOTSUP;
 		goto fail1;
-		break;
 	}
 
 	switch (id) {
@@ -1073,6 +1011,10 @@ sfxge_gld_setprop(void *arg, const char *name, mac_prop_id_t id,
 	case MAC_PROP_AUTONEG:
 	case MAC_PROP_EN_AUTONEG:
 		if ((rc = sfxge_phy_cap_set(sp, EFX_PHY_CAP_AN, v8)) != 0)
+			goto fail2;
+		break;
+	case MAC_PROP_EN_40GFDX_CAP:
+		if ((rc = sfxge_phy_cap_set(sp, EFX_PHY_CAP_40000FDX, v8)) != 0)
 			goto fail2;
 		break;
 	case MAC_PROP_EN_10GFDX_CAP: {
@@ -1149,7 +1091,6 @@ sfxge_gld_setprop(void *arg, const char *name, mac_prop_id_t id,
 		default:
 			rc = EINVAL;
 			goto fail2;
-			break;
 		}
 
 		if ((rc = sfxge_mac_fcntl_set(sp, fcntl)) != 0)
@@ -1157,13 +1098,11 @@ sfxge_gld_setprop(void *arg, const char *name, mac_prop_id_t id,
 
 		break;
 	}
-#ifdef _USE_MAC_PRIV_PROP
 	case MAC_PROP_PRIVATE:
 		if ((rc = sfxge_gld_priv_prop_set(sp, name, size, valp)) != 0)
 			goto fail4;
 
 		break;
-#endif
 	default:
 		rc = ENOTSUP;
 		goto fail5;
@@ -1174,10 +1113,8 @@ sfxge_gld_setprop(void *arg, const char *name, mac_prop_id_t id,
 fail5:
 	DTRACE_PROBE(fail5);
 
-#ifdef _USE_MAC_PRIV_PROP
 fail4:
 	DTRACE_PROBE(fail4);
-#endif
 
 fail3:
 	DTRACE_PROBE(fail3);
@@ -1190,9 +1127,7 @@ fail1:
 
 	return (rc);
 }
-#endif
 
-#ifdef _USE_GLD_V3_PROPS
 static void
 sfxge_gld_propinfo(void *arg, const char *name, mac_prop_id_t id,
     mac_prop_info_handle_t handle)
@@ -1222,11 +1157,9 @@ sfxge_gld_propinfo(void *arg, const char *name, mac_prop_id_t id,
 			mac_prop_info_set_default_uint32(handle, mtu_default);
 			return;
 			}
-#ifdef _USE_MAC_PRIV_PROP
 		case MAC_PROP_PRIVATE:
 			sfxge_gld_priv_prop_info(sp, name, handle);
 			return;
-#endif
 		case MAC_PROP_EN_AUTONEG:
 		case MAC_PROP_AUTONEG:
 			phy_cap = EFX_PHY_CAP_AN;
@@ -1275,7 +1208,6 @@ sfxge_gld_propinfo(void *arg, const char *name, mac_prop_id_t id,
 		mac_prop_info_set_default_uint8(handle, cap_default);
 	}
 }
-#endif
 
 int
 sfxge_gld_register(sfxge_t *sp)
@@ -1283,39 +1215,13 @@ sfxge_gld_register(sfxge_t *sp)
 	mac_callbacks_t *mcp;
 	mac_register_t *mrp;
 	mac_handle_t mh;
+	uint8_t addr[ETHERADDRL];
 	int rc;
 
-#ifdef _USE_GLD_V3_SOL10
-	if ((rc = sfxge_gld_nd_register(sp)) != 0)
-		goto fail0;
-#endif
-
-	/*
-	 * NOTE: mac_register_t has additional fields in later kernels,
-	 * so the buffer returned by mac_alloc(9F) changes size. This
-	 * is not a problem for forward compatibility (a driver binary
-	 * built with older headers/libs running on a newer kernel).
-	 *
-	 * For Solaris 10, we build the sfxge driver on s10u9 to run on
-	 * s10u8, and later. This requries backward compatibility and
-	 * causes a problem. The mac_register_t in s10u8 is smaller than
-	 * the version in s10u9, so writing to the mc_margin field causes
-	 * a buffer overflow (and a hard-to-debug panic).
-	 *
-	 * Work around this problem by allocating mac_register_t using
-	 * kmem_alloc(9F) so it has the size expected by the driver. The
-	 * running kernel ignores the additional fields.
-	 *
-	 * Replace mac_alloc() with kmem_zalloc() and then set m_version.
-	 * Replace mac_free() with kmem_free().
-	 *
-	 * See bug 33189 and bug33213 for details.
-	 */
-	if ((mrp = kmem_zalloc(sizeof (mac_register_t), KM_SLEEP)) == NULL) {
-		rc = ENOMEM;
+	if ((mrp = mac_alloc(MAC_VERSION)) == NULL) {
+		rc = ENOTSUP;
 		goto fail1;
 	}
-	mrp->m_version = MAC_VERSION;
 
 	mrp->m_type_ident = MAC_PLUGIN_IDENT_ETHER;
 	mrp->m_driver = sp;
@@ -1339,8 +1245,6 @@ sfxge_gld_register(sfxge_t *sp)
 	mcp->mc_callbacks |= MC_GETCAPAB;
 	mcp->mc_getcapab = sfxge_gld_getcapab;
 
-#ifdef _USE_GLD_V3_PROPS
-	/* NOTE: mc_setprop, mc_getprop, mc_propinfo added in s10u9 */
 	mcp->mc_callbacks |= MC_SETPROP;
 	mcp->mc_setprop = sfxge_gld_setprop;
 
@@ -1349,11 +1253,10 @@ sfxge_gld_register(sfxge_t *sp)
 
 	mcp->mc_callbacks |= MC_PROPINFO;
 	mcp->mc_propinfo = sfxge_gld_propinfo;
-#endif
 
 	mrp->m_callbacks = mcp;
 
-	mrp->m_src_addr = kmem_alloc(ETHERADDRL, KM_SLEEP);
+	mrp->m_src_addr = addr;
 
 	if ((rc = sfxge_mac_unicst_get(sp, SFXGE_UNICST_BIA,
 	    mrp->m_src_addr)) != 0)
@@ -1362,15 +1265,12 @@ sfxge_gld_register(sfxge_t *sp)
 	mrp->m_min_sdu = 0;
 	mrp->m_max_sdu = sp->s_mtu;
 
-	/* NOTE: m_margin added in s10u9 */
-	mrp->m_margin = SFXGE_VLAN_TAGSZ;
+	mrp->m_margin = VLAN_TAGSZ;
 
 	/* Set up the private properties */
-#ifdef _USE_MAC_PRIV_PROP
 	/* NOTE: m_priv_props added in s10u9 */
 	mrp->m_priv_props = sp->s_mac_priv_props;
 	sfxge_gld_priv_prop_init(sp);
-#endif
 
 	/* NOTE: m_flags added in s11.0 */
 	/* NOTE: m_multicast_sdu added in s11.0 */
@@ -1378,8 +1278,6 @@ sfxge_gld_register(sfxge_t *sp)
 	/* Register the interface */
 	if ((rc = mac_register(mrp, &mh)) != 0)
 		goto fail3;
-
-	kmem_free(mrp->m_src_addr, ETHERADDRL);
 
 	/* Free the stack registration object */
 	kmem_free(mrp, sizeof (mac_register_t));
@@ -1392,27 +1290,17 @@ fail3:
 fail2:
 	DTRACE_PROBE(fail2);
 
-	kmem_free(mrp->m_src_addr, ETHERADDRL);
-
 	/* Free the stack registration object */
-	kmem_free(mrp, sizeof (mac_register_t));
+	mac_free(mrp);
 
-#ifdef _USE_MAC_PRIV_PROP
 	/* Tear down the private properties */
 	sfxge_gld_priv_prop_fini(sp);
-#endif
 
 	/* Clear the callbacks */
 	bzero(&(sp->s_mc), sizeof (mac_callbacks_t));
 
 fail1:
 	DTRACE_PROBE1(fail1, int, rc);
-#ifdef _USE_GLD_V3_SOL10
-	sfxge_gld_nd_unregister(sp);
-
-fail0:
-	DTRACE_PROBE1(fail0, int, rc);
-#endif
 
 	return (rc);
 }
@@ -1428,13 +1316,8 @@ sfxge_gld_unregister(sfxge_t *sp)
 
 	sp->s_mh = NULL;
 
-#ifdef _USE_MAC_PRIV_PROP
 	/* Tear down the private properties */
 	sfxge_gld_priv_prop_fini(sp);
-#endif
-#ifdef _USE_GLD_V3_SOL10
-	sfxge_gld_nd_unregister(sp);
-#endif
 
 	/* Clear the callbacks */
 	bzero(&(sp->s_mc), sizeof (mac_callbacks_t));
@@ -1446,4 +1329,3 @@ fail1:
 
 	return (rc);
 }
-#endif	/* _USE_GLD_V3 */

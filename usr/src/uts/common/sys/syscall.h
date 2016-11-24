@@ -51,6 +51,7 @@ extern "C" {
 
 #define	SYS_syscall	0
 #define	SYS_exit	1
+#define	SYS_psecflags	2
 #define	SYS_read	3
 #define	SYS_write	4
 #define	SYS_open	5
@@ -511,8 +512,8 @@ typedef struct {	/* return values from system call */
 
 #if !defined(_KERNEL)
 
-extern int	syscall(int, ...);
-extern int	__systemcall(sysret_t *, int, ...);
+extern long	syscall(int, ...);
+extern long	__systemcall(sysret_t *, int, ...);
 extern int	__set_errno(int);
 
 #endif	/* _KERNEL */

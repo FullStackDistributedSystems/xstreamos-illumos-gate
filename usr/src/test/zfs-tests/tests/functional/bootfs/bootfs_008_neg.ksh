@@ -25,6 +25,10 @@
 # Use is subject to license terms.
 #
 
+#
+# Copyright (c) 2012, 2016 by Delphix. All rights reserved.
+#
+
 . $STF_SUITE/include/libtest.shlib
 
 #
@@ -47,7 +51,7 @@ function cleanup {
 	fi
 
 	if [[ -f $VDEV ]]; then
-		log_must $RM -f $VDEV
+		log_must rm -f $VDEV
 	fi
 }
 
@@ -60,18 +64,18 @@ typeset COMP_FS=$TESTPOOL/COMP_FS
 log_onexit cleanup
 log_assert $assert_msg
 
-log_must $MKFILE 300m $VDEV
-log_must $ZPOOL create $TESTPOOL $VDEV
-log_must $ZFS create $COMP_FS
+log_must mkfile $MINVDEVSIZE $VDEV
+log_must zpool create $TESTPOOL $VDEV
+log_must zfs create $COMP_FS
 
 typeset -i i=0
 set -A gtype "gzip" "gzip-1" "gzip-2" "gzip-3" "gzip-4" "gzip-5" \
 	     "gzip-6" "gzip-7" "gzip-8" "gzip-9"
 
 while (( i < ${#gtype[@]} )); do
-	log_must $ZFS set compression=${gtype[i]} $COMP_FS
-	log_mustnot $ZPOOL set bootfs=$COMP_FS $TESTPOOL
-	log_must $ZFS set compression=off $COMP_FS
+	log_must zfs set compression=${gtype[i]} $COMP_FS
+	log_mustnot zpool set bootfs=$COMP_FS $TESTPOOL
+	log_must zfs set compression=off $COMP_FS
 	(( i += 1 ))
 done
 

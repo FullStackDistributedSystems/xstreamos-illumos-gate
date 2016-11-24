@@ -18,8 +18,10 @@
  *
  * CDDL HEADER END
  */
+
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright 2016 Nexenta Systems, Inc.
  */
 
 #include <stdio.h>
@@ -666,8 +668,8 @@ typedef struct link_fields_buf_s {
 	char link_class[DLADM_STRSIZE];
 	char link_mtu[11];
 	char link_state[DLADM_STRSIZE];
-	char link_bridge[MAXLINKNAMELEN];
-	char link_over[MAXLINKNAMELEN];
+	char link_bridge[MAXLINKNAMELEN * MAXPORT];
+	char link_over[MAXLINKNAMELEN * MAXPORT];
 	char link_phys_state[DLADM_STRSIZE];
 	char link_phys_media[DLADM_STRSIZE];
 	char link_phys_speed[DLADM_STRSIZE];
@@ -692,7 +694,7 @@ static const ofmt_field_t link_fields[] = {
 	offsetof(link_fields_buf_t, link_state), print_default_cb},
 { "BRIDGE",	11,
     offsetof(link_fields_buf_t, link_bridge), print_default_cb},
-{ "OVER",	DLPI_LINKNAME_MAX,
+{ "OVER",	30,
 	offsetof(link_fields_buf_t, link_over), print_default_cb},
 { NULL,		0, 0, NULL}}
 ;
@@ -2684,7 +2686,7 @@ print_link_topology(show_state_t *state, datalink_id_t linkid,
 			(void) strlcat(lbuf->link_over, tmpbuf,
 			    sizeof (lbuf->link_over));
 			if (i != (ginfo.lg_nports - 1)) {
-				(void) strlcat(lbuf->link_over, " ",
+				(void) strlcat(lbuf->link_over, ",",
 				    sizeof (lbuf->link_over));
 			}
 		}
@@ -2747,7 +2749,7 @@ print_link_topology(show_state_t *state, datalink_id_t linkid,
 			(void) strlcat(lbuf->link_over, tmpbuf,
 			    sizeof (lbuf->link_over));
 			if (i != nports - 1) {
-				(void) strlcat(lbuf->link_over, " ",
+				(void) strlcat(lbuf->link_over, ",",
 				    sizeof (lbuf->link_over));
 			}
 		}
@@ -3389,7 +3391,6 @@ do_show_link(int argc, char *argv[], const char *use)
 {
 	int		option;
 	boolean_t	s_arg = B_FALSE;
-	boolean_t	S_arg = B_FALSE;
 	boolean_t	i_arg = B_FALSE;
 	uint32_t	flags = DLADM_OPT_ACTIVE;
 	boolean_t	p_arg = B_FALSE;
@@ -3411,7 +3412,7 @@ do_show_link(int argc, char *argv[], const char *use)
 	bzero(&state, sizeof (state));
 
 	opterr = 0;
-	while ((option = getopt_long(argc, argv, ":pPsSi:o:",
+	while ((option = getopt_long(argc, argv, ":pPsi:o:",
 	    show_lopts, NULL)) != -1) {
 		switch (option) {
 		case 'p':
@@ -3432,12 +3433,6 @@ do_show_link(int argc, char *argv[], const char *use)
 
 			flags = DLADM_OPT_PERSIST;
 			break;
-		case 'S':
-			if (S_arg)
-				die_optdup(option);
-
-			S_arg = B_TRUE;
-			break;
 		case 'o':
 			o_arg = B_TRUE;
 			fields_str = optarg;
@@ -3456,17 +3451,11 @@ do_show_link(int argc, char *argv[], const char *use)
 		}
 	}
 
-	if (i_arg && !(s_arg || S_arg))
-		die("the option -i can be used only with -s or -S");
-
-	if (s_arg && S_arg)
-		die("the -s option cannot be used with -S");
+	if (i_arg && !s_arg)
+		die("the option -i can be used only with -s");
 
 	if (s_arg && flags != DLADM_OPT_ACTIVE)
 		die("the option -P cannot be used with -s");
-
-	if (S_arg && (p_arg || flags != DLADM_OPT_ACTIVE))
-		die("the option -%c cannot be used with -S", p_arg ? 'p' : 'P');
 
 	/* get link name (optional last argument) */
 	if (optind == (argc-1)) {
@@ -3492,11 +3481,6 @@ do_show_link(int argc, char *argv[], const char *use)
 	if (p_arg && !o_arg)
 		die("-p requires -o");
 
-	if (S_arg) {
-		dladm_continuous(handle, linkid, NULL, interval, LINK_REPORT);
-		return;
-	}
-
 	if (p_arg && strcasecmp(fields_str, "all") == 0)
 		die("\"-o all\" is invalid with -p");
 
@@ -3519,6 +3503,9 @@ do_show_link(int argc, char *argv[], const char *use)
 	}
 	if (state.ls_parsable)
 		ofmtflags |= OFMT_PARSABLE;
+	else
+		ofmtflags |= OFMT_WRAP;
+
 	oferr = ofmt_open(fields_str, link_fields, ofmtflags, 0, &ofmt);
 	dladm_ofmt_check(oferr, state.ls_parsable, ofmt);
 	state.ls_ofmt = ofmt;

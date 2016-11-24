@@ -22,7 +22,7 @@
  * Copyright (c) 1991, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 1990 Mentat Inc.
  * Copyright (c) 2013 by Delphix. All rights reserved.
- * Copyright 2013 Joyent, Inc.
+ * Copyright (c) 2016, Joyent, Inc. All rights reserved.
  * Copyright (c) 2014, OmniTI Computer Consulting, Inc. All rights reserved.
  */
 
@@ -718,7 +718,7 @@ ill_dlur_copy_address(uchar_t *phys_src, uint_t phys_length,
  */
 mblk_t *
 ill_dlur_gen(uchar_t *addr, uint_t addr_length, t_uscalar_t sap,
-		t_scalar_t sap_length)
+    t_scalar_t sap_length)
 {
 	dl_unitdata_req_t *dlur;
 	mblk_t	*mp;
@@ -3855,15 +3855,18 @@ ill_lookup_on_ifindex_global_instance(uint_t index, boolean_t isv6)
 {
 	ip_stack_t	*ipst;
 	ill_t		*ill;
+	netstack_t	*ns;
 
-	ipst = netstack_find_by_stackid(GLOBAL_NETSTACKID)->netstack_ip;
-	if (ipst == NULL) {
+	ns = netstack_find_by_stackid(GLOBAL_NETSTACKID);
+
+	if ((ipst = ns->netstack_ip) == NULL) {
 		cmn_err(CE_WARN, "No ip_stack_t for zoneid zero!\n");
+		netstack_rele(ns);
 		return (NULL);
 	}
 
 	ill = ill_lookup_on_ifindex(index, isv6, ipst);
-	netstack_rele(ipst->ips_netstack);
+	netstack_rele(ns);
 	return (ill);
 }
 
@@ -9945,6 +9948,10 @@ ip_sioctl_get_addr(ipif_t *ipif, sin_t *sin, queue_t *q, mblk_t *mp,
 		*sin6 = sin6_null;
 		sin6->sin6_family = AF_INET6;
 		sin6->sin6_addr = ipif->ipif_v6lcl_addr;
+		if (IN6_IS_ADDR_LINKLOCAL(&sin6->sin6_addr)) {
+			sin6->sin6_scope_id =
+			    ipif->ipif_ill->ill_phyint->phyint_ifindex;
+		}
 		ASSERT(ipip->ipi_cmd_type == LIF_CMD);
 		lifr->lifr_addrlen =
 		    ip_mask_to_plen_v6(&ipif->ipif_v6net_mask);
@@ -10824,7 +10831,7 @@ ip_sioctl_mtu(ipif_t *ipif, sin_t *sin, queue_t *q, mblk_t *mp,
 /* ARGSUSED */
 int
 ip_sioctl_get_mtu(ipif_t *ipif, sin_t *sin, queue_t *q, mblk_t *mp,
-	ip_ioctl_cmd_t *ipip, void *if_req)
+    ip_ioctl_cmd_t *ipip, void *if_req)
 {
 	struct ifreq	*ifr;
 	struct lifreq	*lifr;
@@ -10850,7 +10857,7 @@ ip_sioctl_get_mtu(ipif_t *ipif, sin_t *sin, queue_t *q, mblk_t *mp,
 /* ARGSUSED2 */
 int
 ip_sioctl_brdaddr(ipif_t *ipif, sin_t *sin, queue_t *q, mblk_t *mp,
-	ip_ioctl_cmd_t *ipip, void *if_req)
+    ip_ioctl_cmd_t *ipip, void *if_req)
 {
 	ipaddr_t addr;
 	ire_t	*ire;
@@ -15586,7 +15593,7 @@ ip_select_source_v4(ill_t *ill, ipaddr_t setsrc, ipaddr_t dst,
 /* ARGSUSED */
 int
 if_unitsel_restart(ipif_t *ipif, sin_t *dummy_sin, queue_t *q, mblk_t *mp,
-	ip_ioctl_cmd_t *ipip, void *dummy_ifreq)
+    ip_ioctl_cmd_t *ipip, void *dummy_ifreq)
 {
 	/*
 	 * ill_phyint_reinit merged the v4 and v6 into a single
@@ -16243,7 +16250,7 @@ ill_ptpaddr_cnt(const ill_t *ill)
 /* ARGSUSED */
 int
 ip_sioctl_get_lifusesrc(ipif_t *ipif, sin_t *sin, queue_t *q, mblk_t *mp,
-	ip_ioctl_cmd_t *ipip, void *ifreq)
+    ip_ioctl_cmd_t *ipip, void *ifreq)
 {
 	struct lifreq	*lifr = ifreq;
 

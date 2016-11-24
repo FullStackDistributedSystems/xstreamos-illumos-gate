@@ -20,10 +20,10 @@
 #
 
 #
-# Copyright 2014 Nexenta Systems, Inc.
 # Copyright (c) 2010, Oracle and/or its affiliates. All rights reserved.
 # Copyright 2012 OmniTI Computer Consulting, Inc.  All rights reserved.
 # Copyright (c) 2013 Gary Mills
+# Copyright 2014 Nexenta Systems, Inc.  All rights reserved.
 #
 
 <include system-library.man3.inc>
@@ -54,6 +54,7 @@
 <include system-library.man3nsl.inc>
 <include system-library.man3nvpair.inc>
 <include system-library.man3pam.inc>
+<include system-library.man3proc.inc>
 <include system-library.man3scf.inc>
 <include system-library.man3sec.inc>
 <include system-library.man3secdb.inc>
@@ -98,9 +99,9 @@ dir path=usr/lib/iconv/$(ARCH64)
 $(i386_ONLY)dir path=usr/lib/libc
 dir path=usr/lib/lwp
 dir path=usr/lib/lwp/$(ARCH64)
-dir path=usr/lib/python2.6
-dir path=usr/lib/python2.6/vendor-packages
-dir path=usr/lib/python2.6/vendor-packages/solaris
+dir path=usr/lib/python$(PYTHON_VERSION)
+dir path=usr/lib/python$(PYTHON_VERSION)/vendor-packages
+dir path=usr/lib/python$(PYTHON_VERSION)/vendor-packages/solaris
 dir path=usr/lib/raidcfg
 dir path=usr/lib/raidcfg/$(ARCH64)
 dir path=usr/lib/scsi
@@ -321,6 +322,7 @@ file path=lib/nss_nis.so.1
 file path=lib/nss_user.so.1
 file path=usr/lib/$(ARCH64)/0@0.so.1
 file path=usr/lib/$(ARCH64)/getloginx.so.1
+file path=usr/lib/$(ARCH64)/libads.so.1
 file path=usr/lib/$(ARCH64)/libadutils.so.1
 file path=usr/lib/$(ARCH64)/libast.so.1
 file path=usr/lib/$(ARCH64)/libbsdmalloc.so.1
@@ -392,6 +394,7 @@ file path=usr/lib/cfgadm/usb.so.1
 file path=usr/lib/extendedFILE.so.1
 file path=usr/lib/getloginx.so.1
 file path=usr/lib/lib.b mode=0444
+file path=usr/lib/libads.so.1
 file path=usr/lib/libadutils.so.1
 file path=usr/lib/libast.so.1
 file path=usr/lib/libbsdmalloc.so.1
@@ -449,9 +452,9 @@ file path=usr/lib/libzoneinfo.so.1
 file path=usr/lib/nss_ad.so.1
 file path=usr/lib/nss_ldap.so.1
 file path=usr/lib/passwdutil.so.1
-file path=usr/lib/python2.6/vendor-packages/solaris/__init__.py
-file path=usr/lib/python2.6/vendor-packages/solaris/__init__.pyc
-file path=usr/lib/python2.6/vendor-packages/solaris/misc.so
+file path=usr/lib/python$(PYTHON_VERSION)/vendor-packages/solaris/__init__.py
+file path=usr/lib/python$(PYTHON_VERSION)/vendor-packages/solaris/__init__.pyc
+file path=usr/lib/python$(PYTHON_VERSION)/vendor-packages/solaris/misc.so
 file path=usr/lib/raidcfg/$(ARCH64)/mpt.so.1
 file path=usr/lib/raidcfg/mpt.so.1
 file path=usr/lib/scsi/$(ARCH64)/libscsi.so.1
@@ -757,6 +760,7 @@ link path=usr/lib/$(ARCH64)/libadm.so \
     target=../../../lib/$(ARCH64)/libadm.so.1
 link path=usr/lib/$(ARCH64)/libadm.so.1 \
     target=../../../lib/$(ARCH64)/libadm.so.1
+link path=usr/lib/$(ARCH64)/libads.so target=./libads.so.1
 link path=usr/lib/$(ARCH64)/libadutils.so target=./libadutils.so.1
 link path=usr/lib/$(ARCH64)/libaio.so \
     target=../../../lib/$(ARCH64)/libaio.so.1
@@ -1039,6 +1043,7 @@ link path=usr/lib/cfgadm/shp.so target=./shp.so.1
 link path=usr/lib/cfgadm/usb.so target=./usb.so.1
 link path=usr/lib/libadm.so target=../../lib/libadm.so.1
 link path=usr/lib/libadm.so.1 target=../../lib/libadm.so.1
+link path=usr/lib/libads.so target=./libads.so.1
 link path=usr/lib/libadutils.so target=./libadutils.so.1
 link path=usr/lib/libaio.so target=../../lib/libaio.so.1
 link path=usr/lib/libaio.so.1 target=../../lib/libaio.so.1

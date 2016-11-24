@@ -1,27 +1,31 @@
 /*
- * CDDL HEADER START
+ * Copyright (c) 2009-2016 Solarflare Communications Inc.
+ * All rights reserved.
  *
- * The contents of this file are subject to the terms of the
- * Common Development and Distribution License (the "License").
- * You may not use this file except in compliance with the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
  *
- * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
- * See the License for the specific language governing permissions
- * and limitations under the License.
+ * 1. Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
  *
- * When distributing Covered Code, include this CDDL HEADER in each
- * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
- * If applicable, add the following below this CDDL HEADER, with the
- * fields enclosed by brackets "[]" replaced with your own identifying
- * information: Portions Copyright [yyyy] [name of copyright owner]
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
+ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * CDDL HEADER END
- */
-
-/*
- * Copyright 2009 Solarflare Communications Inc.  All rights reserved.
- * Use is subject to license terms.
+ * The views and conclusions contained in the software and documentation are
+ * those of the authors and should not be interpreted as representing official
+ * policies, either expressed or implied, of the FreeBSD Project.
  */
 
 #include <sys/types.h>
@@ -29,7 +33,7 @@
 #include "sfxge.h"
 
 
-int
+static int
 sfxge_vpd_get_keyword(sfxge_t *sp, sfxge_vpd_ioc_t *svip)
 {
 	efx_nic_t *enp = sp->s_enp;
@@ -41,8 +45,11 @@ sfxge_vpd_get_keyword(sfxge_t *sp, sfxge_vpd_ioc_t *svip)
 	if ((rc = efx_vpd_size(enp, &size)) != 0)
 		goto fail1;
 
-	buf = kmem_zalloc(size, KM_SLEEP);
-	ASSERT(buf);
+	buf = kmem_zalloc(size, KM_NOSLEEP);
+	if (buf == NULL) {
+		rc = ENOMEM;
+		goto fail1;
+	}
 
 	if ((rc = efx_vpd_read(enp, buf, size)) != 0)
 		goto fail2;
@@ -58,8 +65,7 @@ sfxge_vpd_get_keyword(sfxge_t *sp, sfxge_vpd_ioc_t *svip)
 
 	svip->svi_len = vpd.evv_length;
 	EFX_STATIC_ASSERT(sizeof (svip->svi_payload) == sizeof (vpd.evv_value));
-	memcpy(svip->svi_payload, &vpd.evv_value[0],
-	    sizeof (svip->svi_payload));
+	bcopy(&vpd.evv_value[0], svip->svi_payload, sizeof (svip->svi_payload));
 
 	kmem_free(buf, size);
 
@@ -79,7 +85,7 @@ fail1:
 }
 
 
-int
+static int
 sfxge_vpd_set_keyword(sfxge_t *sp, sfxge_vpd_ioc_t *svip)
 {
 	efx_nic_t *enp = sp->s_enp;
@@ -93,8 +99,11 @@ sfxge_vpd_set_keyword(sfxge_t *sp, sfxge_vpd_ioc_t *svip)
 	if ((rc = efx_vpd_size(enp, &size)) != 0)
 		goto fail1;
 
-	buf = kmem_zalloc(size, KM_SLEEP);
-	ASSERT(buf);
+	buf = kmem_zalloc(size, KM_NOSLEEP);
+	if (buf == NULL) {
+		rc = ENOMEM;
+		goto fail1;
+	}
 
 	if ((rc = efx_vpd_read(enp, buf, size)) != 0)
 		goto fail2;
@@ -111,8 +120,7 @@ sfxge_vpd_set_keyword(sfxge_t *sp, sfxge_vpd_ioc_t *svip)
 	vpd.evv_length = svip->svi_len;
 
 	EFX_STATIC_ASSERT(sizeof (svip->svi_payload) == sizeof (vpd.evv_value));
-	memcpy(&vpd.evv_value[0], svip->svi_payload,
-	    sizeof (svip->svi_payload));
+	bcopy(svip->svi_payload, &vpd.evv_value[0], sizeof (svip->svi_payload));
 
 	if ((rc = efx_vpd_set(enp, buf, size, &vpd)) != 0)
 		goto fail5;

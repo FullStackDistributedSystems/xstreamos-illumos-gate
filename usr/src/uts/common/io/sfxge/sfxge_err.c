@@ -1,27 +1,31 @@
 /*
- * CDDL HEADER START
+ * Copyright (c) 2008-2016 Solarflare Communications Inc.
+ * All rights reserved.
  *
- * The contents of this file are subject to the terms of the
- * Common Development and Distribution License (the "License").
- * You may not use this file except in compliance with the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
  *
- * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
- * See the License for the specific language governing permissions
- * and limitations under the License.
+ * 1. Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
  *
- * When distributing Covered Code, include this CDDL HEADER in each
- * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
- * If applicable, add the following below this CDDL HEADER, with the
- * fields enclosed by brackets "[]" replaced with your own identifying
- * information: Portions Copyright [yyyy] [name of copyright owner]
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
+ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * CDDL HEADER END
- */
-
-/*
- * Copyright 2008-2013 Solarflare Communications Inc.  All rights reserved.
- * Use is subject to license terms.
+ * The views and conclusions contained in the software and documentation are
+ * those of the authors and should not be interpreted as representing official
+ * policies, either expressed or implied, of the FreeBSD Project.
  */
 
 #include <sys/types.h>
@@ -56,9 +60,8 @@ sfxge_err(efsys_identifier_t *arg, unsigned int code, uint32_t dword0,
 
 	ASSERT3U(code, <, EFX_ERR_NCODES);
 
-	cmn_err(CE_WARN, SFXGE_CMN_ERR "[%s%d] FATAL ERROR: %s (0x%08x%08x)",
-	    ddi_driver_name(dip), ddi_get_instance(dip), __sfxge_err[code],
-	    dword1, dword0);
+	dev_err(dip, CE_WARN, SFXGE_CMN_ERR "FATAL ERROR: %s (0x%08x%08x)",
+	    __sfxge_err[code], dword1, dword0);
 }
 
 void
@@ -73,13 +76,10 @@ sfxge_intr_fatal(sfxge_t *sp)
 	err = sfxge_restart_dispatch(sp, DDI_NOSLEEP, SFXGE_HW_ERR,
 	    "Fatal Interrupt", 0);
 	if (err != 0) {
-		cmn_err(CE_WARN, SFXGE_CMN_ERR
-			    "[%s%d] UNRECOVERABLE ERROR:"
-			    " Could not schedule driver restart."
-			    " err=%d\n",
-			    ddi_driver_name(sp->s_dip),
-			    ddi_get_instance(sp->s_dip),
-			    err);
+		dev_err(sp->s_dip, CE_WARN, SFXGE_CMN_ERR
+		    "UNRECOVERABLE ERROR:"
+		    " Could not schedule driver restart. err=%d",
+		    err);
 		ASSERT(B_FALSE);
 	}
 }

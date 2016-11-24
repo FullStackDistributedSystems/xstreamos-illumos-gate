@@ -1,27 +1,31 @@
 /*
- * CDDL HEADER START
+ * Copyright (c) 2008-2016 Solarflare Communications Inc.
+ * All rights reserved.
  *
- * The contents of this file are subject to the terms of the
- * Common Development and Distribution License (the "License").
- * You may not use this file except in compliance with the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
  *
- * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
- * See the License for the specific language governing permissions
- * and limitations under the License.
+ * 1. Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
  *
- * When distributing Covered Code, include this CDDL HEADER in each
- * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
- * If applicable, add the following below this CDDL HEADER, with the
- * fields enclosed by brackets "[]" replaced with your own identifying
- * information: Portions Copyright [yyyy] [name of copyright owner]
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
+ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * CDDL HEADER END
- */
-
-/*
- * Copyright 2008-2013 Solarflare Communications Inc.  All rights reserved.
- * Use is subject to license terms.
+ * The views and conclusions contained in the software and documentation are
+ * those of the authors and should not be interpreted as representing official
+ * policies, either expressed or implied, of the FreeBSD Project.
  */
 
 #include <sys/types.h>
@@ -207,11 +211,8 @@ sfxge_intr_bus_enable(sfxge_t *sp)
 		break;
 
 	default:
-		cmn_err(CE_WARN, SFXGE_CMN_ERR
-		    "[%s%d] bus_enable: unknown intr type"
-		    " (si_type=%d nalloc=%d)\n",
-		    ddi_driver_name(sp->s_dip),
-		    ddi_get_instance(sp->s_dip),
+		dev_err(sp->s_dip, CE_WARN, SFXGE_CMN_ERR
+		    "bus_enable: unknown intr type (si_type=%d nalloc=%d)",
 		    sip->si_type, sip->si_nalloc);
 		ASSERT(B_FALSE);
 		rc = EINVAL;
@@ -222,18 +223,19 @@ sfxge_intr_bus_enable(sfxge_t *sp)
 	for (add_index = 0; add_index < sip->si_nalloc; add_index++) {
 		unsigned int pri;
 
-		(void) ddi_intr_get_pri(sip->si_table[add_index], &pri);
+		/* This cannot fail unless given invalid inputs. */
+		err = ddi_intr_get_pri(sip->si_table[add_index], &pri);
+		ASSERT(err == DDI_SUCCESS);
+
 		DTRACE_PROBE2(pri, unsigned int, add_index, unsigned int, pri);
 
 		err = ddi_intr_add_handler(sip->si_table[add_index], handler,
 		    (caddr_t)sp, (caddr_t)(uintptr_t)add_index);
 		if (err != DDI_SUCCESS) {
-			cmn_err(CE_WARN, SFXGE_CMN_ERR
-			    "[%s%d] bus_enable: ddi_intr_add_handler failed"
-			    " err=%d (h=%p idx=%d nalloc=%d)\n",
-			    ddi_driver_name(sp->s_dip),
-			    ddi_get_instance(sp->s_dip),
-			    err, sip->si_table[add_index], add_index,
+			dev_err(sp->s_dip, CE_WARN, SFXGE_CMN_ERR
+			    "bus_enable: ddi_intr_add_handler failed"
+			    " err=%d (h=%p idx=%d nalloc=%d)",
+			    err, (void *)sip->si_table[add_index], add_index,
 			    sip->si_nalloc);
 
 			rc = (err == DDI_EINVAL) ? EINVAL : EFAULT;
@@ -244,12 +246,10 @@ sfxge_intr_bus_enable(sfxge_t *sp)
 	/* Get interrupt capabilities */
 	err = ddi_intr_get_cap(sip->si_table[0], &(sip->si_cap));
 	if (err != DDI_SUCCESS) {
-		cmn_err(CE_WARN, SFXGE_CMN_ERR
-		    "[%s%d] bus_enable: ddi_intr_get_cap failed"
-		    " err=%d (h=%p idx=%d nalloc=%d)\n",
-		    ddi_driver_name(sp->s_dip),
-		    ddi_get_instance(sp->s_dip),
-		    err, sip->si_table[0], 0, sip->si_nalloc);
+		dev_err(sp->s_dip, CE_WARN, SFXGE_CMN_ERR
+		    "bus_enable: ddi_intr_get_cap failed"
+		    " err=%d (h=%p idx=%d nalloc=%d)",
+		    err, (void *)sip->si_table[0], 0, sip->si_nalloc);
 
 		if (err == DDI_EINVAL)
 			rc = EINVAL;
@@ -266,12 +266,10 @@ sfxge_intr_bus_enable(sfxge_t *sp)
 		en_index = 0; /* Silence gcc */
 		err = ddi_intr_block_enable(sip->si_table, sip->si_nalloc);
 		if (err != DDI_SUCCESS) {
-			cmn_err(CE_WARN, SFXGE_CMN_ERR
-			    "[%s%d] bus_enable: ddi_intr_block_enable failed"
-			    " err=%d (table=%p nalloc=%d)\n",
-			    ddi_driver_name(sp->s_dip),
-			    ddi_get_instance(sp->s_dip),
-			    err, sip->si_table, sip->si_nalloc);
+			dev_err(sp->s_dip, CE_WARN, SFXGE_CMN_ERR
+			    "bus_enable: ddi_intr_block_enable failed"
+			    " err=%d (table=%p nalloc=%d)",
+			    err, (void *)sip->si_table, sip->si_nalloc);
 
 			rc = (err == DDI_EINVAL) ? EINVAL : EFAULT;
 			goto fail4;
@@ -280,13 +278,11 @@ sfxge_intr_bus_enable(sfxge_t *sp)
 		for (en_index = 0; en_index < sip->si_nalloc; en_index++) {
 			err = ddi_intr_enable(sip->si_table[en_index]);
 			if (err != DDI_SUCCESS) {
-				cmn_err(CE_WARN, SFXGE_CMN_ERR
-				    "[%s%d] bus_enable: ddi_intr_enable failed"
-				    " err=%d (h=%p idx=%d nalloc=%d)\n",
-				    ddi_driver_name(sp->s_dip),
-				    ddi_get_instance(sp->s_dip),
-				    err, sip->si_table[en_index], en_index,
-				    sip->si_nalloc);
+				dev_err(sp->s_dip, CE_WARN, SFXGE_CMN_ERR
+				    "bus_enable: ddi_intr_enable failed"
+				    " err=%d (h=%p idx=%d nalloc=%d)",
+				    err, (void *)sip->si_table[en_index],
+				    en_index, sip->si_nalloc);
 
 				rc = (err == DDI_EINVAL) ? EINVAL : EFAULT;
 				goto fail4;
@@ -305,13 +301,11 @@ fail4:
 		while (--en_index >= 0) {
 			err = ddi_intr_disable(sip->si_table[en_index]);
 			if (err != DDI_SUCCESS) {
-				cmn_err(CE_WARN, SFXGE_CMN_ERR
-				    "[%s%d] bus_enable: ddi_intr_disable"
-				    " failed err=%d (h=%p idx=%d nalloc=%d)\n",
-				    ddi_driver_name(sp->s_dip),
-				    ddi_get_instance(sp->s_dip),
-				    err, sip->si_table[en_index], en_index,
-				    sip->si_nalloc);
+				dev_err(sp->s_dip, CE_WARN, SFXGE_CMN_ERR
+				    "bus_enable: ddi_intr_disable"
+				    " failed err=%d (h=%p idx=%d nalloc=%d)",
+				    err, (void *)sip->si_table[en_index],
+				    en_index, sip->si_nalloc);
 			}
 		}
 	}
@@ -329,12 +323,10 @@ fail2:
 	while (--add_index >= 0) {
 		err = ddi_intr_remove_handler(sip->si_table[add_index]);
 		if (err != DDI_SUCCESS) {
-			cmn_err(CE_WARN, SFXGE_CMN_ERR
-			    "[%s%d] bus_enable: ddi_intr_remove_handler"
-			    " failed err=%d (h=%p idx=%d nalloc=%d)\n",
-			    ddi_driver_name(sp->s_dip),
-			    ddi_get_instance(sp->s_dip),
-			    err, sip->si_table[add_index], add_index,
+			dev_err(sp->s_dip, CE_WARN, SFXGE_CMN_ERR
+			    "bus_enable: ddi_intr_remove_handler"
+			    " failed err=%d (h=%p idx=%d nalloc=%d)",
+			    err, (void *)sip->si_table[add_index], add_index,
 			    sip->si_nalloc);
 		}
 	}
@@ -360,24 +352,20 @@ sfxge_intr_bus_disable(sfxge_t *sp)
 	if (sip->si_cap & DDI_INTR_FLAG_BLOCK) {
 		err = ddi_intr_block_disable(sip->si_table, sip->si_nalloc);
 		if (err != DDI_SUCCESS) {
-			cmn_err(CE_WARN, SFXGE_CMN_ERR
-			    "[%s%d] bus_disable: ddi_intr_block_disable"
-			    " failed err=%d (table=%p nalloc=%d)\n",
-			    ddi_driver_name(sp->s_dip),
-			    ddi_get_instance(sp->s_dip),
-			    err, sip->si_table, sip->si_nalloc);
+			dev_err(sp->s_dip, CE_WARN, SFXGE_CMN_ERR
+			    "bus_disable: ddi_intr_block_disable"
+			    " failed err=%d (table=%p nalloc=%d)",
+			    err, (void *)sip->si_table, sip->si_nalloc);
 		}
 	} else {
 		index = sip->si_nalloc;
 		while (--index >= 0) {
 			err = ddi_intr_disable(sip->si_table[index]);
 			if (err != DDI_SUCCESS) {
-				cmn_err(CE_WARN, SFXGE_CMN_ERR
-				    "[%s%d] bus_disable: ddi_intr_disable"
-				    " failed err=%d (h=%p idx=%d nalloc=%d)\n",
-				    ddi_driver_name(sp->s_dip),
-				    ddi_get_instance(sp->s_dip),
-				    err, sip->si_table[index], index,
+				dev_err(sp->s_dip, CE_WARN, SFXGE_CMN_ERR
+				    "bus_disable: ddi_intr_disable"
+				    " failed err=%d (h=%p idx=%d nalloc=%d)",
+				    err, (void *)sip->si_table[index], index,
 				    sip->si_nalloc);
 			}
 		}
@@ -390,12 +378,10 @@ sfxge_intr_bus_disable(sfxge_t *sp)
 	while (--index >= 0) {
 		err = ddi_intr_remove_handler(sip->si_table[index]);
 		if (err != DDI_SUCCESS) {
-			cmn_err(CE_WARN, SFXGE_CMN_ERR
-			    "[%s%d] bus_disable: ddi_intr_remove_handler"
-			    " failed err=%d (h=%p idx=%d nalloc=%d)\n",
-			    ddi_driver_name(sp->s_dip),
-			    ddi_get_instance(sp->s_dip),
-			    err, sip->si_table[index], index,
+			dev_err(sp->s_dip, CE_WARN, SFXGE_CMN_ERR
+			    "bus_disable: ddi_intr_remove_handler"
+			    " failed err=%d (h=%p idx=%d nalloc=%d)",
+			    err, (void *)sip->si_table[index], index,
 			    sip->si_nalloc);
 		}
 	}
@@ -415,13 +401,20 @@ sfxge_intr_nic_enable(sfxge_t *sp)
 	int rc;
 
 	/* Zero the memory */
-	(void) memset(esmp->esm_base, 0, EFX_INTR_SIZE);
+	bzero(esmp->esm_base, EFX_INTR_SIZE);
 
 	/* Enable interrupts at the NIC */
 	if ((rc = efx_intr_init(enp, sip->si_type, esmp)) != 0)
 		goto fail1;
 
 	efx_intr_enable(enp);
+
+	/* FIXME FIXME FIXME */
+	if (sp->s_family == EFX_FAMILY_HUNTINGTON) {
+		/* Disable interrupt test until supported on Huntington. */
+		return (0);
+	}
+	/* FIXME FIXME FIXME */
 
 	/* Test the interrupts */
 	mask = 0;
@@ -458,10 +451,9 @@ done:
 fail2:
 	DTRACE_PROBE(fail2);
 
-	cmn_err(CE_WARN, SFXGE_CMN_ERR
-	    "[%s%d] Interrupt test failed (mask=%"PRIx64" got=%"
-	    PRIx64"). NIC is disabled\n",
-	    ddi_driver_name(sp->s_dip), ddi_get_instance(sp->s_dip),
+	dev_err(sp->s_dip, CE_WARN, SFXGE_CMN_ERR
+	    "Interrupt test failed (mask=%"PRIx64" got=%"
+	    PRIx64"). NIC is disabled",
 	    mask, sip->si_mask);
 
 	DTRACE_PROBE2(int_test_fail, uint64_t, mask, uint64_t, sip->si_mask);
@@ -491,7 +483,9 @@ sfxge_intr_nic_disable(sfxge_t *sp)
 	efx_intr_fini(enp);
 }
 
-inline unsigned pow2_le(unsigned long n) {
+static inline unsigned
+pow2_le(unsigned long n)
+{
 	unsigned int order = 1;
 	ASSERT3U(n, >, 0);
 	while ((1ul << order) <= n) ++order;
@@ -526,11 +520,8 @@ sfxge_intr_init(sfxge_t *sp)
 	/* Get the map of supported interrupt types */
 	err = ddi_intr_get_supported_types(dip, &types);
 	if (err != DDI_SUCCESS) {
-		cmn_err(CE_WARN, SFXGE_CMN_ERR
-		    "[%s%d] intr_init: ddi_intr_get_supported_types"
-		    " failed err=%d\n",
-		    ddi_driver_name(sp->s_dip),
-		    ddi_get_instance(sp->s_dip),
+		dev_err(dip, CE_WARN, SFXGE_CMN_ERR
+		    "intr_init: ddi_intr_get_supported_types failed err=%d",
 		    err);
 
 		if (err == DDI_EINVAL)
@@ -562,10 +553,8 @@ sfxge_intr_init(sfxge_t *sp)
 	navail = 0;
 	err = ddi_intr_get_navail(dip, type, &navail);
 	if (err != DDI_SUCCESS) {
-		cmn_err(CE_WARN, SFXGE_CMN_ERR
-		    "[%s%d] intr_init: ddi_intr_get_navail failed err=%d\n",
-		    ddi_driver_name(sp->s_dip), ddi_get_instance(sp->s_dip),
-		    err);
+		dev_err(dip, CE_WARN, SFXGE_CMN_ERR
+		    "intr_init: ddi_intr_get_navail failed err=%d", err);
 
 		if (err == DDI_EINVAL)
 			rc = EINVAL;
@@ -611,10 +600,9 @@ sfxge_intr_init(sfxge_t *sp)
 	mutex_exit(&sfxge_global_lock);
 
 	if (err != DDI_SUCCESS) {
-		cmn_err(CE_WARN, SFXGE_CMN_ERR
-		    "[%s%d] intr_init: ddi_intr_alloc failed err=%d"
-		    " (navail=%d nalloc=%d)\n",
-		    ddi_driver_name(sp->s_dip), ddi_get_instance(sp->s_dip),
+		dev_err(dip, CE_WARN, SFXGE_CMN_ERR
+		    "intr_init: ddi_intr_alloc failed err=%d"
+		    " (navail=%d nalloc=%d)",
 		    err, navail, sip->si_nalloc);
 
 		if (err == DDI_EINVAL)
@@ -668,7 +656,7 @@ sfxge_intr_init(sfxge_t *sp)
 	/* Store the highest priority for convenience */
 	sip->si_intr_pri = 0;
 	for (index = 0; index < sip->si_nalloc; index++) {
-		int pri;
+		uint_t pri;
 		if ((rc = ddi_intr_get_pri(sip->si_table[index], &pri)) !=  0)
 			goto fail5;
 		if (pri > sip->si_intr_pri)
@@ -691,12 +679,11 @@ fail4:
 	while (--index >= 0) {
 		err = ddi_intr_free(sip->si_table[index]);
 		if (err != DDI_SUCCESS) {
-			cmn_err(CE_WARN, SFXGE_CMN_ERR
-			    "[%s%d] intr_init: ddi_intr_free failed err=%d"
-			    " (h=%p idx=%d nalloc=%d)\n",
-			    ddi_driver_name(sp->s_dip),
-			    ddi_get_instance(sp->s_dip),
-			    err, sip->si_table[index], index, sip->si_nalloc);
+			dev_err(dip, CE_WARN, SFXGE_CMN_ERR
+			    "intr_init: ddi_intr_free failed err=%d"
+			    " (h=%p idx=%d nalloc=%d)",
+			    err, (void *)sip->si_table[index], index,
+			    sip->si_nalloc);
 		}
 		sip->si_table[index] = NULL;
 	}
@@ -801,12 +788,11 @@ sfxge_intr_fini(sfxge_t *sp)
 	while (--index >= 0) {
 		err = ddi_intr_free(sip->si_table[index]);
 		if (err != DDI_SUCCESS) {
-			cmn_err(CE_WARN, SFXGE_CMN_ERR
-			    "[%s%d] intr_fini: ddi_intr_free failed err=%d"
-			    " (h=%p idx=%d nalloc=%d)\n",
-			    ddi_driver_name(sp->s_dip),
-			    ddi_get_instance(sp->s_dip),
-			    err, sip->si_table[index], index, sip->si_nalloc);
+			dev_err(sp->s_dip, CE_WARN, SFXGE_CMN_ERR
+			    "intr_fini: ddi_intr_free failed err=%d"
+			    " (h=%p idx=%d nalloc=%d)",
+			    err, (void *)sip->si_table[index],
+			    index, sip->si_nalloc);
 		}
 		sip->si_table[index] = NULL;
 	}

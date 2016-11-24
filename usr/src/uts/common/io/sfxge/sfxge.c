@@ -1,27 +1,31 @@
 /*
- * CDDL HEADER START
+ * Copyright (c) 2008-2016 Solarflare Communications Inc.
+ * All rights reserved.
  *
- * The contents of this file are subject to the terms of the
- * Common Development and Distribution License (the "License").
- * You may not use this file except in compliance with the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
  *
- * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
- * See the License for the specific language governing permissions
- * and limitations under the License.
+ * 1. Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
  *
- * When distributing Covered Code, include this CDDL HEADER in each
- * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
- * If applicable, add the following below this CDDL HEADER, with the
- * fields enclosed by brackets "[]" replaced with your own identifying
- * information: Portions Copyright [yyyy] [name of copyright owner]
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
+ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * CDDL HEADER END
- */
-
-/*
- * Copyright 2008-2013 Solarflare Communications Inc.  All rights reserved.
- * Use is subject to license terms.
+ * The views and conclusions contained in the software and documentation are
+ * those of the authors and should not be interpreted as representing official
+ * policies, either expressed or implied, of the FreeBSD Project.
  */
 
 #include <sys/types.h>
@@ -37,9 +41,8 @@
 #include <sys/cpuvar.h>
 #include <sys/pghw.h>
 
-#include "version.h"
-
 #include "sfxge.h"
+#include "sfxge_version.h"
 #include "efsys.h"
 #include "efx.h"
 
@@ -53,85 +56,39 @@ boolean_t sfxge_aask = B_FALSE;
 /* Broadcast address */
 uint8_t	sfxge_brdcst[] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
 
-/* Soft state head */
-static void	*sfxge_ss;
-
 /*
  * By default modinfo will display lines truncated to 80 characters and so just
- * show 32 characters of our sfxge_ident string. At the moment CI_VERSION_STRING
- * is 12 characters. To show the whole string use modinfo -w
+ * show 32 characters of our sfxge_ident string.
  */
-#if defined(_USE_GLD_V3_SOL10) && !defined(_USE_GLD_V3_SOL11)
-#ifdef DEBUG
-/*
- * The (DEBUG) part of this string will not be displayed in modinfo by
- * default. See previous comment.
- */
-const char sfxge_ident[] =
-    CI_VERSION_STRING" for Sol10u8,u9,u10 (DEBUG)";
-#else
-const char sfxge_ident[] =
-    CI_VERSION_STRING" for Sol10u8,u9,u10";
-#endif
-#elif defined(_USE_GLD_V3_SOL11)
-#ifdef DEBUG
-const char sfxge_ident[] = CI_VERSION_STRING" for Sol11 (DEBUG)";
-#else
-const char sfxge_ident[] = CI_VERSION_STRING" for Sol11";
-#endif
-#elif defined(_USE_GLD_V3)
-#ifdef DEBUG
-const char sfxge_ident[] = CI_VERSION_STRING" GLDv3 (DEBUG)";
-#else
-const char sfxge_ident[] = CI_VERSION_STRING" GLDv3";
-#endif
-#elif defined(_USE_GLD_V2)
-#ifdef DEBUG
-const char sfxge_ident[] = CI_VERSION_STRING" GLDv2 (DEBUG)";
-#else
-const char sfxge_ident[] = CI_VERSION_STRING" GLDv2";
-#endif
-#else
-#error "sfxge_ident undefined"
-#endif
-const char sfxge_version[] = CI_VERSION_STRING;
+const char sfxge_ident[] = "Solarflare 10Gb/40Gb Ethernet";
+const char sfxge_version[] = SFXGE_VERSION_STRING;
 
 static void
 sfxge_cfg_build(sfxge_t *sp)
 {
 	const efx_nic_cfg_t *encp = efx_nic_cfg_get(sp->s_enp);
 	(void) snprintf(sp->s_cfg_kstat.buf.sck_mac, 64,
-			"%02X:%02X:%02X:%02X:%02X:%02X",
-			encp->enc_mac_addr[0], encp->enc_mac_addr[1],
-			encp->enc_mac_addr[2], encp->enc_mac_addr[3],
-			encp->enc_mac_addr[4], encp->enc_mac_addr[5]);
+	    "%02X:%02X:%02X:%02X:%02X:%02X",
+	    encp->enc_mac_addr[0], encp->enc_mac_addr[1],
+	    encp->enc_mac_addr[2], encp->enc_mac_addr[3],
+	    encp->enc_mac_addr[4], encp->enc_mac_addr[5]);
 }
 
 static int
 sfxge_create(dev_info_t *dip, sfxge_t **spp)
 {
-	int instance = ddi_get_instance(dip);
 	sfxge_t *sp;
 	efx_nic_t *enp;
-	char name[MAXNAMELEN];
 	unsigned int rxq_size;
 	int rxq_poll_usec;
 	int rc;
 
-	/* Allocate the soft state object */
-	if (ddi_soft_state_zalloc(sfxge_ss, instance) != DDI_SUCCESS) {
-		rc = ENOMEM;
-		goto fail1;
-	}
-
-	sp = ddi_get_soft_state(sfxge_ss, instance);
-	ASSERT(sp != NULL);
-
-	SFXGE_OBJ_CHECK(sp, sfxge_t);
-
+	/* Allocate the object */
+	sp = kmem_zalloc(sizeof (*sp), KM_SLEEP);
 	sp->s_dip = dip;
+	ddi_set_driver_private(dip, sp);
 
-	mutex_init(&(sp->s_state_lock), "", MUTEX_DRIVER, NULL);
+	mutex_init(&(sp->s_state_lock), NULL, MUTEX_DRIVER, NULL);
 	sp->s_state = SFXGE_UNINITIALIZED;
 
 	/* Get property values */
@@ -143,21 +100,25 @@ sfxge_create(dev_info_t *dip, sfxge_t **spp)
 
 	rxq_size = ddi_prop_get_int(DDI_DEV_T_ANY, sp->s_dip,
 	    DDI_PROP_DONTPASS, "rxq_size", SFXGE_DEFAULT_RXQ_SIZE);
-	if (!(IS_POW2(rxq_size)))
+	if (!(ISP2(rxq_size)))
 		rxq_size = SFXGE_DEFAULT_RXQ_SIZE;
 	rxq_size = min(rxq_size, EFX_RXQ_MAXNDESCS);
-	sp->s_rxq_size = max(rxq_size, EFX_RXQ_MINNDESCS);
+	sp->s_rxq_size = (uint16_t)max(rxq_size, EFX_RXQ_MINNDESCS);
 
 	/* Configure polling interval for queue refill/trim */
 	rxq_poll_usec = ddi_prop_get_int(DDI_DEV_T_ANY, sp->s_dip,
-		DDI_PROP_DONTPASS, "rxq_poll_usec", SFXGE_RX_QPOLL_USEC);
+	    DDI_PROP_DONTPASS, "rxq_poll_usec", SFXGE_RX_QPOLL_USEC);
 	if (rxq_poll_usec <= 0)
 		rxq_poll_usec = SFXGE_RX_QPOLL_USEC;
 	sp->s_rxq_poll_usec = rxq_poll_usec;
 
+#if EFSYS_OPT_MCDI_LOGGING
+	sp->s_mcdi_logging = ddi_prop_get_int(DDI_DEV_T_ANY, sp->s_dip,
+	    DDI_PROP_DONTPASS, "mcdi_logging", 0);
+#endif
+
 	/* Create a taskq */
-	(void) snprintf(name, MAXNAMELEN - 1, "%s_tq", ddi_driver_name(dip));
-	sp->s_tqp = ddi_taskq_create(dip, name, 1, TASKQ_DEFAULTPRI, DDI_SLEEP);
+	sp->s_tqp = ddi_taskq_create(dip, "tq", 1, TASKQ_DEFAULTPRI, 0);
 	if (sp->s_tqp == NULL) {
 		rc = ENOMEM;
 		goto fail2;
@@ -188,14 +149,17 @@ sfxge_create(dev_info_t *dip, sfxge_t **spp)
 	if ((rc = efx_nic_probe(enp)) != 0)
 		goto fail7;
 
-	if (sp->s_family == EFX_FAMILY_SIENA) {
+	switch (sp->s_family) {
+	case EFX_FAMILY_HUNTINGTON:
+		sfxge_pcie_check_link(sp, 8, 3); /* PCI 8x Gen3 */
+		break;
+
+	case EFX_FAMILY_SIENA:
 		sfxge_pcie_check_link(sp, 8, 2); /* PCI 8x Gen2 */
+		break;
 
-	} else if (sp->s_family == EFX_FAMILY_FALCON) {
-		sfxge_pcie_check_link(sp, 8, 1); /* PCI 8x Gen1 */
-
-		rc = efx_nic_pcie_tune(enp, sp->s_pcie_nlanes);
-		ASSERT(rc == 0);
+	default:
+		break;
 	}
 
 	if ((rc = efx_nvram_init(enp)) != 0)
@@ -215,21 +179,21 @@ sfxge_create(dev_info_t *dip, sfxge_t **spp)
 	if ((rc = sfxge_ev_init(sp)) != 0)
 		goto fail12;
 
-	if ((rc = sfxge_rx_init(sp)) != 0)
+	if ((rc = sfxge_mac_init(sp)) != 0)
 		goto fail13;
 
-	if ((rc = sfxge_tx_init(sp)) != 0)
+	if ((rc = sfxge_rx_init(sp)) != 0)
 		goto fail14;
 
-	if ((rc = sfxge_mon_init(sp)) != 0)
+	if ((rc = sfxge_tx_init(sp)) != 0)
 		goto fail15;
 
-	if ((rc = sfxge_mac_init(sp)) != 0)
+	if ((rc = sfxge_mon_init(sp)) != 0)
 		goto fail16;
 
-	mutex_init(&(sp->s_tx_flush_lock), "", MUTEX_DRIVER,
+	mutex_init(&(sp->s_tx_flush_lock), NULL, MUTEX_DRIVER,
 	    DDI_INTR_PRI(sp->s_intr.si_intr_pri));
-	cv_init(&(sp->s_tx_flush_kv), "", CV_DRIVER, NULL);
+	cv_init(&(sp->s_tx_flush_kv), NULL, CV_DRIVER, NULL);
 
 	sp->s_state = SFXGE_INITIALIZED;
 
@@ -237,16 +201,16 @@ sfxge_create(dev_info_t *dip, sfxge_t **spp)
 	return (0);
 
 fail16:
-	DTRACE_PROBE(fail16);
-	sfxge_mon_fini(sp);
-
-fail15:
 	DTRACE_PROBE(fail15);
 	sfxge_tx_fini(sp);
 
-fail14:
+fail15:
 	DTRACE_PROBE(fail14);
 	sfxge_rx_fini(sp);
+
+fail14:
+	DTRACE_PROBE(fail14);
+	sfxge_mac_fini(sp);
 
 fail13:
 	DTRACE_PROBE(fail13);
@@ -308,10 +272,7 @@ fail2:
 	sp->s_dip = NULL;
 
 	SFXGE_OBJ_CHECK(sp, sfxge_t);
-	ddi_soft_state_free(sfxge_ss, instance);
-
-fail1:
-	DTRACE_PROBE1(fail1, int, rc);
+	kmem_free(sp, sizeof (*sp));
 
 	return (rc);
 }
@@ -333,32 +294,38 @@ sfxge_start_locked(sfxge_t *sp, boolean_t restart)
 	}
 	sp->s_state = SFXGE_STARTING;
 
+	/* Start a new epoch (allow fresh MCDI requests to succeed) */
+	efx_mcdi_new_epoch(sp->s_enp);
+
 	if ((rc = efx_nic_reset(sp->s_enp)) != 0)
 		goto fail2;
 
 	if ((rc = efx_nic_init(sp->s_enp)) != 0)
 		goto fail3;
 
-	if ((rc = sfxge_sram_start(sp)) != 0)
+	if ((rc = efx_filter_init(sp->s_enp)) != 0)
 		goto fail4;
 
-	if ((rc = sfxge_intr_start(sp)) != 0)
+	if ((rc = sfxge_sram_start(sp)) != 0)
 		goto fail5;
 
-	if ((rc = sfxge_ev_start(sp)) != 0)
+	if ((rc = sfxge_intr_start(sp)) != 0)
 		goto fail6;
 
-	if ((rc = sfxge_rx_start(sp)) != 0)
+	if ((rc = sfxge_ev_start(sp)) != 0)
 		goto fail7;
 
-	if ((rc = sfxge_tx_start(sp)) != 0)
+	if ((rc = sfxge_mac_start(sp, restart)) != 0)
 		goto fail8;
 
-	if ((rc = sfxge_mon_start(sp)) != 0)
+	if ((rc = sfxge_rx_start(sp)) != 0)
 		goto fail9;
 
-	if ((rc = sfxge_mac_start(sp, restart)) != 0)
+	if ((rc = sfxge_tx_start(sp)) != 0)
 		goto fail10;
+
+	if ((rc = sfxge_mon_start(sp)) != 0)
+		goto fail11;
 
 	ASSERT3U(sp->s_state, ==, SFXGE_STARTING);
 	sp->s_state = SFXGE_STARTED;
@@ -369,29 +336,33 @@ sfxge_start_locked(sfxge_t *sp, boolean_t restart)
 done:
 	return (0);
 
+fail11:
+	DTRACE_PROBE(fail11);
+	sfxge_tx_stop(sp);
+
 fail10:
 	DTRACE_PROBE(fail10);
-	sfxge_mon_stop(sp);
+	sfxge_rx_stop(sp);
 
 fail9:
 	DTRACE_PROBE(fail9);
-	sfxge_tx_stop(sp);
+	sfxge_mac_stop(sp);
 
 fail8:
 	DTRACE_PROBE(fail8);
-	sfxge_rx_stop(sp);
+	sfxge_ev_stop(sp);
 
 fail7:
 	DTRACE_PROBE(fail7);
-	sfxge_ev_stop(sp);
+	sfxge_intr_stop(sp);
 
 fail6:
 	DTRACE_PROBE(fail6);
-	sfxge_intr_stop(sp);
+	sfxge_sram_stop(sp);
 
 fail5:
 	DTRACE_PROBE(fail5);
-	sfxge_sram_stop(sp);
+	efx_filter_fini(sp->s_enp);
 
 fail4:
 	DTRACE_PROBE(fail4);
@@ -436,18 +407,20 @@ sfxge_stop_locked(sfxge_t *sp)
 	}
 	sp->s_state = SFXGE_STOPPING;
 
-	sfxge_mac_stop(sp);
 	sfxge_mon_stop(sp);
 	sfxge_tx_stop(sp);
 	sfxge_rx_stop(sp);
+	sfxge_mac_stop(sp);
 
 	/* Stop event processing - must be after rx_stop see sfxge_rx_qpoll() */
 	sfxge_ev_stop(sp);
 	sfxge_intr_stop(sp); /* cope with late flush/soft events until here */
 	sfxge_sram_stop(sp);
 
+	efx_filter_fini(sp->s_enp);
+
 	efx_nic_fini(sp->s_enp);
-	efx_nic_reset(sp->s_enp);
+	(void) efx_nic_reset(sp->s_enp);
 
 	ASSERT3U(sp->s_state, ==, SFXGE_STOPPING);
 	sp->s_state = SFXGE_REGISTERED;
@@ -484,9 +457,11 @@ _sfxge_restart(void *arg)
 	sfxge_stop_locked(sp);
 
 	if (sp->s_hw_err && sp->s_action_on_hw_err == SFXGE_LEAVE_DEAD) {
-		cmn_err(CE_WARN, SFXGE_CMN_ERR "[%s%d] NIC error - interface is"
-		    " being left permanently DOWN per driver config",
-		    ddi_driver_name(sp->s_dip), ddi_get_instance(sp->s_dip));
+		dev_err(sp->s_dip, CE_WARN, SFXGE_CMN_ERR
+		    "NIC error - interface is"
+		    " being left permanently DOWN per driver config");
+
+		(void) atomic_swap_32(&(sp->s_nested_restarts), 0);
 		mutex_exit(&(sp->s_state_lock));
 		return;
 	} else
@@ -497,17 +472,17 @@ _sfxge_restart(void *arg)
 		goto fail1;
 
 done:
+	(void) atomic_swap_32(&(sp->s_nested_restarts), 0);
 	mutex_exit(&(sp->s_state_lock));
-	cmn_err(CE_WARN, SFXGE_CMN_ERR "[%s%d] NIC restart complete",
-	    ddi_driver_name(sp->s_dip), ddi_get_instance(sp->s_dip));
+	dev_err(sp->s_dip, CE_WARN, SFXGE_CMN_ERR "NIC restart complete");
 	return;
 
 fail1:
 	DTRACE_PROBE1(fail1, int, rc);
-	cmn_err(CE_WARN,
-	    SFXGE_CMN_ERR "[%s%d] FATAL ERROR: NIC restart failed rc=%d",
-	    ddi_driver_name(sp->s_dip), ddi_get_instance(sp->s_dip), rc);
+	dev_err(sp->s_dip, CE_WARN,
+	    SFXGE_CMN_ERR "FATAL ERROR: NIC restart failed rc=%d", rc);
 
+	(void) atomic_swap_32(&(sp->s_nested_restarts), 0);
 	mutex_exit(&(sp->s_state_lock));
 }
 
@@ -522,12 +497,16 @@ sfxge_restart_dispatch(sfxge_t *sp, uint_t cflags, sfxge_hw_err_t hw_err,
 		sp->s_num_restarts_hw_err++;
 	}
 
+	if (atomic_inc_32_nv(&(sp->s_nested_restarts)) > 1) {
+		/* A restart is currently in progress */
+		return (0);
+	}
+
 	DTRACE_PROBE2(sfxge_restart_dispatch, sfxge_hw_err_t, hw_err, char *,
 	    reason);
 
-	cmn_err(CE_WARN, SFXGE_CMN_ERR "[%s%d] NIC restart due to %s:%d",
-	    ddi_driver_name(sp->s_dip), ddi_get_instance(sp->s_dip), reason,
-	    errval);
+	dev_err(sp->s_dip, CE_WARN, SFXGE_CMN_ERR "NIC restart due to %s:%d",
+	    reason, errval);
 
 	/* If cflags == DDI_SLEEP then guaranteed to succeed */
 	return (ddi_taskq_dispatch(sp->s_tqp, _sfxge_restart, sp, cflags));
@@ -537,7 +516,6 @@ sfxge_restart_dispatch(sfxge_t *sp, uint_t cflags, sfxge_hw_err_t hw_err,
 static int
 sfxge_can_destroy(sfxge_t *sp)
 {
-	sfxge_intr_t *sip = &(sp->s_intr);
 	int index;
 
 	/*
@@ -546,10 +524,12 @@ sfxge_can_destroy(sfxge_t *sp)
 	 * This call to empty the TX deferred packet list may result in
 	 * rx_loaned reducing.
 	 */
-	index = sip->si_nalloc;
+	index = EFX_ARRAY_SIZE(sp->s_stp);
 	while (--index >= 0) {
 		sfxge_txq_t *stp = sp->s_stp[index];
-		sfxge_tx_qdpl_flush(stp);
+
+		if (stp != NULL)
+			sfxge_tx_qdpl_flush(stp);
 	}
 
 	/* Need to wait for desballoc free_func callback */
@@ -560,8 +540,6 @@ sfxge_can_destroy(sfxge_t *sp)
 static int
 sfxge_destroy(sfxge_t *sp)
 {
-	dev_info_t *dip = sp->s_dip;
-	int instance = ddi_get_instance(dip);
 	ddi_taskq_t *tqp;
 	efx_nic_t *enp;
 	int rc;
@@ -579,10 +557,10 @@ sfxge_destroy(sfxge_t *sp)
 	cv_destroy(&(sp->s_tx_flush_kv));
 	mutex_destroy(&(sp->s_tx_flush_lock));
 
-	sfxge_mac_fini(sp);
 	sfxge_mon_fini(sp);
 	sfxge_tx_fini(sp);
 	sfxge_rx_fini(sp);
+	sfxge_mac_fini(sp);
 	sfxge_ev_fini(sp);
 	sfxge_intr_fini(sp);
 	sfxge_sram_fini(sp);
@@ -619,7 +597,7 @@ sfxge_destroy(sfxge_t *sp)
 	sp->s_dip = NULL;
 
 	SFXGE_OBJ_CHECK(sp, sfxge_t);
-	ddi_soft_state_free(sfxge_ss, instance);
+	kmem_free(sp, sizeof (*sp));
 
 	return (0);
 
@@ -646,41 +624,18 @@ sfxge_ioctl(sfxge_t *sp, queue_t *wq, mblk_t *mp)
 	iocp = (struct iocblk *)mp->b_rptr;
 
 	switch (iocp->ioc_cmd) {
-	case SFXGE_TX_IOC:
-		ioclen = sizeof (sfxge_tx_ioc_t);
-		break;
-	case SFXGE_RX_IOC:
-		ioclen = sizeof (sfxge_rx_ioc_t);
-		break;
-	case SFXGE_BAR_IOC:
-		ioclen = sizeof (sfxge_bar_ioc_t);
-		break;
-	case SFXGE_PCI_IOC:
-		ioclen = sizeof (sfxge_pci_ioc_t);
-		break;
-	case SFXGE_MAC_IOC:
-		ioclen = sizeof (sfxge_mac_ioc_t);
-		break;
-	case SFXGE_PHY_IOC:
-		ioclen = sizeof (sfxge_phy_ioc_t);
-		break;
-	case SFXGE_PHY_BIST_IOC:
-		ioclen = sizeof (sfxge_phy_bist_ioc_t);
-		break;
-	case SFXGE_SRAM_IOC:
-		ioclen = sizeof (sfxge_sram_ioc_t);
-		break;
 	case SFXGE_NVRAM_IOC:
 		ioclen = sizeof (sfxge_nvram_ioc_t);
 		break;
 	case SFXGE_MCDI_IOC:
 		ioclen = sizeof (sfxge_mcdi_ioc_t);
 		break;
+	case SFXGE_MCDI2_IOC:
+		ioclen = sizeof (sfxge_mcdi2_ioc_t);
+		break;
 	case SFXGE_VPD_IOC:
 		ioclen = sizeof (sfxge_vpd_ioc_t);
 		break;
-	case SFXGE_START_IOC:
-	case SFXGE_STOP_IOC:
 	case SFXGE_NIC_RESET_IOC:
 		break;
 	default:
@@ -699,82 +654,6 @@ sfxge_ioctl(sfxge_t *sp, queue_t *wq, mblk_t *mp)
 	}
 
 	switch (iocp->ioc_cmd) {
-	case SFXGE_START_IOC:
-		if ((rc = sfxge_start_locked(sp, B_TRUE)) != 0)
-			goto fail4;
-
-		break;
-
-	case SFXGE_STOP_IOC:
-		sfxge_stop_locked(sp);
-		break;
-
-	case SFXGE_TX_IOC: {
-		sfxge_tx_ioc_t *stip = (sfxge_tx_ioc_t *)mp->b_cont->b_rptr;
-
-		if ((rc = sfxge_tx_ioctl(sp, stip)) != 0)
-			goto fail4;
-
-		break;
-	}
-	case SFXGE_RX_IOC: {
-		sfxge_rx_ioc_t *srip = (sfxge_rx_ioc_t *)mp->b_cont->b_rptr;
-
-		if ((rc = sfxge_rx_ioctl(sp, srip)) != 0)
-			goto fail4;
-
-		break;
-	}
-	case SFXGE_BAR_IOC: {
-		sfxge_bar_ioc_t *sbip = (sfxge_bar_ioc_t *)mp->b_cont->b_rptr;
-
-		if ((rc = sfxge_bar_ioctl(sp, sbip)) != 0)
-			goto fail4;
-
-		break;
-	}
-	case SFXGE_PCI_IOC: {
-		sfxge_pci_ioc_t *spip = (sfxge_pci_ioc_t *)mp->b_cont->b_rptr;
-
-		if ((rc = sfxge_pci_ioctl(sp, spip)) != 0)
-			goto fail4;
-
-		break;
-	}
-	case SFXGE_MAC_IOC: {
-		sfxge_mac_ioc_t *smip = (sfxge_mac_ioc_t *)mp->b_cont->b_rptr;
-
-		if ((rc = sfxge_mac_ioctl(sp, smip)) != 0)
-			goto fail4;
-
-		break;
-	}
-	case SFXGE_PHY_IOC: {
-		sfxge_phy_ioc_t *spip = (sfxge_phy_ioc_t *)mp->b_cont->b_rptr;
-
-		if ((rc = sfxge_phy_ioctl(sp, spip)) != 0)
-			goto fail4;
-
-		break;
-	}
-	case SFXGE_PHY_BIST_IOC: {
-		sfxge_phy_bist_ioc_t *spbip;
-
-		spbip = (sfxge_phy_bist_ioc_t *)mp->b_cont->b_rptr;
-
-		if ((rc = sfxge_phy_bist_ioctl(sp, spbip)) != 0)
-			goto fail4;
-
-		break;
-	}
-	case SFXGE_SRAM_IOC: {
-		sfxge_sram_ioc_t *ssip = (sfxge_sram_ioc_t *)mp->b_cont->b_rptr;
-
-		if ((rc = sfxge_sram_ioctl(sp, ssip)) != 0)
-			goto fail4;
-
-		break;
-	}
 	case SFXGE_NVRAM_IOC: {
 		sfxge_nvram_ioc_t *snip =
 		    (sfxge_nvram_ioc_t *)mp->b_cont->b_rptr;
@@ -788,6 +667,16 @@ sfxge_ioctl(sfxge_t *sp, queue_t *wq, mblk_t *mp)
 		sfxge_mcdi_ioc_t *smip = (sfxge_mcdi_ioc_t *)mp->b_cont->b_rptr;
 
 		if ((rc = sfxge_mcdi_ioctl(sp, smip)) != 0)
+			goto fail4;
+		taskq_wait = 1;
+
+		break;
+	}
+	case SFXGE_MCDI2_IOC: {
+		sfxge_mcdi2_ioc_t *smip =
+		    (sfxge_mcdi2_ioc_t *)mp->b_cont->b_rptr;
+
+		if ((rc = sfxge_mcdi2_ioctl(sp, smip)) != 0)
 			goto fail4;
 		taskq_wait = 1;
 
@@ -891,7 +780,7 @@ fail1:
 
 static void
 _sfxge_vpd_kstat_init(sfxge_t *sp, caddr_t vpd, size_t size, efx_vpd_tag_t tag,
-	    const char *keyword, sfxge_vpd_type_t type)
+    const char *keyword, sfxge_vpd_type_t type)
 {
 	static const char unknown[] = "?";
 	efx_nic_t *enp = sp->s_enp;
@@ -905,7 +794,7 @@ _sfxge_vpd_kstat_init(sfxge_t *sp, caddr_t vpd, size_t size, efx_vpd_tag_t tag,
 
 	if (efx_vpd_get(enp, vpd, size, evvp) != 0) {
 		evvp->evv_length = strlen(unknown) + 1;
-		memcpy(evvp->evv_value, unknown, evvp->evv_length);
+		bcopy(unknown, evvp->evv_value, evvp->evv_length);
 	}
 
 	knp = &(svkp->svk_stat[type]);
@@ -961,7 +850,9 @@ sfxge_vpd_kstat_init(sfxge_t *sp)
 	_sfxge_vpd_kstat_init(sp, vpd, size, EFX_VPD_RO, "PN", SFXGE_VPD_PN);
 	_sfxge_vpd_kstat_init(sp, vpd, size, EFX_VPD_RO, "SN", SFXGE_VPD_SN);
 	_sfxge_vpd_kstat_init(sp, vpd, size, EFX_VPD_RO, "EC", SFXGE_VPD_EC);
+	_sfxge_vpd_kstat_init(sp, vpd, size, EFX_VPD_RO, "MN", SFXGE_VPD_MN);
 	_sfxge_vpd_kstat_init(sp, vpd, size, EFX_VPD_RO, "VD", SFXGE_VPD_VD);
+	_sfxge_vpd_kstat_init(sp, vpd, size, EFX_VPD_RO, "VE", SFXGE_VPD_VE);
 
 	kstat_install(ksp);
 	kmem_free(vpd, size);
@@ -1064,9 +955,8 @@ sfxge_cfg_kstat_fini(sfxge_t *sp)
 }
 
 static int
-sfxge_resume(dev_info_t *dip)
+sfxge_resume(sfxge_t *sp)
 {
-	sfxge_t *sp = ddi_get_soft_state(sfxge_ss, ddi_get_instance(dip));
 	int rc;
 
 	/* Start processing */
@@ -1084,29 +974,17 @@ fail1:
 static int
 sfxge_attach(dev_info_t *dip, ddi_attach_cmd_t cmd)
 {
-	sfxge_t *sp = ddi_get_soft_state(sfxge_ss, ddi_get_instance(dip));
+	sfxge_t *sp;
 	int rc;
 
 	switch (cmd) {
 	case DDI_ATTACH:
-		if (sp != NULL) {
-			cmn_err(CE_WARN, SFXGE_CMN_ERR
-			    "[%s%d] ATTACH for attached instance\n",
-			    ddi_driver_name(sp->s_dip),
-			    ddi_get_instance(sp->s_dip));
-			return (DDI_FAILURE);
-		}
 		break;
 
 	case DDI_RESUME:
-		if (sp == NULL) {
-			cmn_err(CE_WARN, SFXGE_CMN_ERR
-			    "[%s%d] RESUME for missing instance\n",
-			    ddi_driver_name(sp->s_dip),
-			    ddi_get_instance(sp->s_dip));
+		if ((sp = ddi_get_driver_private(dip)) == NULL)
 			return (DDI_FAILURE);
-		}
-		return (sfxge_resume(dip));
+		return (sfxge_resume(sp));
 
 	default:
 		return (DDI_FAILURE);
@@ -1160,10 +1038,8 @@ fail1:
 }
 
 static int
-sfxge_suspend(dev_info_t *dip)
+sfxge_suspend(sfxge_t *sp)
 {
-	sfxge_t *sp = ddi_get_soft_state(sfxge_ss, ddi_get_instance(dip));
-
 	/* Stop processing */
 	sfxge_stop(sp);
 
@@ -1173,29 +1049,19 @@ sfxge_suspend(dev_info_t *dip)
 static int
 sfxge_detach(dev_info_t *dip, ddi_detach_cmd_t cmd)
 {
-	sfxge_t *sp = ddi_get_soft_state(sfxge_ss, ddi_get_instance(dip));
+	sfxge_t *sp = ddi_get_driver_private(dip);
 	int rc;
 
 	switch (cmd) {
 	case DDI_DETACH:
-		if (sp == NULL) {
-			cmn_err(CE_WARN, SFXGE_CMN_ERR
-			    "[%s%d] DETACH for missing instance\n",
-			    ddi_driver_name(sp->s_dip),
-			    ddi_get_instance(sp->s_dip));
+		if (sp == NULL)
 			return (DDI_FAILURE);
-		}
 		break;
 
 	case DDI_SUSPEND:
-		if (sp == NULL) {
-			cmn_err(CE_WARN, SFXGE_CMN_ERR
-			    "[%s%d] SUSPEND for missing instance\n",
-			    ddi_driver_name(sp->s_dip),
-			    ddi_get_instance(sp->s_dip));
+		if (sp == NULL)
 			return (DDI_FAILURE);
-		}
-		return (sfxge_suspend(dip));
+		return (sfxge_suspend(sp));
 
 	default:
 		return (DDI_FAILURE);
@@ -1213,10 +1079,8 @@ sfxge_detach(dev_info_t *dip, ddi_detach_cmd_t cmd)
 	 */
 	mutex_enter(&(sp->s_state_lock));
 	if (sp->s_state == SFXGE_STARTED) {
-		cmn_err(CE_WARN, SFXGE_CMN_ERR
-			    "[%s%d] STREAMS detach when STARTED\n",
-			    ddi_driver_name(sp->s_dip),
-			    ddi_get_instance(sp->s_dip));
+		dev_err(dip, CE_WARN, SFXGE_CMN_ERR
+		    "STREAMS detach when STARTED");
 		sfxge_stop_locked(sp);
 		ASSERT3U(sp->s_state, ==, SFXGE_REGISTERED);
 	}
@@ -1256,108 +1120,12 @@ fail1:
 	return (DDI_FAILURE);
 }
 
-#ifdef _USE_GLD_V3
-#ifndef _USE_GLD_V3_SOL10
-static int
-sfxge_quiesce(dev_info_t *dip)
-{
-	sfxge_t *sp = ddi_get_soft_state(sfxge_ss, ddi_get_instance(dip));
-	int rc;
-
-	/* Reset the hardware */
-	if ((rc = sfxge_reset(sp, B_FALSE)) != 0)
-		goto fail1;
-
-	return (DDI_SUCCESS);
-
-fail1:
-	DTRACE_PROBE1(fail1, int, rc);
-
-	return (DDI_FAILURE);
-}
-#endif
-#endif
-
 /*
  * modlinkage
  */
+
 DDI_DEFINE_STREAM_OPS(sfxge_dev_ops, nulldev, nulldev, sfxge_attach,
     sfxge_detach, nulldev, NULL, D_MP, NULL, NULL);
-
-#ifdef _USE_GLD_V2
-
-static struct module_info	sfxge_module_info = {
-	0,
-	SFXGE_DRIVER_NAME,
-	0,
-	INFPSZ,
-	1,
-	0
-};
-
-static struct qinit		sfxge_rqinit = {
-	NULL,
-	gld_rsrv,
-	gld_open,
-	gld_close,
-	NULL,
-	&sfxge_module_info,
-	NULL
-};
-
-static struct qinit		sfxge_wqinit = {
-	gld_wput,
-	gld_wsrv,
-	NULL,
-	NULL,
-	NULL,
-	&sfxge_module_info,
-	NULL
-};
-
-static struct streamtab		sfxge_streamtab = {
-	&sfxge_rqinit,
-	&sfxge_wqinit,
-	NULL,
-	NULL
-};
-
-static struct cb_ops		sfxge_cb_ops = {
-	nulldev,		/* cb_open */
-	nulldev,		/* cb_close */
-	nodev,			/* cb_strategy */
-	nodev,			/* cb_print */
-	nodev,			/* cb_dump */
-	nodev,			/* cb_read */
-	nodev,			/* cb_write */
-	nodev,			/* cb_ioctl */
-	nodev,			/* cb_devmap */
-	nodev,			/* cb_mmap */
-	nodev,			/* cb_segmap */
-	nochpoll,		/* cb_chpoll */
-	ddi_prop_op,		/* cb_prop_op */
-	&sfxge_streamtab,	/* cb_stream */
-	D_MP,			/* cb_flag */
-	CB_REV,			/* cb_rev */
-	nodev,			/* cb_aread */
-	nodev,			/* cb_awrite */
-};
-
-static struct dev_ops		sfxge_dev_ops = {
-	DEVO_REV,		/* devo_rev */
-	0,			/* devo_refcnt */
-	NULL,			/* devo_getinfo */
-	nulldev,		/* devo_identify */
-	nulldev,		/* devo_probe */
-	sfxge_attach,		/* devo_attach */
-	sfxge_detach,		/* devo_detach */
-	nulldev,		/* devo_reset */
-	&sfxge_cb_ops,		/* devo_cb_ops */
-	(struct bus_ops *)NULL,	/* devo_bus_ops */
-	NULL			/* devo_power */
-};
-
-#endif
 
 static struct modldrv		sfxge_modldrv = {
 	&mod_driverops,
@@ -1372,11 +1140,6 @@ static struct modlinkage	sfxge_modlinkage = {
 
 kmutex_t	sfxge_global_lock;
 unsigned int	*sfxge_cpu;
-#ifdef	_USE_CPU_PHYSID
-unsigned int	*sfxge_core;
-unsigned int	*sfxge_cache;
-unsigned int	*sfxge_chip;
-#endif
 
 int
 _init(void)
@@ -1387,39 +1150,21 @@ _init(void)
 
 	/* Create tables for CPU, core, cache and chip counts */
 	sfxge_cpu = kmem_zalloc(sizeof (unsigned int) * NCPU, KM_SLEEP);
-#ifdef	_USE_CPU_PHYSID
-	sfxge_core = kmem_zalloc(sizeof (unsigned int) * NCPU, KM_SLEEP);
-	sfxge_cache = kmem_zalloc(sizeof (unsigned int) * NCPU, KM_SLEEP);
-	sfxge_chip = kmem_zalloc(sizeof (unsigned int) * NCPU, KM_SLEEP);
-#endif
 
-	if ((rc = ddi_soft_state_init(&sfxge_ss, sizeof (sfxge_t), 0)) != 0)
-		goto fail1;
-
-#ifdef _USE_GLD_V3
 	mac_init_ops(&sfxge_dev_ops, SFXGE_DRIVER_NAME);
-#endif
 
 	if ((rc = mod_install(&sfxge_modlinkage)) != 0)
-		goto fail2;
-
-	cmn_err(CE_NOTE, SFXGE_CMN_ERR
-	    "LOAD: Solarflare Ethernet Driver (%s) %s",
-	    SFXGE_DRIVER_NAME, sfxge_ident);
+		goto fail1;
 
 	return (0);
 
-fail2:
+fail1:
 	DTRACE_PROBE(fail2);
 
-#ifdef _USE_GLD_V3
-//	mac_fini_ops(&sfxge_dev_ops);
-#endif
+	mac_fini_ops(&sfxge_dev_ops);
 
-	ddi_soft_state_fini(&sfxge_ss);
-
-fail1:
-	DTRACE_PROBE1(fail1, int, rc);
+	kmem_free(sfxge_cpu, sizeof (unsigned int) * NCPU);
+	mutex_destroy(&sfxge_global_lock);
 
 	return (rc);
 }
@@ -1432,22 +1177,9 @@ _fini(void)
 	if ((rc = mod_remove(&sfxge_modlinkage)) != 0)
 		return (rc);
 
-	cmn_err(CE_NOTE, SFXGE_CMN_ERR
-	    "UNLOAD: Solarflare Ethernet Driver (%s) %s",
-	    SFXGE_DRIVER_NAME, sfxge_ident);
-
-#ifdef _USE_GLD_V3
 	mac_fini_ops(&sfxge_dev_ops);
-#endif
-
-	ddi_soft_state_fini(&sfxge_ss);
 
 	/* Destroy tables */
-#ifdef	_USE_CPU_PHYSID
-	kmem_free(sfxge_chip, sizeof (unsigned int) * NCPU);
-	kmem_free(sfxge_cache, sizeof (unsigned int) * NCPU);
-	kmem_free(sfxge_core, sizeof (unsigned int) * NCPU);
-#endif
 	kmem_free(sfxge_cpu, sizeof (unsigned int) * NCPU);
 
 	mutex_destroy(&sfxge_global_lock);

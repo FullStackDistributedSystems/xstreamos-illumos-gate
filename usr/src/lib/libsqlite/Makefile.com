@@ -1,6 +1,8 @@
 #
 # Copyright 2008 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
+# Copyright 2015 Igor Kozhukhov <ikozhukhov@gmail.com>
+# Copyright 2016 Nexenta Systems, Inc.  All rights reserved.
 #
 
 # Make the SO name unlikely to conflict with any other
@@ -219,7 +221,7 @@ opcodes.h: $(SRCDIR)/vdbe.c
 	 echo '/* Automatically generated file.  Do not edit */' > $@ ; \
 	 grep '^case OP_' $(SRCDIR)/vdbe.c | \
 	    sed -e 's/://' | \
-	    awk '{printf "#define %-30s %3d\n", $$2, ++cnt}' >> $@
+	    $(AWK) '{printf "#define %-30s %3d\n", $$2, ++cnt}' >> $@
 
 opcodes.c: $(SRCDIR)/vdbe.c
 	@echo "Generating $@"; \
@@ -240,15 +242,22 @@ testfixture: FRC
 		exit 1; \
 	fi
 
+# Prevent Makefile.lib $(PICS) := from adding PICFLAGS
+# by building lemon in a recursive make invocation.
+# Otherwise, this target causes a rebuild every time after
+# the PICS target builds this one way, then lint the other.
 parse.h parse.c : $(SRCDIR)/parse.y $(TOOLDIR)/lemon.c $(TOOLDIR)/lempar.c
 	-$(RM) parse_tmp.y lempar.c
 	$(CP) $(SRCDIR)/parse.y parse_tmp.y
 	$(CP) $(TOOLDIR)/lempar.c lempar.c
-	$(NATIVECC) -o lemon $(TOOLDIR)/lemon.c
+	$(MAKE) lemon
 	./lemon parse_tmp.y
 	-$(RM) parse.c parse.h
 	$(CP) parse_tmp.h parse.h
 	$(CP) parse_tmp.c parse.c
+
+lemon: $(TOOLDIR)/lemon.c
+	$(NATIVECC) $(NATIVE_CFLAGS) -o $@ $(TOOLDIR)/lemon.c
 
 objs/%-native.o: $(SRCDIR)/%.c $(GENHDR)
 	$(COMPILE.c) -o $@ $<

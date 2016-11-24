@@ -1,90 +1,59 @@
 #
-# CDDL HEADER START
+# This file and its contents are supplied under the terms of the
+# Common Development and Distribution License ("CDDL"), version 1.0.
+# You may only use this file in accordance with the terms of version
+# 1.0 of the CDDL.
 #
-# The contents of this file are subject to the terms of the
-# Common Development and Distribution License (the "License").
-# You may not use this file except in compliance with the License.
-#
-# You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
-# or http://www.opensolaris.org/os/licensing.
-# See the License for the specific language governing permissions
-# and limitations under the License.
-#
-# When distributing Covered Code, include this CDDL HEADER in each
-# file and include the License file at usr/src/OPENSOLARIS.LICENSE.
-# If applicable, add the following below this CDDL HEADER, with the
-# fields enclosed by brackets "[]" replaced with your own identifying
-# information: Portions Copyright [yyyy] [name of copyright owner]
-#
-# CDDL HEADER END
-#
-#
-# Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
-# Use is subject to license terms.
-#
-# uts/intel/sfxge/Makefile
-#
-#	This makefile drives the production of the sfxge
-#	network driver kernel module.
-#
-#	intel architecture dependent
+# A full copy of the text of the CDDL should have accompanied this
+# source.  A copy of the CDDL is also available via the Internet at
+# http://www.illumos.org/license/CDDL.
 #
 
 #
-#	Paths to the base of the uts directory trees
+# Copyright 2016 Garrett D'Amore <garrett@damore.org>
 #
-UTSBASE = ../..
 
-#
-#	Define the module and object file sets.
-#
+UTSBASE		= ../..
+
 MODULE		= sfxge
 OBJECTS		= $(SFXGE_OBJS:%=$(OBJS_DIR)/%)
+OBJECTS		+= $(SFXGE_SF_OBJS:%=$(OBJS_DIR)/%)
 LINTS		= $(SFXGE_OBJS:%.o=$(LINTS_DIR)/%.ln)
+LINTS		+= $(SFXGE_SF_OBJS:%.o=$(LINTS_DIR)/%.ln)
 ROOTMODULE	= $(ROOT_DRV_DIR)/$(MODULE)
-CONF_SRCDIR	= $(UTSBASE)/common/io/sfxge
 
-#
-#	Include common rules.
-#
 include $(UTSBASE)/intel/Makefile.intel
 
-CERRWARN	+= -_gcc=-Wno-parentheses
-CERRWARN	+= -_gcc=-Wno-switch
-CERRWARN	+= -_gcc=-Wno-uninitialized
-CERRWARN	+= -_gcc=-Wno-type-limits
-CERRWARN	+= -_gcc=-Wno-pointer-sign
-
 #
-#	Define targets
+# Targets
 #
-ALL_TARGET	= $(BINARY) $(CONFMOD)
+ALL_TARGET	= $(BINARY)
 LINT_TARGET	= $(MODULE).lint
-INSTALL_TARGET	= $(BINARY) $(ROOTMODULE) $(ROOT_CONFFILE)
+INSTALL_TARGET	= $(BINARY) $(ROOTMODULE)
 
 #
-# Driver depends on MAC and IP
+# Overrides
 #
-LDFLAGS		+= -dy -N misc/mac -N drv/ip
+
+INC_PATH += -I$(UTSBASE)/common/io/sfxge -I$(UTSBASE)/common/io/sfxge/common
 
 #
-# CFLAGS for Sol11-based target
+# TODO:
+# These are specific to this driver.  We will unidef these out later.
+# Some of them need further cleanup as well (e.g. we shouldn't bother with
+# supporting NDD directly.)
 #
-CFLAGS	  += -D_USE_DESBALLOC
-CFLAGS    += -U_USE_XESBALLOC
-CFLAGS    += -U_USE_CPU_PHYSID
-CFLAGS	  += -U_USE_GLD_V2
-CFLAGS    += -D_USE_GLD_V3
-CFLAGS    += -D_USE_GLD_V3_SOL10
-CFLAGS    += -D_USE_GLD_V3_SOL11
-CFLAGS	  += -D_USE_MAC_PRIV_PROP
-CFLAGS    += -D_USE_GLD_V3_PROPS
-CFLAGS    += -U_USE_MTU_UPDATE
-CFLAGS    += -D_USE_NDD_PROPS
+CPPFLAGS += -U_USE_MTU_UPDATE
 
+CFLAGS += $(CCVERBOSE)
 
 #
-#	Default build targets.
+# Driver depends on GLDv3 (mac)
+#
+LDFLAGS		+= -dy -N misc/mac
+
+#
+# Default build targets.
 #
 .KEEP_STATE:
 

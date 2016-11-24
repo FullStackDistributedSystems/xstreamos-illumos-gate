@@ -1,4 +1,4 @@
-#!/usr/bin/python2.6
+#!@PYTHON@
 #
 #  This program is free software; you can redistribute it and/or modify
 #  it under the terms of the GNU General Public License version 2
@@ -19,6 +19,7 @@
 # Copyright 2008, 2012 Richard Lowe
 # Copyright 2014 Garrett D'Amore <garrett@damore.org>
 # Copyright (c) 2014, Joyent, Inc.
+# Copyright (c) 2015, 2016 by Delphix. All rights reserved.
 #
 
 import getopt
@@ -47,7 +48,7 @@ sys.path.insert(2, os.path.join(os.path.dirname(__file__), ".."))
 
 from onbld.Scm import Ignore
 from onbld.Checks import Comments, Copyright, CStyle, HdrChk
-from onbld.Checks import JStyle, Keywords, ManLint, Mapfile
+from onbld.Checks import JStyle, Keywords, ManLint, Mapfile, SpellCheck
 
 
 class GitError(Exception):
@@ -70,13 +71,13 @@ def git(command):
     try:
         p = subprocess.Popen(command,
                              stdout=tmpfile,
-                             stderr=subprocess.STDOUT)
+                             stderr=subprocess.PIPE)
     except OSError, e:
         raise GitError("could not execute %s: %s\n" (command, e))
 
     err = p.wait()
     if err != 0:
-        raise GitError(p.stdout.read())
+        raise GitError(p.stderr.read())
 
     tmpfile.seek(0)
     return tmpfile
@@ -198,7 +199,17 @@ def gen_files(root, parent, paths, exclude):
 
         for f in git_file_list(parent, paths):
             f = relpath(f, '.')
-            if (os.path.exists(f) and select(f) and not exclude(f)):
+            try:
+                res = git("diff %s HEAD %s" % (parent, f))
+            except GitError, e:
+                # This ignores all the errors that can be thrown. Usually, this means
+                # that git returned non-zero because the file doesn't exist, but it
+                # could also fail if git can't create a new file or it can't be
+                # executed.  Such errors are 1) unlikely, and 2) will be caught by other
+                # invocations of git().
+                continue
+            empty = not res.readline()
+            if (os.path.exists(f) and not empty and select(f) and not exclude(f)):
                 yield f
     return ret
 
@@ -280,11 +291,12 @@ def jstyle(root, parent, flist, output):
 
 def manlint(root, parent, flist, output):
     ret = 0
-    output.write("Man page format:\n")
+    output.write("Man page format/spelling:\n")
     ManfileRE = re.compile(r'.*\.[0-9][a-z]*$', re.IGNORECASE)
     for f in flist(lambda x: ManfileRE.match(x)):
         fh = open(f, 'r')
         ret |= ManLint.manlint(fh, output=output, picky=True)
+        ret |= SpellCheck.spellcheck(fh, output=output)
 	fh.close()
     return ret
 

@@ -20,8 +20,14 @@
 # CDDL HEADER END
 #
 
+# Copyright 2016 Toomas Soome <tsoome@me.com>
 # Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
+#
+
+#
+# Copyright (c) 2014 by Delphix. All rights reserved.
+#
 
 format=ufs
 ALT_ROOT=
@@ -255,7 +261,7 @@ function create_ufs
 		list="$list32"
 	fi
 
-	newfs $lofidev < /dev/null 2> /dev/null
+	NOINUSE_CHECK=1 newfs $lofidev < /dev/null 2> /dev/null
 	mkdir "$rdmnt"
 	mount -F mntfs mnttab /etc/mnttab > /dev/null 2>&1
 	mount -F ufs -o nologging $lofidev "$rdmnt"
@@ -423,6 +429,8 @@ function create_archive
 	else
 		lockfs -f "/$ALT_ROOT" 2>/dev/null
 		mv "${archive}-new" "$archive"
+		rm -f "$archive.hash"
+		digest -a sha1 "$archive" > "$archive.hash"
 		lockfs -f "/$ALT_ROOT" 2>/dev/null
 	fi
 

@@ -21,6 +21,11 @@
 /*
  * Copyright 2008 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
+ * Copyright 2014 Joyent, Inc.  All rights reserved.
+ */
+
+/*
+ * Copyright (c) 2016 by Delphix. All rights reserved.
  */
 
 /*
@@ -30,6 +35,7 @@
  */
 
 #include <sys/types.h>
+#include <sys/null.h>
 #include <sys/varargs.h>
 
 #if defined(_KERNEL)
@@ -37,10 +43,6 @@
 #include <sys/debug.h>
 #elif !defined(_BOOT)
 #include <string.h>
-#endif
-
-#ifndef	NULL
-#define	NULL	0l
 #endif
 
 #include "memcpy.h"
@@ -264,7 +266,7 @@ next_fmt:
 
 		if (sign && pad == '0')
 			ADDCHAR('-');
-		while (width-- > sign)
+		while ((!left_align) && (width-- > sign))
 			ADDCHAR(pad);
 		if (sign && pad == ' ')
 			ADDCHAR('-');
@@ -279,6 +281,10 @@ next_fmt:
 			sp--;
 			ADDCHAR(*sp);
 		}
+
+		/* add left-alignment padding */
+		while (width-- > sign)
+			ADDCHAR(' ');
 
 		if (c == 'b' && ul != 0) {
 			int any = 0;
@@ -311,7 +317,7 @@ next_fmt:
 	return (bufp - buf);
 }
 
-/*PRINTFLIKE1*/
+/*PRINTFLIKE3*/
 size_t
 snprintf(char *buf, size_t buflen, const char *fmt, ...)
 {

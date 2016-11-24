@@ -18,12 +18,15 @@
 #
 # CDDL HEADER END
 #
+
 #
 # Copyright (c) 1989, 2010, Oracle and/or its affiliates. All rights reserved.
-# Copyright 2013, Joyent, Inc. All rights reserved.
+# Copyright 2014, Joyent, Inc. All rights reserved.
 # Copyright 2013 Garrett D'Amore <garrett@damore.org>
 # Copyright 2013 Saso Kiselkov. All rights reserved.
-# Copyright 2015 Nexenta Systems, Inc. All rights reserved.
+# Copyright 2015 Igor Kozhukhov <ikozhukhov@gmail.com>
+# Copyright 2016 Nexenta Systems, Inc.
+# Copyright 2016 Hans Rosenfeld <rosenfeld@grumpf.hope-2000.org>
 #
 
 include $(SRC)/uts/Makefile.uts
@@ -48,6 +51,7 @@ i386_HDRS=			\
 	fd_debug.h		\
 	fdc.h			\
 	fdmedia.h		\
+	firmload.h		\
 	mouse.h			\
 	ucode.h
 
@@ -215,6 +219,7 @@ CHKHDRS=			\
 	emul64cmd.h		\
 	emul64var.h		\
 	epm.h			\
+	epoll.h			\
 	errno.h			\
 	errorq.h		\
 	errorq_impl.h		\
@@ -349,6 +354,7 @@ CHKHDRS=			\
 	lockfs.h		\
 	lockstat.h		\
 	lofi.h			\
+	lofi_impl.h		\
 	log.h			\
 	logindmux.h		\
 	logindmux_impl.h	\
@@ -405,6 +411,7 @@ CHKHDRS=			\
 	ndifm.h			\
 	ndi_impldefs.h		\
 	net80211.h		\
+	net80211_amrr.h		\
 	net80211_crypto.h	\
 	net80211_ht.h		\
 	net80211_proto.h	\
@@ -413,6 +420,7 @@ CHKHDRS=			\
 	netstack.h		\
 	nexusdefs.h		\
 	note.h			\
+	null.h			\
 	nvpair.h		\
 	nvpair_impl.h		\
 	objfs.h			\
@@ -489,6 +497,7 @@ CHKHDRS=			\
 	sad.h			\
 	schedctl.h		\
 	sdt.h			\
+	secflags.h		\
 	select.h		\
 	sem.h			\
 	sem_impl.h		\
@@ -507,6 +516,7 @@ CHKHDRS=			\
 	sid.h			\
 	siginfo.h		\
 	signal.h		\
+	signalfd.h		\
 	skein.h			\
 	sleepq.h		\
 	smbios.h		\
@@ -586,6 +596,7 @@ CHKHDRS=			\
 	time_std_impl.h		\
 	timeb.h			\
 	timer.h			\
+	timerfd.h		\
 	times.h			\
 	timex.h			\
 	timod.h			\
@@ -894,6 +905,7 @@ SCSIHDRS=		\
 	scsi_address.h	\
 	scsi_ctl.h	\
 	scsi_fm.h	\
+	scsi_names.h	\
 	scsi_params.h	\
 	scsi_pkt.h	\
 	scsi_resource.h	\
@@ -1340,13 +1352,13 @@ install_h:			\
 all_h: $(GENHDRS)
 
 priv_const.h: $(PRIVS_AWK) $(PRIVS_DEF)
-	$(NAWK) -f $(PRIVS_AWK) < $(PRIVS_DEF) -v privhfile=$@
+	$(AWK) -f $(PRIVS_AWK) < $(PRIVS_DEF) -v privhfile=$@
 
 priv_names.h: $(PRIVS_AWK) $(PRIVS_DEF)
-	$(NAWK) -f $(PRIVS_AWK) < $(PRIVS_DEF) -v pubhfile=$@
+	$(AWK) -f $(PRIVS_AWK) < $(PRIVS_DEF) -v pubhfile=$@
 
 usb/usbdevs.h: $(USBDEVS_AWK) $(USBDEVS_DATA)
-	$(NAWK) -f $(USBDEVS_AWK) $(USBDEVS_DATA) -H > $@
+	$(AWK) -f $(USBDEVS_AWK) $(USBDEVS_DATA) -H > $@
 
 LVMDERIVED_H:
 	cd $(SRC)/uts/common/sys/lvm; pwd; $(MAKE) all_h

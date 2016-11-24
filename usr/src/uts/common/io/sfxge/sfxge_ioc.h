@@ -1,27 +1,31 @@
 /*
- * CDDL HEADER START
+ * Copyright (c) 2008-2016 Solarflare Communications Inc.
+ * All rights reserved.
  *
- * The contents of this file are subject to the terms of the
- * Common Development and Distribution License (the "License").
- * You may not use this file except in compliance with the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
  *
- * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
- * See the License for the specific language governing permissions
- * and limitations under the License.
+ * 1. Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
  *
- * When distributing Covered Code, include this CDDL HEADER in each
- * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
- * If applicable, add the following below this CDDL HEADER, with the
- * fields enclosed by brackets "[]" replaced with your own identifying
- * information: Portions Copyright [yyyy] [name of copyright owner]
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
+ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * CDDL HEADER END
- */
-
-/*
- * Copyright 2008-2013 Solarflare Communications Inc.  All rights reserved.
- * Use is subject to license terms.
+ * The views and conclusions contained in the software and documentation are
+ * those of the authors and should not be interpreted as representing official
+ * policies, either expressed or implied, of the FreeBSD Project.
  */
 
 #ifndef	_SYS_SFXGE_IOC_H
@@ -47,88 +51,19 @@ extern "C" {
 
 /* SPI was SFXGE_IOC 0x05 */
 
-/* BAR */
+/* BAR was SFXGE_IOC 0x06 */
 
-#define	SFXGE_BAR_IOC	(SFXGE_IOC | 0x06)
+/* PCI was SFXGE_IOC 0x07 */
 
-typedef	struct sfxge_bar_ioc_s {
-	uint32_t	sbi_op;
-	uint32_t	sbi_addr;
-	uint32_t	sbi_data[4];
-} sfxge_bar_ioc_t;
+/* MAC was SFXGE_IOC 0x08 */
 
-#define	SFXGE_BAR_OP_READ	0x00000001
-#define	SFXGE_BAR_OP_WRITE	0x00000002
+/* PHY was SFXGE_IOC 0x09 */
 
-/* PCI */
+/* SRAM was SFXGE_IOC 0x0a */
 
-#define	SFXGE_PCI_IOC	(SFXGE_IOC | 0x07)
+/* TX was SFXGE_IOC 0x0b */
 
-typedef	struct sfxge_pci_ioc_s {
-	uint32_t	spi_op;
-	uint8_t		spi_addr;
-	uint8_t		spi_data;
-} sfxge_pci_ioc_t;
-
-#define	SFXGE_PCI_OP_READ	0x00000001
-#define	SFXGE_PCI_OP_WRITE	0x00000002
-
-/* MAC */
-
-#define	SFXGE_MAC_IOC	(SFXGE_IOC | 0x08)
-
-typedef	struct sfxge_mac_ioc_s {
-	uint32_t	smi_op;
-	uint32_t	smi_data;
-} sfxge_mac_ioc_t;
-
-#define	SFXGE_MAC_OP_LOOPBACK	0x00000001
-
-/* PHY */
-
-#define	SFXGE_PHY_IOC	(SFXGE_IOC | 0x09)
-
-typedef	struct sfxge_phy_ioc_s {
-	uint32_t	spi_op;
-	uint32_t	spi_data;
-} sfxge_phy_ioc_t;
-
-#define	SFXGE_PHY_OP_LOOPBACK	0x00000001
-#define	SFXGE_PHY_OP_LINK	0x00000002
-#define	SFXGE_PHY_OP_LED	0x00000003
-
-/* SRAM */
-
-#define	SFXGE_SRAM_IOC	(SFXGE_IOC | 0x0a)
-
-typedef	struct sfxge_sram_ioc_s {
-	uint32_t	ssi_op;
-	uint32_t	ssi_data;
-} sfxge_sram_ioc_t;
-
-#define	SFXGE_SRAM_OP_TEST	0x00000001
-
-/* TX */
-
-#define	SFXGE_TX_IOC	(SFXGE_IOC | 0x0b)
-
-typedef	struct sfxge_tx_ioc_s {
-	uint32_t	sti_op;
-	uint32_t	sti_data;
-} sfxge_tx_ioc_t;
-
-#define	SFXGE_TX_OP_LOOPBACK	0x00000001
-
-/* RX */
-
-#define	SFXGE_RX_IOC	(SFXGE_IOC | 0x0c)
-
-typedef	struct sfxge_rx_ioc_s {
-	uint32_t	sri_op;
-	uint32_t	sri_data;
-} sfxge_rx_ioc_t;
-
-#define	SFXGE_RX_OP_LOOPBACK	0x00000001
+/* RX was SFXGE_IOC 0x0c */
 
 /* NVRAM */
 
@@ -162,33 +97,15 @@ typedef	struct sfxge_nvram_ioc_s {
 #define	SFXGE_NVRAM_TYPE_PHY		0x00000005
 #define	SFXGE_NVRAM_TYPE_NULL_PHY	0x00000006
 #define	SFXGE_NVRAM_TYPE_FPGA		0x00000007
+#define	SFXGE_NVRAM_TYPE_FCFW		0x00000008
+#define	SFXGE_NVRAM_TYPE_CPLD		0x00000009
+#define	SFXGE_NVRAM_TYPE_FPGA_BACKUP	0x0000000a
+#define	SFXGE_NVRAM_TYPE_DYNAMIC_CFG	0x0000000b
 
-/* PHY BIST */
 
-#define	SFXGE_PHY_BIST_IOC	(SFXGE_IOC | 0x0e)
+/* PHY BIST was IOC 0x0e */
 
-typedef	struct sfxge_phy_bist_ioc_s {
-	boolean_t	spbi_break_link;
-	uint8_t		spbi_status_a;
-	uint8_t		spbi_status_b;
-	uint8_t		spbi_status_c;
-	uint8_t		spbi_status_d;
-	uint16_t	spbi_length_ind_a;
-	uint16_t	spbi_length_ind_b;
-	uint16_t	spbi_length_ind_c;
-	uint16_t	spbi_length_ind_d;
-} sfxge_phy_bist_ioc_t;
-
-#define	SFXGE_PHY_BIST_CABLE_OK			0
-#define	SFXGE_PHY_BIST_CABLE_INVALID		1
-#define	SFXGE_PHY_BIST_CABLE_OPEN		2
-#define	SFXGE_PHY_BIST_CABLE_INTRAPAIRSHORT	3
-#define	SFXGE_PHY_BIST_CABLE_INTERPAIRSHORT	4
-#define	SFXGE_PHY_BIST_CABLE_BUSY		5
-#define	SFXGE_PHY_BIST_CABLE_UNKNOWN		6
-
-/* MCDI */
-
+/* Legacy IOC for MCDIv1 protocol - do not use in new code */
 #define	SFXGE_MCDI_IOC	(SFXGE_IOC | 0x0f)
 
 typedef	struct sfxge_mcdi_ioc_s {
@@ -218,6 +135,18 @@ typedef	struct sfxge_vpd_ioc_s {
 
 #define	SFXGE_VPD_OP_GET_KEYWORD	0x00000001
 #define	SFXGE_VPD_OP_SET_KEYWORD	0x00000002
+
+/* MCDIv2 */
+
+#define	SFXGE_MCDI2_IOC	(SFXGE_IOC | 0x12)
+
+typedef	struct sfxge_mcdi2_ioc_s {
+	uint8_t		smi_payload[1024];
+	uint32_t	smi_cmd;
+	uint32_t	smi_len; /* In and out */
+	uint32_t	smi_rc;
+} sfxge_mcdi2_ioc_t;
+
 
 #pragma pack()
 

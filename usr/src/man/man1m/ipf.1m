@@ -2,8 +2,8 @@
 .\" To view license terms, attribution, and copyright for IP Filter, the default path is /usr/lib/ipf/IPFILTER.LICENCE. If the Solaris operating environment has been installed anywhere other than the default, modify the given path to access the file at the installed
 .\" location.
 .\" Portions Copyright (c) 2009, Sun Microsystems Inc. All Rights Reserved.
-.\" Portions Copyright (c) 2014, Joyent, Inc. All Rights Reserved.
-.TH IPF 1M "Oct 7, 2014"
+.\" Portions Copyright (c) 2015, Joyent, Inc.
+.TH IPF 1M "April 9, 2016"
 .SH NAME
 ipf \- alter packet filtering lists for IP packet input and output
 .SH SYNOPSIS
@@ -54,7 +54,7 @@ Configure system and services' firewall policies. See \fBsvc.ipfd\fR(1M) and
 .TP
 3.
 (Optional) Create a network address translation (NAT) configuration file.
-See \fBipnat.conf\fR(4).
+See \fBipnat\fR(4).
 .RE
 .RS +4
 .TP
@@ -233,7 +233,7 @@ determining that used to execute options.
 .ad
 .sp .6
 .RS 4n
-To flush entries from the state table, use the \fB-F\fR option in conjuction
+To flush entries from the state table, use the \fB-F\fR option in conjunction
 with either \fBs\fR (removes state information about any non-fully established
 connections) or \fBS\fR (deletes the entire state table). You can specify only
 one of these two options. A fully established connection will show up in
@@ -542,7 +542,7 @@ Interface Stability	Committed
 .SH SEE ALSO
 .LP
 \fBipfstat\fR(1M), \fBipmon\fR(1M), \fBipnat\fR(1M), \fBippool\fR(1M),
-\fBsvcadm\fR(1M), \fBsvc.ipfd\fR(1M), \fBipf\fR(4), \fBipnat.conf\fR(4),
+\fBsvcadm\fR(1M), \fBsvc.ipfd\fR(1M), \fBipf\fR(4), \fBipnat\fR(4),
 \fBippool\fR(4), \fBattributes\fR(5), \fBipfilter\fR(5), \fBzones(5)\fR
 .sp
 .LP

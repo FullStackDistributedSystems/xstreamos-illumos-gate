@@ -19,6 +19,7 @@
 # CDDL HEADER END
 #
 #
+# Copyright 2016 Gary Mills
 # Copyright (c) 1989, 2010, Oracle and/or its affiliates. All rights reserved.
 # Copyright (c) 2015, Joyent, Inc.  All rights reserved.
 # Copyright (c) 2013, OmniTI Computer Consulting, Inc. All rights reserved.
@@ -146,6 +147,7 @@ GENOBJS=			\
 	byteorder.o		\
 	cuexit.o		\
 	ecvt.o			\
+	endian.o		\
 	getctxt.o		\
 	lock.o			\
 	makectxt.o		\
@@ -267,6 +269,7 @@ COMSYSOBJS=			\
 	processor_bind.o	\
 	processor_info.o	\
 	profil.o		\
+	psecflagsset.o		\
 	putmsg.o		\
 	putpmsg.o		\
 	pwrite.o		\
@@ -409,6 +412,7 @@ PORTGEN=			\
 	fdetach.o		\
 	fdopendir.o		\
 	ffs.o			\
+	flock.o			\
 	fls.o			\
 	fmtmsg.o		\
 	ftime.o			\
@@ -516,6 +520,7 @@ PORTGEN=			\
 	priocntl.o		\
 	privlib.o		\
 	priv_str_xlate.o	\
+	psecflags.o		\
 	psiginfo.o		\
 	psignal.o		\
 	pt.o			\
@@ -587,6 +592,7 @@ PORTGEN=			\
 	tfind.o			\
 	time_data.o		\
 	time_gdata.o		\
+	timespec_get.o		\
 	tls_data.o		\
 	truncate.o		\
 	tsdalloc.o		\
@@ -826,12 +832,16 @@ RTOBJS=				\
 	shm.o			\
 	sigev_thread.o
 
+SECFLAGSOBJS=			\
+	secflags.o
+
 TPOOLOBJS=			\
 	thread_pool.o
 
 THREADSOBJS=			\
 	alloc.o			\
 	assfail.o		\
+	c11_thr.o		\
 	cancel.o		\
 	door_calls.o		\
 	tmem.o			\
@@ -882,6 +892,7 @@ PORTSYS=			\
 	chown.o			\
 	corectl.o		\
 	eventfd.o		\
+	epoll.o			\
 	exacctsys.o		\
 	execl.o			\
 	execle.o		\
@@ -919,6 +930,7 @@ PORTSYS=			\
 	sidsys.o		\
 	siginterrupt.o		\
 	signal.o		\
+	signalfd.o		\
 	sigpending.o		\
 	sigstack.o		\
 	stat.o			\
@@ -926,6 +938,7 @@ PORTSYS=			\
 	tasksys.o		\
 	time.o			\
 	time_util.o		\
+	timerfd.o		\
 	ucontext.o		\
 	unlink.o		\
 	ustat.o			\
@@ -969,6 +982,7 @@ MOSTOBJS=			\
 	$(PORTSYS64)		\
 	$(AIOOBJS)		\
 	$(RTOBJS)		\
+	$(SECFLAGSOBJS)		\
 	$(TPOOLOBJS)		\
 	$(THREADSOBJS)		\
 	$(THREADSMACHOBJS)	\
@@ -1101,6 +1115,7 @@ SRCS=							\
 	$(PORTSYS:%.o=$(LIBCDIR)/port/sys/%.c)			\
 	$(AIOOBJS:%.o=$(LIBCDIR)/port/aio/%.c)			\
 	$(RTOBJS:%.o=$(LIBCDIR)/port/rt/%.c)			\
+	$(SECFLAGSOBJS:%.o=$(SRC)/common/secflags/%.c)		\
 	$(TPOOLOBJS:%.o=$(LIBCDIR)/port/tpool/%.c)		\
 	$(THREADSOBJS:%.o=$(LIBCDIR)/port/threads/%.c)		\
 	$(THREADSMACHOBJS:%.o=$(LIBCDIR)/$(MACH)/threads/%.c)	\
@@ -1111,6 +1126,7 @@ SRCS=							\
 	$(LIBCBASE)/crt/_ftou.c				\
 	$(LIBCBASE)/gen/_xregs_clrptr.c			\
 	$(LIBCBASE)/gen/byteorder.c			\
+	$(LIBCBASE)/gen/endian.c			\
 	$(LIBCBASE)/gen/ecvt.c				\
 	$(LIBCBASE)/gen/getctxt.c			\
 	$(LIBCBASE)/gen/makectxt.c			\
@@ -1295,7 +1311,7 @@ assym.h := CFLAGS64 += -g
 GENASSYM_C = $(LIBCDIR)/$(MACH)/genassym.c
 
 genassym: $(GENASSYM_C)
-	$(NATIVECC) -I$(LIBCBASE)/inc -I$(LIBCDIR)/inc \
+	$(NATIVECC) $(NATIVE_CFLAGS) -I$(LIBCBASE)/inc -I$(LIBCDIR)/inc \
 		$(CPPFLAGS.native) -o $@ $(GENASSYM_C)
 
 OFFSETS = $(LIBCDIR)/$(MACH)/offsets.in

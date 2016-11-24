@@ -21,7 +21,8 @@
 
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2011, 2015 by Delphix. All rights reserved.
+ * Copyright (c) 2011, 2016 by Delphix. All rights reserved.
+ * Copyright (c) 2014 Integros [integros.com]
  */
 
 #include <stdio.h>
@@ -59,7 +60,6 @@
 #include <sys/ddt.h>
 #include <sys/zfeature.h>
 #include <zfs_comutil.h>
-#undef ZFS_MAXNAMELEN
 #undef verify
 #include <libzfs.h>
 
@@ -75,10 +75,12 @@
 	DMU_OT_ZAP_OTHER : DMU_OT_NUMTYPES))
 
 #ifndef lint
+extern int reference_tracking_enable;
 extern boolean_t zfs_recover;
 extern uint64_t zfs_arc_max, zfs_arc_meta_limit;
 extern int zfs_vdev_async_read_max_active;
 #else
+int reference_tracking_enable;
 boolean_t zfs_recover;
 uint64_t zfs_arc_max, zfs_arc_meta_limit;
 int zfs_vdev_async_read_max_active;
@@ -117,8 +119,9 @@ static void
 usage(void)
 {
 	(void) fprintf(stderr,
-	    "Usage: %s [-CumMdibcsDvhLXFPA] [-t txg] [-e [-p path...]] "
-	    "[-U config] [-I inflight I/Os] [-x dumpdir] poolname [object...]\n"
+	    "Usage: %s [-CumMdibcsDvhLXFPAG] [-t txg] [-e [-p path...]] "
+	    "[-U config] [-I inflight I/Os] [-x dumpdir] [-o var=value] "
+	    "poolname [object...]\n"
 	    "       %s [-divPA] [-e -p path...] [-U config] dataset "
 	    "[object...]\n"
 	    "       %s -mM [-LXFPA] [-t txg] [-e [-p path...]] [-U config] "
@@ -178,10 +181,23 @@ usage(void)
 	(void) fprintf(stderr, "        -I <number of inflight I/Os> -- "
 	    "specify the maximum number of "
 	    "checksumming I/Os [default is 200]\n");
+	(void) fprintf(stderr, "        -G dump zfs_dbgmsg buffer before "
+	    "exiting\n");
+	(void) fprintf(stderr, "        -o <variable>=<value> set global "
+	    "variable to an unsigned 32-bit integer value\n");
 	(void) fprintf(stderr, "Specify an option more than once (e.g. -bb) "
 	    "to make only that option verbose\n");
 	(void) fprintf(stderr, "Default is to dump everything non-verbosely\n");
 	exit(1);
+}
+
+static void
+dump_debug_buffer()
+{
+	if (dump_opt['G']) {
+		(void) printf("\n");
+		zfs_dbgmsg_print("zdb");
+	}
 }
 
 /*
@@ -199,6 +215,8 @@ fatal(const char *fmt, ...)
 	(void) vfprintf(stderr, fmt, ap);
 	va_end(ap);
 	(void) fprintf(stderr, "\n");
+
+	dump_debug_buffer();
 
 	exit(1);
 }
@@ -1056,7 +1074,6 @@ static void
 dump_history(spa_t *spa)
 {
 	nvlist_t **events = NULL;
-	char buf[SPA_MAXBLOCKSIZE];
 	uint64_t resid, len, off = 0;
 	uint_t num = 0;
 	int error;
@@ -1065,12 +1082,14 @@ dump_history(spa_t *spa)
 	char tbuf[30];
 	char internalstr[MAXPATHLEN];
 
+	char *buf = umem_alloc(SPA_MAXBLOCKSIZE, UMEM_NOFAIL);
 	do {
-		len = sizeof (buf);
+		len = SPA_MAXBLOCKSIZE;
 
 		if ((error = spa_history_get(spa, &off, &len, buf)) != 0) {
 			(void) fprintf(stderr, "Unable to read history: "
 			    "error %d\n", error);
+			umem_free(buf, SPA_MAXBLOCKSIZE);
 			return;
 		}
 
@@ -1079,6 +1098,7 @@ dump_history(spa_t *spa)
 
 		off -= resid;
 	} while (len != 0);
+	umem_free(buf, SPA_MAXBLOCKSIZE);
 
 	(void) printf("\nHistory:\n");
 	for (int i = 0; i < num; i++) {
@@ -1262,7 +1282,7 @@ visit_indirect(spa_t *spa, const dnode_phys_t *dnp,
 		}
 		if (!err)
 			ASSERT3U(fill, ==, BP_GET_FILL(bp));
-		(void) arc_buf_remove_ref(buf, &buf);
+		arc_buf_destroy(buf, &buf);
 	}
 
 	return (err);
@@ -1919,7 +1939,7 @@ dump_dir(objset_t *os)
 	uint64_t refdbytes, usedobjs, scratch;
 	char numbuf[32];
 	char blkbuf[BP_SPRINTF_LEN + 20];
-	char osname[MAXNAMELEN];
+	char osname[ZFS_MAX_DATASET_NAME_LEN];
 	char *type = "UNKNOWN";
 	int verbosity = dump_opt['d'];
 	int print_header = 1;
@@ -2130,10 +2150,11 @@ dump_label(const char *dev)
 	uint64_t psize, ashift;
 	int len = strlen(dev) + 1;
 
-	if (strncmp(dev, "/dev/dsk/", 9) == 0) {
+	if (strncmp(dev, ZFS_DISK_ROOTD, strlen(ZFS_DISK_ROOTD)) == 0) {
 		len++;
 		path = malloc(len);
-		(void) snprintf(path, len, "%s%s", "/dev/rdsk/", dev + 9);
+		(void) snprintf(path, len, "%s%s", ZFS_RDISK_ROOTD,
+		    dev + strlen(ZFS_DISK_ROOTD));
 	} else {
 		path = strdup(dev);
 	}
@@ -3042,7 +3063,8 @@ dump_zpool(spa_t *spa)
 			uint64_t refcount;
 
 			if (!(spa_feature_table[f].fi_flags &
-			    ZFEATURE_FLAG_PER_DATASET)) {
+			    ZFEATURE_FLAG_PER_DATASET) ||
+			    !spa_feature_is_enabled(spa, f)) {
 				ASSERT0(dataset_feature_count[f]);
 				continue;
 			}
@@ -3075,8 +3097,10 @@ dump_zpool(spa_t *spa)
 	if (dump_opt['h'])
 		dump_history(spa);
 
-	if (rc != 0)
+	if (rc != 0) {
+		dump_debug_buffer();
 		exit(rc);
+	}
 }
 
 #define	ZDB_FLAG_CHECKSUM	0x0001
@@ -3452,7 +3476,7 @@ find_zpool(char **target, nvlist_t **configp, int dirc, char **dirv)
 	nvlist_t *match = NULL;
 	char *name = NULL;
 	char *sepp = NULL;
-	char sep;
+	char sep = '\0';
 	int count = 0;
 	importargs_t args = { 0 };
 
@@ -3528,14 +3552,25 @@ main(int argc, char **argv)
 	nvlist_t *policy = NULL;
 	uint64_t max_txg = UINT64_MAX;
 	int rewind = ZPOOL_NEVER_REWIND;
+	char *spa_config_path_env;
+	boolean_t target_is_spa = B_TRUE;
 
 	(void) setrlimit(RLIMIT_NOFILE, &rl);
 	(void) enable_extended_FILE_stdio(-1, -1);
 
 	dprintf_setup(&argc, argv);
 
+	/*
+	 * If there is an environment variable SPA_CONFIG_PATH it overrides
+	 * default spa_config_path setting. If -U flag is specified it will
+	 * override this environment variable settings once again.
+	 */
+	spa_config_path_env = getenv("SPA_CONFIG_PATH");
+	if (spa_config_path_env != NULL)
+		spa_config_path = spa_config_path_env;
+
 	while ((c = getopt(argc, argv,
-	    "bcdhilmMI:suCDRSAFLXx:evp:t:U:P")) != -1) {
+	    "bcdhilmMI:suCDRSAFLXx:evp:t:U:PGo:")) != -1) {
 		switch (c) {
 		case 'b':
 		case 'c':
@@ -3551,6 +3586,7 @@ main(int argc, char **argv)
 		case 'M':
 		case 'R':
 		case 'S':
+		case 'G':
 			dump_opt[c]++;
 			dump_all = 0;
 			break;
@@ -3603,6 +3639,11 @@ main(int argc, char **argv)
 		case 'x':
 			vn_dumpdir = optarg;
 			break;
+		case 'o':
+			error = set_global_var(optarg);
+			if (error != 0)
+				usage();
+			break;
 		default:
 			usage();
 			break;
@@ -3626,6 +3667,11 @@ main(int argc, char **argv)
 	 * For good performance, let several of them be active at once.
 	 */
 	zfs_vdev_async_read_max_active = 10;
+
+	/*
+	 * Disable reference tracking for better performance.
+	 */
+	reference_tracking_enable = B_FALSE;
 
 	kernel_init(FREAD);
 	g_zfs = libzfs_init();
@@ -3697,8 +3743,23 @@ main(int argc, char **argv)
 		}
 	}
 
+	if (strpbrk(target, "/@") != NULL) {
+		size_t targetlen;
+
+		target_is_spa = B_FALSE;
+		/*
+		 * Remove any trailing slash.  Later code would get confused
+		 * by it, but we want to allow it so that "pool/" can
+		 * indicate that we want to dump the topmost filesystem,
+		 * rather than the whole pool.
+		 */
+		targetlen = strlen(target);
+		if (targetlen != 0 && target[targetlen - 1] == '/')
+			target[targetlen - 1] = '\0';
+	}
+
 	if (error == 0) {
-		if (strpbrk(target, "/@") == NULL || dump_opt['R']) {
+		if (target_is_spa || dump_opt['R']) {
 			error = spa_open_rewind(target, &spa, FTAG, policy,
 			    NULL);
 			if (error) {
@@ -3769,6 +3830,8 @@ main(int argc, char **argv)
 
 	fuid_table_destroy();
 	sa_loaded = B_FALSE;
+
+	dump_debug_buffer();
 
 	libzfs_fini(g_zfs);
 	kernel_fini();

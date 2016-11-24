@@ -36,6 +36,7 @@
 #include <sys/zfs_context.h>
 #include <sys/refcount.h>
 #include <sys/zrlock.h>
+#include <sys/multilist.h>
 
 #ifdef	__cplusplus
 extern "C" {
@@ -120,6 +121,9 @@ typedef struct dbuf_dirty_record {
 
 	/* How much space was changed to dsl_pool_dirty_space() for this? */
 	unsigned int dr_accounted;
+
+	/* A copy of the bp that points to us */
+	blkptr_t dr_bp_copy;
 
 	union dirty_types {
 		struct dirty_indirect {
@@ -225,13 +229,34 @@ typedef struct dmu_buf_impl {
 	 */
 	avl_node_t db_link;
 
+	/*
+	 * Link in dbuf_cache.
+	 */
+	multilist_node_t db_cache_link;
+
 	/* Data which is unique to data (leaf) blocks: */
 
 	/* User callback information. */
 	dmu_buf_user_t *db_user;
 
-	uint8_t db_immediate_evict;
+	/*
+	 * Evict user data as soon as the dirty and reference
+	 * counts are equal.
+	 */
+	uint8_t db_user_immediate_evict;
+
+	/*
+	 * This block was freed while a read or write was
+	 * active.
+	 */
 	uint8_t db_freed_in_flight;
+
+	/*
+	 * dnode_evict_dbufs() or dnode_evict_bonus() tried to
+	 * evict this dbuf, but couldn't due to outstanding
+	 * references.  Evict once the refcount drops to 0.
+	 */
+	uint8_t db_pending_evict;
 
 	uint8_t db_dirtycnt;
 } dmu_buf_impl_t;
@@ -286,8 +311,7 @@ void dmu_buf_write_embedded(dmu_buf_t *dbuf, void *data,
     bp_embedded_type_t etype, enum zio_compress comp,
     int uncompressed_size, int compressed_size, int byteorder, dmu_tx_t *tx);
 
-void dbuf_clear(dmu_buf_impl_t *db);
-void dbuf_evict(dmu_buf_impl_t *db);
+void dbuf_destroy(dmu_buf_impl_t *db);
 
 void dbuf_setdirty(dmu_buf_impl_t *db, dmu_tx_t *tx);
 void dbuf_unoverride(dbuf_dirty_record_t *dr);
@@ -322,10 +346,6 @@ boolean_t dbuf_is_metadata(dmu_buf_impl_t *db);
 	((_db)->db_objset->os_secondary_cache == ZFS_CACHE_ALL ||	\
 	(dbuf_is_metadata(_db) &&					\
 	((_db)->db_objset->os_secondary_cache == ZFS_CACHE_METADATA)))
-
-#define	DBUF_IS_L2COMPRESSIBLE(_db)					\
-	((_db)->db_objset->os_compress != ZIO_COMPRESS_OFF ||		\
-	(dbuf_is_metadata(_db) && zfs_mdcomp_disable == B_FALSE))
 
 #ifdef ZFS_DEBUG
 

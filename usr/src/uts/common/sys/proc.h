@@ -47,6 +47,8 @@
 #include <sys/list.h>
 #include <sys/avl.h>
 #include <sys/door_impl.h>
+#include <sys/signalfd.h>
+#include <sys/secflags.h>
 
 #ifdef	__cplusplus
 extern "C" {
@@ -197,6 +199,7 @@ typedef struct	proc {
 	k_sigset_t p_extsig;		/* signals sent from another contract */
 	k_sigset_t p_ignore;		/* ignore when generated */
 	k_sigset_t p_siginfo;		/* gets signal info with signal */
+	void *p_sigfd;			/* signalfd support state */
 	struct sigqueue *p_sigqueue;	/* queued siginfo structures */
 	struct sigqhdr *p_sigqhdr;	/* hdr to sigqueue structure pool */
 	struct sigqhdr *p_signhdr;	/* hdr to signotify structure pool */
@@ -347,6 +350,7 @@ typedef struct	proc {
 	struct vnode	*p_execdir;	/* directory that p_exec came from */
 	struct brand	*p_brand;	/* process's brand  */
 	void		*p_brand_data;	/* per-process brand state */
+	psecflags_t	p_secflags;	/* per-process security flags */
 
 	/* additional lock to protect p_sessp (but not its contents) */
 	kmutex_t p_splock;

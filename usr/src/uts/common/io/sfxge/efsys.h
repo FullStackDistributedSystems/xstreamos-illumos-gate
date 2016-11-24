@@ -1,27 +1,31 @@
 /*
- * CDDL HEADER START
+ * Copyright (c) 2008-2016 Solarflare Communications Inc.
+ * All rights reserved.
  *
- * The contents of this file are subject to the terms of the
- * Common Development and Distribution License (the "License").
- * You may not use this file except in compliance with the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
  *
- * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
- * See the License for the specific language governing permissions
- * and limitations under the License.
+ * 1. Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
  *
- * When distributing Covered Code, include this CDDL HEADER in each
- * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
- * If applicable, add the following below this CDDL HEADER, with the
- * fields enclosed by brackets "[]" replaced with your own identifying
- * information: Portions Copyright [yyyy] [name of copyright owner]
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
+ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * CDDL HEADER END
- */
-
-/*
- * Copyright 2008-2013 Solarflare Communications Inc.  All rights reserved.
- * Use is subject to license terms.
+ * The views and conclusions contained in the software and documentation are
+ * those of the authors and should not be interpreted as representing official
+ * policies, either expressed or implied, of the FreeBSD Project.
  */
 
 #ifndef	_SYS_EFSYS_H
@@ -45,6 +49,7 @@ extern "C" {
 
 #define	EFSYS_HAS_UINT64 1
 #define	EFSYS_USE_UINT64 0
+#define	EFSYS_HAS_SSE2_M128 0
 #ifdef	_BIG_ENDIAN
 #define	EFSYS_IS_BIG_ENDIAN 1
 #endif
@@ -52,14 +57,6 @@ extern "C" {
 #define	EFSYS_IS_LITTLE_ENDIAN 1
 #endif
 #include "efx_types.h"
-
-#ifdef _USE_GLD_V3_SOL10
-#include "compat.h"
-#endif
-
-/* Modifiers used for DOS builds */
-#define	__cs
-#define	__far
 
 /* Modifiers used for Windows builds */
 #define	__in
@@ -75,6 +72,8 @@ extern "C" {
 #define	__out_ecount_opt(_n)
 #define	__out_bcount(_n)
 #define	__out_bcount_opt(_n)
+#define	__out_bcount_part(_n, _l)
+#define	__out_bcount_part_opt(_n, _l)
 
 #define	__deref_out
 
@@ -89,6 +88,7 @@ extern "C" {
 #define	__deref_out_bcount_opt(n)
 
 #define	__checkReturn
+#define	__success(_x)
 
 #define	__drv_when(_p, _c)
 
@@ -97,8 +97,9 @@ extern "C" {
 
 #define	EFSYS_OPT_NAMES 1
 
-#define	EFSYS_OPT_FALCON 1
 #define	EFSYS_OPT_SIENA 1
+#define	EFSYS_OPT_HUNTINGTON 1
+#define	EFSYS_OPT_MEDFORD 0
 #if DEBUG
 #define	EFSYS_OPT_CHECK_REG 1
 #else
@@ -106,40 +107,25 @@ extern "C" {
 #endif
 
 #define	EFSYS_OPT_MCDI 1
+#define	EFSYS_OPT_MCDI_LOGGING 0
+#define	EFSYS_OPT_MCDI_PROXY_AUTH 0
 
-#define	EFSYS_OPT_MAC_FALCON_GMAC 1
-#define	EFSYS_OPT_MAC_FALCON_XMAC 1
 #define	EFSYS_OPT_MAC_STATS 1
 
 #define	EFSYS_OPT_LOOPBACK 1
 
-#define	EFSYS_OPT_MON_NULL 1
-#define	EFSYS_OPT_MON_LM87 1
-#define	EFSYS_OPT_MON_MAX6647 1
-#define	EFSYS_OPT_MON_SIENA 1
+#define	EFSYS_OPT_MON_MCDI 1
 #define	EFSYS_OPT_MON_STATS 1
 
-#define	EFSYS_OPT_PHY_NULL 1
-#define	EFSYS_OPT_PHY_QT2022C2 1
-#define	EFSYS_OPT_PHY_SFX7101 1
-#define	EFSYS_OPT_PHY_TXC43128 1
-#define	EFSYS_OPT_PHY_PM8358 1
-#define	EFSYS_OPT_PHY_SFT9001 1
-#define	EFSYS_OPT_PHY_QT2025C 1
 #define	EFSYS_OPT_PHY_STATS 1
-#define	EFSYS_OPT_PHY_PROPS 1
-#define	EFSYS_OPT_PHY_BIST 1
+#define	EFSYS_OPT_BIST 1
 #define	EFSYS_OPT_PHY_LED_CONTROL 1
 
 #define	EFSYS_OPT_VPD 1
 #define	EFSYS_OPT_NVRAM 1
-#define	EFSYS_OPT_NVRAM_FALCON_BOOTROM 1
-#define	EFSYS_OPT_NVRAM_SFT9001	0
-#define	EFSYS_OPT_NVRAM_SFX7101	0
 #define	EFSYS_OPT_BOOTCFG 1
 
-#define	EFSYS_OPT_PCIE_TUNE 1
-#define	EFSYS_OPT_DIAG 1
+#define	EFSYS_OPT_DIAG 0
 #define	EFSYS_OPT_WOL 1
 #define	EFSYS_OPT_RX_SCALE 1
 #define	EFSYS_OPT_QSTATS 1
@@ -147,6 +133,10 @@ extern "C" {
 #define	EFSYS_OPT_EV_PREFETCH 0
 
 #define	EFSYS_OPT_DECODE_INTR_FATAL 1
+
+#define	EFSYS_OPT_FILTER 1
+
+#define	EFSYS_OPT_LICENSING 0
 
 /* ID */
 
@@ -162,15 +152,12 @@ typedef struct efsys_mem_s {
 	caddr_t			esm_base;
 	efsys_dma_addr_t	esm_addr;
 	size_t			esm_size;
+	size_t			esm_used;
 } efsys_mem_t;
 
 
 #define	EFSYS_MEM_ZERO(_esmp, _size)					\
-	do {								\
-		(void) memset((_esmp)->esm_base, 0, (_size));		\
-									\
-	_NOTE(CONSTANTCONDITION)					\
-	} while (B_FALSE)
+	(void) bzero((_esmp)->esm_base, (_size))
 
 #define	EFSYS_MEM_READD(_esmp, _offset, _edp)				\
 	do {								\
@@ -306,6 +293,9 @@ typedef struct efsys_mem_s {
 
 #define	EFSYS_MEM_ADDR(_esmp)						\
 	((_esmp)->esm_addr)
+
+#define	EFSYS_MEM_IS_NULL(_esmp)					\
+	((_esmp)->esm_base == NULL)
 
 /* BAR */
 
@@ -447,6 +437,23 @@ typedef struct efsys_bar_s {
 	_NOTE(CONSTANTCONDITION)					\
 	} while (B_FALSE)
 
+/*
+ * Guarantees 64bit aligned 64bit writes to write combined BAR mapping
+ * (required by PIO hardware)
+ */
+#define	EFSYS_BAR_WC_WRITEQ(_esbp, _offset, _eqp)			\
+	do {								\
+		_NOTE(CONSTANTCONDITION)				\
+		ASSERT(IS_P2ALIGNED(_offset, sizeof (efx_qword_t)));	\
+									\
+		(void) (_esbp);						\
+									\
+		/* FIXME: Perform a 64-bit write */			\
+		EFSYS_ASSERT(0);					\
+									\
+	_NOTE(CONSTANTCONDITION)					\
+	} while (B_FALSE)
+
 #define	EFSYS_BAR_WRITEO(_esbp, _offset, _eop, _lock)			\
 	do {								\
 		uint32_t *addr;						\
@@ -481,14 +488,19 @@ typedef struct efsys_bar_s {
 	_NOTE(CONSTANTCONDITION)					\
 	} while (B_FALSE)
 
-/* SPIN */
-
-#define	EFSYS_SPIN(_us)							\
+/* Use the standard octo-word write for doorbell writes */
+#define	EFSYS_BAR_DOORBELL_WRITEO(_esbp, _offset, _eop)			\
 	do {								\
-		drv_usecwait(_us);					\
+		EFSYS_BAR_WRITEO((_esbp), (_offset), (_eop), B_FALSE);	\
 	_NOTE(CONSTANTCONDITION)					\
 	} while (B_FALSE)
 
+/* SPIN */
+
+#define	EFSYS_SPIN(_us)							\
+	drv_usecwait(_us)
+
+/* TODO: Perhaps this should use delay(9F)? */
 #define	EFSYS_SLEEP	EFSYS_SPIN
 
 /* BARRIERS */
@@ -498,16 +510,28 @@ typedef struct efsys_bar_s {
 /* TODO: Is ddi_put32() properly barriered? */
 #define	EFSYS_PIO_WRITE_BARRIER()
 
+/* DMA SYNC */
+/*
+ * It could be cheaper to sync entire map than calculate offset and
+ * size. If so, below macros should be updated to ignore these arguments
+ * and sync entire map.
+ */
+#define	EFSYS_DMA_SYNC_FOR_KERNEL(_esmp, _offset, _size)		\
+	(void) ddi_dma_sync((_esmp)->esm_dma_handle,			\
+	    (_offset), (_size), DDI_DMA_SYNC_FORKERNEL)
+
+#define	EFSYS_DMA_SYNC_FOR_DEVICE(_esmp, _offset, _size)		\
+	(void) ddi_dma_sync((_esmp)->esm_dma_handle,			\
+	    (_offset), (_size), DDI_DMA_SYNC_FORDEV)
+
 /* TIMESTAMP */
 
 typedef	clock_t	efsys_timestamp_t;
 
+/* TODO: Arguably this could use gethrtime */
 #define	EFSYS_TIMESTAMP(_usp)						\
 	do {								\
-		clock_t now;						\
-									\
-		now = ddi_get_lbolt();					\
-		*(_usp) = drv_hztousec(now);				\
+		*(_usp) = drv_hztousec(ddi_get_lbolt());		\
 	_NOTE(CONSTANTCONDITION)					\
 	} while (B_FALSE)
 
@@ -545,20 +569,6 @@ typedef kmutex_t	efsys_lock_t;
 		if ((_state) != EFSYS_LOCK_MAGIC)			\
 			ASSERT(B_FALSE);				\
 		mutex_exit(_lockp);					\
-	_NOTE(CONSTANTCONDITION)					\
-	} while (B_FALSE)
-
-/* PREEMPT */
-
-#define	EFSYS_PREEMPT_DISABLE(_state)					\
-	do {								\
-		(_state) = ddi_enter_critical();			\
-	_NOTE(CONSTANTCONDITION)					\
-	} while (B_FALSE)
-
-#define	EFSYS_PREEMPT_ENABLE(_state)					\
-	do {								\
-		ddi_exit_critical(_state);				\
 	_NOTE(CONSTANTCONDITION)					\
 	} while (B_FALSE)
 
@@ -615,10 +625,7 @@ extern void	sfxge_err(efsys_identifier_t *, unsigned int,
 
 #if EFSYS_OPT_DECODE_INTR_FATAL
 #define	EFSYS_ERR(_esip, _code, _dword0, _dword1)			\
-	do {								\
-		sfxge_err((_esip), (_code), (_dword0), (_dword1));	\
-	_NOTE(CONSTANTCONDITION)					\
-	} while (B_FALSE)
+	sfxge_err((_esip), (_code), (_dword0), (_dword1))
 #endif
 
 /* PROBE */
@@ -647,35 +654,19 @@ extern void	sfxge_err(efsys_identifier_t *, unsigned int,
 	DTRACE_PROBE5(_name, _type1, _arg1, _type2, _arg2,		\
 	    _type3, _arg3, _type4, _arg4, _type5, _arg5)
 
-#ifdef DTRACE_PROBE6
 #define	EFSYS_PROBE6(_name, _type1, _arg1, _type2, _arg2,		\
 	    _type3, _arg3, _type4, _arg4, _type5, _arg5,		\
 	    _type6, _arg6)						\
 	DTRACE_PROBE6(_name, _type1, _arg1, _type2, _arg2,		\
 	    _type3, _arg3, _type4, _arg4, _type5, _arg5,		\
 	    _type6, _arg6)
-#else
-#define	EFSYS_PROBE6(_name, _type1, _arg1, _type2, _arg2,		\
-	    _type3, _arg3, _type4, _arg4, _type5, _arg5,		\
-	    _type6, _arg6)						\
-	DTRACE_PROBE5(_name, _type1, _arg1, _type2, _arg2,		\
-	    _type3, _arg3, _type4, _arg4, _type5, _arg5)
-#endif
 
-#ifdef DTRACE_PROBE7
 #define	EFSYS_PROBE7(_name, _type1, _arg1, _type2, _arg2,		\
 	    _type3, _arg3, _type4, _arg4, _type5, _arg5,		\
 	    _type6, _arg6, _type7, _arg7)				\
 	DTRACE_PROBE7(_name, _type1, _arg1, _type2, _arg2,		\
 	    _type3, _arg3, _type4, _arg4, _type5, _arg5,		\
 	    _type6, _arg6, _type7, _arg7)
-#else
-#define	EFSYS_PROBE7(_name, _type1, _arg1, _type2, _arg2,		\
-	    _type3, _arg3, _type4, _arg4, _type5, _arg5,		\
-	    _type6, _arg6, _type7, _arg7)				\
-	DTRACE_PROBE5(_name, _type1, _arg1, _type2, _arg2,		\
-	    _type3, _arg3, _type4, _arg4, _type5, _arg5)
-#endif
 
 /* ASSERT */
 
@@ -683,6 +674,10 @@ extern void	sfxge_err(efsys_identifier_t *, unsigned int,
 #define	EFSYS_ASSERT3U(_x, _op, _y)	ASSERT3U(_x, _op, _y)
 #define	EFSYS_ASSERT3S(_x, _op, _y)	ASSERT3S(_x, _op, _y)
 #define	EFSYS_ASSERT3P(_x, _op, _y)	ASSERT3P(_x, _op, _y)
+
+/* ROTATE */
+
+#define	EFSYS_HAS_ROTL_DWORD 0
 
 #ifdef	__cplusplus
 }

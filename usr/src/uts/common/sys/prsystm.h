@@ -53,6 +53,7 @@ struct psinfo;
 struct lwpsinfo;
 struct prcred;
 struct prpriv;
+struct prsecflags;
 
 struct seg;
 struct regs;
@@ -84,6 +85,7 @@ extern void prgetcred(proc_t *, struct prcred *);
 #endif
 extern void prgetpriv(proc_t *, struct prpriv *);
 extern size_t prgetprivsize(void);
+extern void prgetsecflags(proc_t *, struct prsecflags *);
 extern int  prnsegs(struct as *, int);
 extern void prexit(proc_t *);
 extern void prfree(proc_t *);
@@ -108,9 +110,9 @@ extern int  pr_watch_emul(struct regs *, caddr_t, enum seg_rw);
 extern void pr_free_watched_pages(proc_t *);
 extern int  pr_allstopped(proc_t *, int);
 #if defined(__sparc)
-struct gwindows;
+struct _gwindows;
 extern	int	prnwindows(klwp_t *);
-extern	void	prgetwindows(klwp_t *, struct gwindows *);
+extern	void	prgetwindows(klwp_t *, struct _gwindows *);
 #if defined(__sparcv9) /* 32-bit adb macros should not see these defs */
 extern	void	prgetasregs(klwp_t *, asrset_t);
 extern	void	prsetasregs(klwp_t *, asrset_t);

@@ -21,7 +21,7 @@
 
 /*
  * Copyright (c) 2009, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2015 Nexenta Systems, Inc. All rights reserved.
+ * Copyright 2016 Nexenta Systems, Inc. All rights reserved.
  * Copyright (c) 2014, Joyent, Inc. All rights reserved.
  * Copyright 2014 OmniTI Computer Consulting, Inc. All rights reserved.
  * Copyright (c) 2014, Tegile Systems Inc. All rights reserved.
@@ -76,6 +76,7 @@
 #include <sys/sysevent/eventdefs.h>
 #include <sys/sysevent/dr.h>
 #include <sys/sata/sata_defs.h>
+#include <sys/sata/sata_hba.h>
 #include <sys/scsi/generic/sas.h>
 #include <sys/scsi/impl/scsi_sas.h>
 
@@ -3117,7 +3118,6 @@ mptsas_scsi_tgt_init(dev_info_t *hba_dip, dev_info_t *tgt_dip,
 		char model[SATA_ID_MODEL_LEN + 1];
 		char fw[SATA_ID_FW_LEN + 1];
 		char *vid, *pid;
-		int i;
 
 		mutex_exit(&mpt->m_mutex);
 		/*
@@ -3146,29 +3146,7 @@ mptsas_scsi_tgt_init(dev_info_t *hba_dip, dev_info_t *tgt_dip,
 		model[SATA_ID_MODEL_LEN] = 0;
 		fw[SATA_ID_FW_LEN] = 0;
 
-		/*
-		 * split model into into vid/pid
-		 */
-		for (i = 0, pid = model; i < SATA_ID_MODEL_LEN; i++, pid++)
-			if ((*pid == ' ') || (*pid == '\t'))
-				break;
-		if (i < SATA_ID_MODEL_LEN) {
-			vid = model;
-			/*
-			 * terminate vid, establish pid
-			 */
-			*pid++ = 0;
-		} else {
-			/*
-			 * vid will stay "ATA     ", the rule is same
-			 * as sata framework implementation.
-			 */
-			vid = NULL;
-			/*
-			 * model is all pid
-			 */
-			pid = model;
-		}
+		sata_split_model(model, &vid, &pid);
 
 		/*
 		 * override SCSA "inquiry-*" properties
@@ -9296,11 +9274,17 @@ mptsas_flush_hba(mptsas_t *mpt)
 	mutex_exit(&mpt->m_tx_waitq_mutex);
 
 	/*
-	 * Drain the taskqs prior to reallocating resources.
+	 * Drain the taskqs prior to reallocating resources. The thread
+	 * passing through here could be launched from either (dr)
+	 * or (event) taskqs so only wait on the 'other' queue since
+	 * waiting on 'this' queue is a deadlock condition.
 	 */
 	mutex_exit(&mpt->m_mutex);
-	ddi_taskq_wait(mpt->m_event_taskq);
-	ddi_taskq_wait(mpt->m_dr_taskq);
+	if (!taskq_member((taskq_t *)mpt->m_event_taskq, curthread))
+		ddi_taskq_wait(mpt->m_event_taskq);
+	if (!taskq_member((taskq_t *)mpt->m_dr_taskq, curthread))
+		ddi_taskq_wait(mpt->m_dr_taskq);
+
 	mutex_enter(&mpt->m_mutex);
 }
 

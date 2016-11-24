@@ -20,9 +20,9 @@
 #
 
 #
-# Copyright 2011 Nexenta Systems, Inc.  All rights reserved.
 # Copyright (c) 2010, Oracle and/or its affiliates. All rights reserved.
 # Copyright 2012 OmniTI Computer Consulting, Inc.  All rights reserved.
+# Copyright 2014 Nexenta Systems, Inc.  All rights reserved.
 #
 
 set name=pkg.fmri value=pkg:/developer/library/lint@$(PKGVERS)
@@ -74,6 +74,7 @@ file path=lib/$(ARCH64)/llib-lmd5.ln
 file path=lib/$(ARCH64)/llib-lnsl.ln
 file path=lib/$(ARCH64)/llib-lnvpair.ln
 file path=lib/$(ARCH64)/llib-lpam.ln
+file path=lib/$(ARCH64)/llib-lproc.ln
 file path=lib/$(ARCH64)/llib-lpthread.ln
 file path=lib/$(ARCH64)/llib-lrcm.ln
 file path=lib/$(ARCH64)/llib-lresolv.ln
@@ -156,6 +157,8 @@ file path=lib/llib-lnwam
 file path=lib/llib-lnwam.ln
 file path=lib/llib-lpam
 file path=lib/llib-lpam.ln
+file path=lib/llib-lproc
+file path=lib/llib-lproc.ln
 file path=lib/llib-lpthread
 file path=lib/llib-lpthread.ln
 file path=lib/llib-lrcm
@@ -198,6 +201,7 @@ $(i386_ONLY)file path=usr/lib/$(ARCH64)/crt1.o
 file path=usr/lib/$(ARCH64)/crti.o
 file path=usr/lib/$(ARCH64)/crtn.o
 $(i386_ONLY)file path=usr/lib/$(ARCH64)/gcrt1.o
+file path=usr/lib/$(ARCH64)/llib-lads.ln
 file path=usr/lib/$(ARCH64)/llib-ladutils.ln
 file path=usr/lib/$(ARCH64)/llib-lbsdmalloc.ln
 file path=usr/lib/$(ARCH64)/llib-lcfgadm.ln
@@ -246,6 +250,8 @@ $(i386_ONLY)file path=usr/lib/crt1.o
 file path=usr/lib/crti.o
 file path=usr/lib/crtn.o
 $(i386_ONLY)file path=usr/lib/gcrt1.o
+file path=usr/lib/llib-lads
+file path=usr/lib/llib-lads.ln
 file path=usr/lib/llib-ladutils
 file path=usr/lib/llib-ladutils.ln
 file path=usr/lib/llib-lbsdmalloc

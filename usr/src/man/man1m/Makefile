@@ -11,8 +11,9 @@
 
 #
 # Copyright 2011, Richard Lowe
-# Copyright (c) 2012, Joyent, Inc.  All rights reserved.
+# Copyright 2016 Joyent, Inc.
 # Copyright 2015 Nexenta Systems, Inc.  All rights reserved.
+# Copyright 2016 Toomas Soome <tsoome@me.com>
 #
 
 include		$(SRC)//Makefile.master
@@ -212,6 +213,7 @@ _MANFILES=	6to4relay.1m		\
 		init.1m			\
 		inityp2l.1m		\
 		install.1m		\
+		installboot.1m		\
 		installf.1m		\
 		installgrub.1m		\
 		intrd.1m		\
@@ -286,6 +288,7 @@ _MANFILES=	6to4relay.1m		\
 		makedbm.1m		\
 		makemap.1m		\
 		mdmonitord.1m		\
+		mdnsd.1m		\
 		medstat.1m		\
 		metaclear.1m		\
 		metadb.1m		\
@@ -335,6 +338,7 @@ _MANFILES=	6to4relay.1m		\
 		ncheck.1m		\
 		ncheck_ufs.1m		\
 		ndd.1m			\
+		ndp.1m			\
 		ndmpadm.1m		\
 		ndmpd.1m		\
 		ndmpstat.1m		\
@@ -455,7 +459,6 @@ _MANFILES=	6to4relay.1m		\
 		sdpadm.1m		\
 		sendmail.1m		\
 		setuname.1m		\
-		sftp-server.1m		\
 		share.1m		\
 		share_nfs.1m		\
 		shareall.1m		\
@@ -480,8 +483,6 @@ _MANFILES=	6to4relay.1m		\
 		soconfig.1m		\
 		sppptun.1m		\
 		spray.1m		\
-		ssh-keysign.1m		\
-		sshd.1m			\
 		statd.1m		\
 		stmfadm.1m		\
 		stmsboot.1m		\
@@ -578,6 +579,8 @@ _MANFILES=	6to4relay.1m		\
 		zstreamdump.1m
 
 i386_MANFILES=				\
+		acpidump.1m		\
+		acpixtract.1m		\
 		lms.1m
 
 sparc_MANFILES=	cvcd.1m			\
@@ -716,6 +719,7 @@ hal-find-by-property.1m		:= LINKSRC = hal-find.1m
 hal-set-property.1m		:= LINKSRC = hal-get-property.1m
 
 poweroff.1m			:= LINKSRC = halt.1m
+
 
 comsat.1m			:= LINKSRC = in.comsat.1m
 fingerd.1m			:= LINKSRC = in.fingerd.1m

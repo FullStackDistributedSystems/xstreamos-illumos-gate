@@ -25,7 +25,7 @@
  */
 /*
  * Copyright 2012 DEY Storage Systems, Inc.  All rights reserved.
- * Copyright (c) 2014, Joyent, Inc. All rights reserved.
+ * Copyright 2015 Joyent, Inc.
  * Copyright (c) 2013 by Delphix. All rights reserved.
  */
 
@@ -1392,10 +1392,10 @@ Pfgcore(struct ps_prochandle *P, int fd, core_content_t content)
 		pprivsz = PRIV_PRPRIV_SIZE(ppriv);
 
 		if (write_note(fd, NT_PRPRIV, ppriv, pprivsz, &doff) != 0) {
-			free(ppriv);
+			Ppriv_free(P, ppriv);
 			goto err;
 		}
-		free(ppriv);
+		Ppriv_free(P, ppriv);
 
 		if ((pinfo = getprivimplinfo()) == NULL)
 			goto err;
@@ -1416,6 +1416,22 @@ Pfgcore(struct ps_prochandle *P, int fd, core_content_t content)
 
 		if (Pfdinfo_iter(P, iter_fd, &iter) != 0)
 			goto err;
+	}
+
+
+	{
+		prsecflags_t *psf = NULL;
+
+		if (Psecflags(P, &psf) != 0)
+			goto err;
+
+		if (write_note(fd, NT_SECFLAGS, psf,
+		    sizeof (prsecflags_t), &doff) != 0) {
+			Psecflags_free(psf);
+			goto err;
+		}
+
+		Psecflags_free(psf);
 	}
 
 #if defined(__i386) || defined(__amd64)
@@ -1501,6 +1517,7 @@ err:
 	 */
 	(void) ftruncate64(fd, 0);
 	free(pgc.pgc_chunk);
+
 	return (-1);
 }
 

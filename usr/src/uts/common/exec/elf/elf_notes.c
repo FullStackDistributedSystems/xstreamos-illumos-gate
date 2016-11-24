@@ -94,7 +94,7 @@ setup_note_header(Phdr *v, proc_t *p)
 
 	v[0].p_type = PT_NOTE;
 	v[0].p_flags = PF_R;
-	v[0].p_filesz = (sizeof (Note) * (9 + 2 * nlwp + nzomb + nfd))
+	v[0].p_filesz = (sizeof (Note) * (10 + 2 * nlwp + nzomb + nfd))
 	    + roundup(sizeof (psinfo_t), sizeof (Word))
 	    + roundup(sizeof (pstatus_t), sizeof (Word))
 	    + roundup(prgetprivsize(), sizeof (Word))
@@ -104,6 +104,7 @@ setup_note_header(Phdr *v, proc_t *p)
 	    + roundup(__KERN_NAUXV_IMPL * sizeof (aux_entry_t), sizeof (Word))
 	    + roundup(sizeof (utsname), sizeof (Word))
 	    + roundup(sizeof (core_content_t), sizeof (Word))
+	    + roundup(sizeof (prsecflags_t), sizeof (Word))
 	    + (nlwp + nzomb) * roundup(sizeof (lwpsinfo_t), sizeof (Word))
 	    + nlwp * roundup(sizeof (lwpstatus_t), sizeof (Word))
 	    + nfd * roundup(sizeof (prfdinfo_t), sizeof (Word));
@@ -182,6 +183,7 @@ write_elfnotes(proc_t *p, int sig, vnode_t *vp, offset_t offset,
 		prpriv_t	ppriv;
 		priv_impl_info_t prinfo;
 		struct utsname	uts;
+		prsecflags_t	psecflags;
 	} *bigwad;
 
 	size_t xregsize = prhasx(p)? prgetprxregsize(p) : 0;
@@ -287,6 +289,12 @@ write_elfnotes(proc_t *p, int sig, vnode_t *vp, offset_t offset,
 	if (error)
 		goto done;
 
+	prgetsecflags(p, &bigwad->psecflags);
+	error = elfnote(vp, &offset, NT_SECFLAGS, sizeof (prsecflags_t),
+	    (caddr_t)&bigwad->psecflags, rlimit, credp);
+	if (error)
+		goto done;
+
 	prgetcred(p, &bigwad->pcred);
 
 	if (bigwad->pcred.pr_ngroups != 0) {
@@ -376,11 +384,28 @@ write_elfnotes(proc_t *p, int sig, vnode_t *vp, offset_t offset,
 		(void) vnodetopath(vroot, fvp, fdinfo.pr_path,
 		    sizeof (fdinfo.pr_path), credp);
 
-		error = VOP_GETATTR(fvp, &vattr, 0, credp, NULL);
-		if (error != 0) {
+		if (VOP_GETATTR(fvp, &vattr, 0, credp, NULL) != 0) {
+			/*
+			 * Try to write at least a subset of information
+			 */
+			fdinfo.pr_major = 0;
+			fdinfo.pr_minor = 0;
+			fdinfo.pr_ino = 0;
+			fdinfo.pr_mode = 0;
+			fdinfo.pr_uid = (uid_t)-1;
+			fdinfo.pr_gid = (gid_t)-1;
+			fdinfo.pr_rmajor = 0;
+			fdinfo.pr_rminor = 0;
+			fdinfo.pr_size = -1;
+
+			error = elfnote(vp, &offset, NT_FDINFO,
+			    sizeof (fdinfo), &fdinfo, rlimit, credp);
 			VN_RELE(fvp);
-			VN_RELE(vroot);
-			goto done;
+			if (error) {
+				VN_RELE(vroot);
+				goto done;
+			}
+			continue;
 		}
 
 		if (fvp->v_type == VSOCK)

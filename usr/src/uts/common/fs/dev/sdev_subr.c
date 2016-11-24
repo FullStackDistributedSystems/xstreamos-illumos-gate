@@ -20,7 +20,7 @@
  */
 /*
  * Copyright (c) 2006, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2013, Joyent, Inc. All rights reserved.
+ * Copyright (c) 2013, 2016 Joyent, Inc. All rights reserved.
  */
 
 /*
@@ -160,16 +160,11 @@ static void
 sdev_prof_free(struct sdev_node *dv)
 {
 	ASSERT(!SDEV_IS_GLOBAL(dv));
-	if (dv->sdev_prof.dev_name)
-		nvlist_free(dv->sdev_prof.dev_name);
-	if (dv->sdev_prof.dev_map)
-		nvlist_free(dv->sdev_prof.dev_map);
-	if (dv->sdev_prof.dev_symlink)
-		nvlist_free(dv->sdev_prof.dev_symlink);
-	if (dv->sdev_prof.dev_glob_incdir)
-		nvlist_free(dv->sdev_prof.dev_glob_incdir);
-	if (dv->sdev_prof.dev_glob_excdir)
-		nvlist_free(dv->sdev_prof.dev_glob_excdir);
+	nvlist_free(dv->sdev_prof.dev_name);
+	nvlist_free(dv->sdev_prof.dev_map);
+	nvlist_free(dv->sdev_prof.dev_symlink);
+	nvlist_free(dv->sdev_prof.dev_glob_incdir);
+	nvlist_free(dv->sdev_prof.dev_glob_excdir);
 	bzero(&dv->sdev_prof, sizeof (dv->sdev_prof));
 }
 
@@ -2286,7 +2281,7 @@ sdev_cleandir(struct sdev_node *ddv, char *expr, uint_t flags)
 	int error = 0;
 	int busy = 0;
 	struct vnode *vp;
-	struct sdev_node *dv;
+	struct sdev_node *dv, *next;
 	int bkstore = 0;
 	int len = 0;
 	char *bks_name = NULL;
@@ -2297,7 +2292,8 @@ sdev_cleandir(struct sdev_node *ddv, char *expr, uint_t flags)
 	 * We try our best to destroy all unused sdev_node's
 	 */
 	rw_enter(&ddv->sdev_contents, RW_WRITER);
-	while ((dv = SDEV_FIRST_ENTRY(ddv)) != NULL) {
+	for (dv = SDEV_FIRST_ENTRY(ddv); dv != NULL; dv = next) {
+		next = SDEV_NEXT_ENTRY(ddv, dv);
 		vp = SDEVTOV(dv);
 
 		if (expr && gmatch(dv->sdev_name, expr) == 0)

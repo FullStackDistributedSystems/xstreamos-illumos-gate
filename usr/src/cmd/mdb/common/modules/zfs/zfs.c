@@ -21,7 +21,7 @@
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2011 Nexenta Systems, Inc. All rights reserved.
- * Copyright (c) 2011, 2014 by Delphix. All rights reserved.
+ * Copyright (c) 2011, 2016 by Delphix. All rights reserved.
  */
 
 /* Portions Copyright 2010 Robert Milkowski */
@@ -42,6 +42,7 @@
 #include <ctype.h>
 #include <sys/zfs_acl.h>
 #include <sys/sa_impl.h>
+#include <sys/multilist.h>
 
 #ifdef _KERNEL
 #define	ZFS_OBJ_NAME	"zfs"
@@ -65,9 +66,12 @@ enum spa_flags {
 	SPA_FLAG_HISTOGRAMS		= 1 << 5
 };
 
+/*
+ * If any of these flags are set, call spa_vdevs in spa_print
+ */
 #define	SPA_FLAG_ALL_VDEV	\
 	(SPA_FLAG_VDEVS | SPA_FLAG_ERRORS | SPA_FLAG_METASLAB_GROUPS | \
-	SPA_FLAG_METASLABS | SPA_FLAG_HISTOGRAMS)
+	SPA_FLAG_METASLABS)
 
 static int
 getmember(uintptr_t addr, const char *type, mdb_ctf_id_t *idp,
@@ -230,7 +234,7 @@ mdb_dsl_dir_name(uintptr_t addr, char *buf)
 	static int gotid;
 	static mdb_ctf_id_t dd_id;
 	uintptr_t dd_parent;
-	char dd_myname[MAXNAMELEN];
+	char dd_myname[ZFS_MAX_DATASET_NAME_LEN];
 
 	if (!gotid) {
 		if (mdb_ctf_lookup_by_name(ZFS_STRUCT "dsl_dir",
@@ -265,7 +269,7 @@ objset_name(uintptr_t addr, char *buf)
 	static int gotid;
 	static mdb_ctf_id_t os_id, ds_id;
 	uintptr_t os_dsl_dataset;
-	char ds_snapname[MAXNAMELEN];
+	char ds_snapname[ZFS_MAX_DATASET_NAME_LEN];
 	uintptr_t ds_dir;
 
 	buf[0] = '\0';
@@ -466,10 +470,12 @@ dbuf(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 	mdb_dmu_buf_impl_t db;
 	char objectname[32];
 	char blkidname[32];
-	char path[MAXNAMELEN];
+	char path[ZFS_MAX_DATASET_NAME_LEN];
+	int ptr_width = (int)(sizeof (void *)) * 2;
 
 	if (DCMD_HDRSPEC(flags))
-		mdb_printf("        addr object lvl blkid holds os\n");
+		mdb_printf("%*s %8s %3s %9s %5s %s\n",
+		    ptr_width, "addr", "object", "lvl", "blkid", "holds", "os");
 
 	if (mdb_ctf_vread(&db, ZFS_STRUCT "dmu_buf_impl", "mdb_dmu_buf_impl_t",
 	    addr, 0) == -1)
@@ -491,7 +497,7 @@ dbuf(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 		return (DCMD_ERR);
 	}
 
-	mdb_printf("%p %8s %1u %9s %2llu %s\n", addr,
+	mdb_printf("%*p %8s %3u %9s %5llu %s\n", ptr_width, addr,
 	    objectname, (int)db.db_level, blkidname,
 	    db.db_holds.rc_count, path);
 
@@ -723,7 +729,7 @@ dbufs_cb(uintptr_t addr, const void *unknown, void *arg)
 	dmu_buf_t db;
 	uint8_t level;
 	uint64_t blkid;
-	char osname[MAXNAMELEN];
+	char osname[ZFS_MAX_DATASET_NAME_LEN];
 
 	if (GETMEMBID(addr, &data->id, db_objset, objset) ||
 	    GETMEMBID(addr, &data->id, db, db) ||
@@ -971,6 +977,7 @@ arc_print(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 		"mfu_ghost_evictable_metadata", "evict_l2_cached",
 		"evict_l2_eligible", "evict_l2_ineligible", "l2_read_bytes",
 		"l2_write_bytes", "l2_size", "l2_asize", "l2_hdr_size",
+		"compressed_size", "uncompressed_size", "overhead_size",
 		NULL
 	};
 
@@ -1077,8 +1084,65 @@ arc_print(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 
 typedef struct mdb_spa_print {
 	pool_state_t spa_state;
-	char spa_name[MAXNAMELEN];
+	char spa_name[ZFS_MAX_DATASET_NAME_LEN];
+	uintptr_t spa_normal_class;
 } mdb_spa_print_t;
+
+
+const char histo_stars[] = "****************************************";
+const int histo_width = sizeof (histo_stars) - 1;
+
+static void
+dump_histogram(const uint64_t *histo, int size, int offset)
+{
+	int i;
+	int minidx = size - 1;
+	int maxidx = 0;
+	uint64_t max = 0;
+
+	for (i = 0; i < size; i++) {
+		if (histo[i] > max)
+			max = histo[i];
+		if (histo[i] > 0 && i > maxidx)
+			maxidx = i;
+		if (histo[i] > 0 && i < minidx)
+			minidx = i;
+	}
+
+	if (max < histo_width)
+		max = histo_width;
+
+	for (i = minidx; i <= maxidx; i++) {
+		mdb_printf("%3u: %6llu %s\n",
+		    i + offset, (u_longlong_t)histo[i],
+		    &histo_stars[(max - histo[i]) * histo_width / max]);
+	}
+}
+
+typedef struct mdb_metaslab_class {
+	uint64_t mc_histogram[RANGE_TREE_HISTOGRAM_SIZE];
+} mdb_metaslab_class_t;
+
+/*
+ * spa_class_histogram(uintptr_t class_addr)
+ *
+ * Prints free space histogram for a device class
+ *
+ * Returns DCMD_OK, or DCMD_ERR.
+ */
+static int
+spa_class_histogram(uintptr_t class_addr)
+{
+	mdb_metaslab_class_t mc;
+	if (mdb_ctf_vread(&mc, "metaslab_class_t",
+	    "mdb_metaslab_class_t", class_addr, 0) == -1)
+		return (DCMD_ERR);
+
+	mdb_inc_indent(4);
+	dump_histogram(mc.mc_histogram, RANGE_TREE_HISTOGRAM_SIZE, 0);
+	mdb_dec_indent(4);
+	return (DCMD_OK);
+}
 
 /*
  * ::spa
@@ -1140,6 +1204,8 @@ spa_print(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 		state = statetab[spa.spa_state];
 
 	mdb_printf("%0?p %9s %s\n", addr, state, spa.spa_name);
+	if (spa_flags & SPA_FLAG_HISTOGRAMS)
+		spa_class_histogram(spa.spa_normal_class);
 
 	if (spa_flags & SPA_FLAG_CONFIG) {
 		mdb_printf("\n");
@@ -1212,35 +1278,7 @@ spa_print_config(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 	    0, NULL));
 }
 
-const char histo_stars[] = "****************************************";
-const int histo_width = sizeof (histo_stars) - 1;
 
-static void
-dump_histogram(const uint64_t *histo, int size, int offset)
-{
-	int i;
-	int minidx = size - 1;
-	int maxidx = 0;
-	uint64_t max = 0;
-
-	for (i = 0; i < size; i++) {
-		if (histo[i] > max)
-			max = histo[i];
-		if (histo[i] > 0 && i > maxidx)
-			maxidx = i;
-		if (histo[i] > 0 && i < minidx)
-			minidx = i;
-	}
-
-	if (max < histo_width)
-		max = histo_width;
-
-	for (i = minidx; i <= maxidx; i++) {
-		mdb_printf("%3u: %6llu %s\n",
-		    i + offset, (u_longlong_t)histo[i],
-		    &histo_stars[(max - histo[i]) * histo_width / max]);
-	}
-}
 
 typedef struct mdb_range_tree {
 	uint64_t rt_space;
@@ -1653,7 +1691,6 @@ metaslab_walk_step(mdb_walk_state_t *wsp)
 	return (wsp->walk_callback(msp, &ms, wsp->walk_cbdata));
 }
 
-/* ARGSUSED */
 static int
 metaslab_walk_init(mdb_walk_state_t *wsp)
 {
@@ -2179,6 +2216,69 @@ zio_state(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 		addr = 0;
 
 	return (mdb_pwalk_dcmd("zio_root", "zio", argc, argv, addr));
+}
+
+typedef struct mdb_multilist {
+	uint64_t ml_num_sublists;
+	uintptr_t ml_sublists;
+} mdb_multilist_t;
+
+typedef struct multilist_walk_data {
+	uint64_t mwd_idx;
+	mdb_multilist_t mwd_ml;
+} multilist_walk_data_t;
+
+/* ARGSUSED */
+static int
+multilist_print_cb(uintptr_t addr, const void *unknown, void *arg)
+{
+	mdb_printf("%#lr\n", addr);
+	return (WALK_NEXT);
+}
+
+static int
+multilist_walk_step(mdb_walk_state_t *wsp)
+{
+	multilist_walk_data_t *mwd = wsp->walk_data;
+
+	if (mwd->mwd_idx >= mwd->mwd_ml.ml_num_sublists)
+		return (WALK_DONE);
+
+	wsp->walk_addr = mwd->mwd_ml.ml_sublists +
+	    mdb_ctf_sizeof_by_name("multilist_sublist_t") * mwd->mwd_idx +
+	    mdb_ctf_offsetof_by_name("multilist_sublist_t", "mls_list");
+
+	mdb_pwalk("list", multilist_print_cb, (void*)NULL, wsp->walk_addr);
+	mwd->mwd_idx++;
+
+	return (WALK_NEXT);
+}
+
+static int
+multilist_walk_init(mdb_walk_state_t *wsp)
+{
+	multilist_walk_data_t *mwd;
+
+	if (wsp->walk_addr == NULL) {
+		mdb_warn("must supply address of multilist_t\n");
+		return (WALK_ERR);
+	}
+
+	mwd = mdb_zalloc(sizeof (multilist_walk_data_t), UM_SLEEP | UM_GC);
+	if (mdb_ctf_vread(&mwd->mwd_ml, "multilist_t", "mdb_multilist_t",
+	    wsp->walk_addr, 0) == -1) {
+		return (WALK_ERR);
+	}
+
+	if (mwd->mwd_ml.ml_num_sublists == 0 ||
+	    mwd->mwd_ml.ml_sublists == NULL) {
+		mdb_warn("invalid or uninitialized multilist at %#lx\n",
+		    wsp->walk_addr);
+		return (WALK_ERR);
+	}
+
+	wsp->walk_data = mwd;
+	return (WALK_NEXT);
 }
 
 typedef struct txg_list_walk_data {
@@ -3267,6 +3367,359 @@ rrwlock(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 	return (DCMD_OK);
 }
 
+typedef struct mdb_arc_buf_hdr_t {
+	uint16_t b_psize;
+	uint16_t b_lsize;
+	struct {
+		uint32_t	b_bufcnt;
+		uintptr_t	b_state;
+		uintptr_t	b_pdata;
+	} b_l1hdr;
+} mdb_arc_buf_hdr_t;
+
+enum arc_cflags {
+	ARC_CFLAG_VERBOSE		= 1 << 0,
+	ARC_CFLAG_ANON			= 1 << 1,
+	ARC_CFLAG_MRU			= 1 << 2,
+	ARC_CFLAG_MFU			= 1 << 3,
+	ARC_CFLAG_BUFS			= 1 << 4,
+};
+
+typedef struct arc_compression_stats_data {
+	GElf_Sym anon_sym;	/* ARC_anon symbol */
+	GElf_Sym mru_sym;	/* ARC_mru symbol */
+	GElf_Sym mrug_sym;	/* ARC_mru_ghost symbol */
+	GElf_Sym mfu_sym;	/* ARC_mfu symbol */
+	GElf_Sym mfug_sym;	/* ARC_mfu_ghost symbol */
+	GElf_Sym l2c_sym;	/* ARC_l2c_only symbol */
+	uint64_t *anon_c_hist;	/* histogram of compressed sizes in anon */
+	uint64_t *anon_u_hist;	/* histogram of uncompressed sizes in anon */
+	uint64_t *anon_bufs;	/* histogram of buffer counts in anon state */
+	uint64_t *mru_c_hist;	/* histogram of compressed sizes in mru */
+	uint64_t *mru_u_hist;	/* histogram of uncompressed sizes in mru */
+	uint64_t *mru_bufs;	/* histogram of buffer counts in mru */
+	uint64_t *mfu_c_hist;	/* histogram of compressed sizes in mfu */
+	uint64_t *mfu_u_hist;	/* histogram of uncompressed sizes in mfu */
+	uint64_t *mfu_bufs;	/* histogram of buffer counts in mfu */
+	uint64_t *all_c_hist;	/* histogram of compressed anon + mru + mfu */
+	uint64_t *all_u_hist;	/* histogram of uncompressed anon + mru + mfu */
+	uint64_t *all_bufs;	/* histogram of buffer counts in all states  */
+	int arc_cflags;		/* arc compression flags, specified by user */
+	int hist_nbuckets;	/* number of buckets in each histogram */
+} arc_compression_stats_data_t;
+
+int
+highbit64(uint64_t i)
+{
+	int h = 1;
+
+	if (i == 0)
+		return (0);
+	if (i & 0xffffffff00000000ULL) {
+		h += 32; i >>= 32;
+	}
+	if (i & 0xffff0000) {
+		h += 16; i >>= 16;
+	}
+	if (i & 0xff00) {
+		h += 8; i >>= 8;
+	}
+	if (i & 0xf0) {
+		h += 4; i >>= 4;
+	}
+	if (i & 0xc) {
+		h += 2; i >>= 2;
+	}
+	if (i & 0x2) {
+		h += 1;
+	}
+	return (h);
+}
+
+/* ARGSUSED */
+static int
+arc_compression_stats_cb(uintptr_t addr, const void *unknown, void *arg)
+{
+	arc_compression_stats_data_t *data = arg;
+	mdb_arc_buf_hdr_t hdr;
+	int cbucket, ubucket, bufcnt;
+
+	if (mdb_ctf_vread(&hdr, "arc_buf_hdr_t", "mdb_arc_buf_hdr_t",
+	    addr, 0) == -1) {
+		return (WALK_ERR);
+	}
+
+	/*
+	 * Headers in the ghost states, or the l2c_only state don't have
+	 * arc buffers linked off of them. Thus, their compressed size
+	 * is meaningless, so we skip these from the stats.
+	 */
+	if (hdr.b_l1hdr.b_state == data->mrug_sym.st_value ||
+	    hdr.b_l1hdr.b_state == data->mfug_sym.st_value ||
+	    hdr.b_l1hdr.b_state == data->l2c_sym.st_value) {
+		return (WALK_NEXT);
+	}
+
+	/*
+	 * The physical size (compressed) and logical size
+	 * (uncompressed) are in units of SPA_MINBLOCKSIZE. By default,
+	 * we use the log2 of this value (rounded down to the nearest
+	 * integer) to determine the bucket to assign this header to.
+	 * Thus, the histogram is logarithmic with respect to the size
+	 * of the header. For example, the following is a mapping of the
+	 * bucket numbers and the range of header sizes they correspond to:
+	 *
+	 *	0: 0 byte headers
+	 *	1: 512 byte headers
+	 *	2: [1024 - 2048) byte headers
+	 *	3: [2048 - 4096) byte headers
+	 *	4: [4096 - 8192) byte headers
+	 *	5: [8192 - 16394) byte headers
+	 *	6: [16384 - 32768) byte headers
+	 *	7: [32768 - 65536) byte headers
+	 *	8: [65536 - 131072) byte headers
+	 *	9: 131072 byte headers
+	 *
+	 * If the ARC_CFLAG_VERBOSE flag was specified, we use the
+	 * physical and logical sizes directly. Thus, the histogram will
+	 * no longer be logarithmic; instead it will be linear with
+	 * respect to the size of the header. The following is a mapping
+	 * of the first many bucket numbers and the header size they
+	 * correspond to:
+	 *
+	 *	0: 0 byte headers
+	 *	1: 512 byte headers
+	 *	2: 1024 byte headers
+	 *	3: 1536 byte headers
+	 *	4: 2048 byte headers
+	 *	5: 2560 byte headers
+	 *	6: 3072 byte headers
+	 *
+	 * And so on. Keep in mind that a range of sizes isn't used in
+	 * the case of linear scale because the headers can only
+	 * increment or decrement in sizes of 512 bytes. So, it's not
+	 * possible for a header to be sized in between whats listed
+	 * above.
+	 *
+	 * Also, the above mapping values were calculated assuming a
+	 * SPA_MINBLOCKSHIFT of 512 bytes and a SPA_MAXBLOCKSIZE of 128K.
+	 */
+
+	if (data->arc_cflags & ARC_CFLAG_VERBOSE) {
+		cbucket = hdr.b_psize;
+		ubucket = hdr.b_lsize;
+	} else {
+		cbucket = highbit64(hdr.b_psize);
+		ubucket = highbit64(hdr.b_lsize);
+	}
+
+	bufcnt = hdr.b_l1hdr.b_bufcnt;
+	if (bufcnt >= data->hist_nbuckets)
+		bufcnt = data->hist_nbuckets - 1;
+
+	/* Ensure we stay within the bounds of the histogram array */
+	ASSERT3U(cbucket, <, data->hist_nbuckets);
+	ASSERT3U(ubucket, <, data->hist_nbuckets);
+
+	if (hdr.b_l1hdr.b_state == data->anon_sym.st_value) {
+		data->anon_c_hist[cbucket]++;
+		data->anon_u_hist[ubucket]++;
+		data->anon_bufs[bufcnt]++;
+	} else if (hdr.b_l1hdr.b_state == data->mru_sym.st_value) {
+		data->mru_c_hist[cbucket]++;
+		data->mru_u_hist[ubucket]++;
+		data->mru_bufs[bufcnt]++;
+	} else if (hdr.b_l1hdr.b_state == data->mfu_sym.st_value) {
+		data->mfu_c_hist[cbucket]++;
+		data->mfu_u_hist[ubucket]++;
+		data->mfu_bufs[bufcnt]++;
+	}
+
+	data->all_c_hist[cbucket]++;
+	data->all_u_hist[ubucket]++;
+	data->all_bufs[bufcnt]++;
+
+	return (WALK_NEXT);
+}
+
+/* ARGSUSED */
+static int
+arc_compression_stats(uintptr_t addr, uint_t flags, int argc,
+    const mdb_arg_t *argv)
+{
+	arc_compression_stats_data_t data = { 0 };
+	unsigned int max_shifted = SPA_MAXBLOCKSIZE >> SPA_MINBLOCKSHIFT;
+	unsigned int hist_size;
+	char range[32];
+	int rc = DCMD_OK;
+
+	if (mdb_getopts(argc, argv,
+	    'v', MDB_OPT_SETBITS, ARC_CFLAG_VERBOSE, &data.arc_cflags,
+	    'a', MDB_OPT_SETBITS, ARC_CFLAG_ANON, &data.arc_cflags,
+	    'b', MDB_OPT_SETBITS, ARC_CFLAG_BUFS, &data.arc_cflags,
+	    'r', MDB_OPT_SETBITS, ARC_CFLAG_MRU, &data.arc_cflags,
+	    'f', MDB_OPT_SETBITS, ARC_CFLAG_MFU, &data.arc_cflags) != argc)
+		return (DCMD_USAGE);
+
+	if (mdb_lookup_by_obj(ZFS_OBJ_NAME, "ARC_anon", &data.anon_sym) ||
+	    mdb_lookup_by_obj(ZFS_OBJ_NAME, "ARC_mru", &data.mru_sym) ||
+	    mdb_lookup_by_obj(ZFS_OBJ_NAME, "ARC_mru_ghost", &data.mrug_sym) ||
+	    mdb_lookup_by_obj(ZFS_OBJ_NAME, "ARC_mfu", &data.mfu_sym) ||
+	    mdb_lookup_by_obj(ZFS_OBJ_NAME, "ARC_mfu_ghost", &data.mfug_sym) ||
+	    mdb_lookup_by_obj(ZFS_OBJ_NAME, "ARC_l2c_only", &data.l2c_sym)) {
+		mdb_warn("can't find arc state symbol");
+		return (DCMD_ERR);
+	}
+
+	/*
+	 * Determine the maximum expected size for any header, and use
+	 * this to determine the number of buckets needed for each
+	 * histogram. If ARC_CFLAG_VERBOSE is specified, this value is
+	 * used directly; otherwise the log2 of the maximum size is
+	 * used. Thus, if using a log2 scale there's a maximum of 10
+	 * possible buckets, while the linear scale (when using
+	 * ARC_CFLAG_VERBOSE) has a maximum of 257 buckets.
+	 */
+	if (data.arc_cflags & ARC_CFLAG_VERBOSE)
+		data.hist_nbuckets = max_shifted + 1;
+	else
+		data.hist_nbuckets = highbit64(max_shifted) + 1;
+
+	hist_size = sizeof (uint64_t) * data.hist_nbuckets;
+
+	data.anon_c_hist = mdb_zalloc(hist_size, UM_SLEEP);
+	data.anon_u_hist = mdb_zalloc(hist_size, UM_SLEEP);
+	data.anon_bufs = mdb_zalloc(hist_size, UM_SLEEP);
+
+	data.mru_c_hist = mdb_zalloc(hist_size, UM_SLEEP);
+	data.mru_u_hist = mdb_zalloc(hist_size, UM_SLEEP);
+	data.mru_bufs = mdb_zalloc(hist_size, UM_SLEEP);
+
+	data.mfu_c_hist = mdb_zalloc(hist_size, UM_SLEEP);
+	data.mfu_u_hist = mdb_zalloc(hist_size, UM_SLEEP);
+	data.mfu_bufs = mdb_zalloc(hist_size, UM_SLEEP);
+
+	data.all_c_hist = mdb_zalloc(hist_size, UM_SLEEP);
+	data.all_u_hist = mdb_zalloc(hist_size, UM_SLEEP);
+	data.all_bufs = mdb_zalloc(hist_size, UM_SLEEP);
+
+	if (mdb_walk("arc_buf_hdr_t_full", arc_compression_stats_cb,
+	    &data) != 0) {
+		mdb_warn("can't walk arc_buf_hdr's");
+		rc = DCMD_ERR;
+		goto out;
+	}
+
+	if (data.arc_cflags & ARC_CFLAG_VERBOSE) {
+		rc = mdb_snprintf(range, sizeof (range),
+		    "[n*%llu, (n+1)*%llu)", SPA_MINBLOCKSIZE,
+		    SPA_MINBLOCKSIZE);
+	} else {
+		rc = mdb_snprintf(range, sizeof (range),
+		    "[2^(n-1)*%llu, 2^n*%llu)", SPA_MINBLOCKSIZE,
+		    SPA_MINBLOCKSIZE);
+	}
+
+	if (rc < 0) {
+		/* snprintf failed, abort the dcmd */
+		rc = DCMD_ERR;
+		goto out;
+	} else {
+		/* snprintf succeeded above, reset return code */
+		rc = DCMD_OK;
+	}
+
+	if (data.arc_cflags & ARC_CFLAG_ANON) {
+		if (data.arc_cflags & ARC_CFLAG_BUFS) {
+			mdb_printf("Histogram of the number of anon buffers "
+			    "that are associated with an arc hdr.\n");
+			dump_histogram(data.anon_bufs, data.hist_nbuckets, 0);
+			mdb_printf("\n");
+		}
+		mdb_printf("Histogram of compressed anon buffers.\n"
+		    "Each bucket represents buffers of size: %s.\n", range);
+		dump_histogram(data.anon_c_hist, data.hist_nbuckets, 0);
+		mdb_printf("\n");
+
+		mdb_printf("Histogram of uncompressed anon buffers.\n"
+		    "Each bucket represents buffers of size: %s.\n", range);
+		dump_histogram(data.anon_u_hist, data.hist_nbuckets, 0);
+		mdb_printf("\n");
+	}
+
+	if (data.arc_cflags & ARC_CFLAG_MRU) {
+		if (data.arc_cflags & ARC_CFLAG_BUFS) {
+			mdb_printf("Histogram of the number of mru buffers "
+			    "that are associated with an arc hdr.\n");
+			dump_histogram(data.mru_bufs, data.hist_nbuckets, 0);
+			mdb_printf("\n");
+		}
+		mdb_printf("Histogram of compressed mru buffers.\n"
+		    "Each bucket represents buffers of size: %s.\n", range);
+		dump_histogram(data.mru_c_hist, data.hist_nbuckets, 0);
+		mdb_printf("\n");
+
+		mdb_printf("Histogram of uncompressed mru buffers.\n"
+		    "Each bucket represents buffers of size: %s.\n", range);
+		dump_histogram(data.mru_u_hist, data.hist_nbuckets, 0);
+		mdb_printf("\n");
+	}
+
+	if (data.arc_cflags & ARC_CFLAG_MFU) {
+		if (data.arc_cflags & ARC_CFLAG_BUFS) {
+			mdb_printf("Histogram of the number of mfu buffers "
+			    "that are associated with an arc hdr.\n");
+			dump_histogram(data.mfu_bufs, data.hist_nbuckets, 0);
+			mdb_printf("\n");
+		}
+
+		mdb_printf("Histogram of compressed mfu buffers.\n"
+		    "Each bucket represents buffers of size: %s.\n", range);
+		dump_histogram(data.mfu_c_hist, data.hist_nbuckets, 0);
+		mdb_printf("\n");
+
+		mdb_printf("Histogram of uncompressed mfu buffers.\n"
+		    "Each bucket represents buffers of size: %s.\n", range);
+		dump_histogram(data.mfu_u_hist, data.hist_nbuckets, 0);
+		mdb_printf("\n");
+	}
+
+	if (data.arc_cflags & ARC_CFLAG_BUFS) {
+		mdb_printf("Histogram of all buffers that "
+		    "are associated with an arc hdr.\n");
+		dump_histogram(data.all_bufs, data.hist_nbuckets, 0);
+		mdb_printf("\n");
+	}
+
+	mdb_printf("Histogram of all compressed buffers.\n"
+	    "Each bucket represents buffers of size: %s.\n", range);
+	dump_histogram(data.all_c_hist, data.hist_nbuckets, 0);
+	mdb_printf("\n");
+
+	mdb_printf("Histogram of all uncompressed buffers.\n"
+	    "Each bucket represents buffers of size: %s.\n", range);
+	dump_histogram(data.all_u_hist, data.hist_nbuckets, 0);
+
+out:
+	mdb_free(data.anon_c_hist, hist_size);
+	mdb_free(data.anon_u_hist, hist_size);
+	mdb_free(data.anon_bufs, hist_size);
+
+	mdb_free(data.mru_c_hist, hist_size);
+	mdb_free(data.mru_u_hist, hist_size);
+	mdb_free(data.mru_bufs, hist_size);
+
+	mdb_free(data.mfu_c_hist, hist_size);
+	mdb_free(data.mfu_u_hist, hist_size);
+	mdb_free(data.mfu_bufs, hist_size);
+
+	mdb_free(data.all_c_hist, hist_size);
+	mdb_free(data.all_u_hist, hist_size);
+	mdb_free(data.all_bufs, hist_size);
+
+	return (rc);
+}
+
 /*
  * MDB module linkage information:
  *
@@ -3303,11 +3756,11 @@ static const mdb_dcmd_t dcmds[] = {
 	    "\t-M display metaslab group statistic\n"
 	    "\t-h display histogram (requires -m or -M)\n",
 	    "given a spa_t, print vdev summary", spa_vdevs },
-	{ "vdev", ":[-re]\n"
+	{ "vdev", ":[-remMh]\n"
 	    "\t-r display recursively\n"
 	    "\t-e display statistics\n"
-	    "\t-m display metaslab statistics\n"
-	    "\t-M display metaslab group statistics\n"
+	    "\t-m display metaslab statistics (top level vdev only)\n"
+	    "\t-M display metaslab group statistics (top level vdev only)\n"
 	    "\t-h display histogram (requires -m or -M)\n",
 	    "vdev_t summary", vdev_print },
 	{ "zio", ":[-cpr]\n"
@@ -3337,6 +3790,14 @@ static const mdb_dcmd_t dcmds[] = {
 	    "print zfs debug log", dbgmsg},
 	{ "rrwlock", ":",
 	    "print rrwlock_t, including readers", rrwlock},
+	{ "arc_compression_stats", ":[-vabrf]\n"
+	    "\t-v verbose, display a linearly scaled histogram\n"
+	    "\t-a display ARC_anon state statistics individually\n"
+	    "\t-r display ARC_mru state statistics individually\n"
+	    "\t-f display ARC_mfu state statistics individually\n"
+	    "\t-b display histogram of buffer counts\n",
+	    "print a histogram of compressed arc buffer sizes",
+	    arc_compression_stats},
 	{ NULL }
 };
 
@@ -3362,6 +3823,8 @@ static const mdb_walker_t walkers[] = {
 	    spa_walk_init, spa_walk_step, NULL },
 	{ "metaslab", "given a spa_t *, walk all metaslab_t structures",
 	    metaslab_walk_init, metaslab_walk_step, NULL },
+	{ "multilist", "given a multilist_t *, walk all list_t structures",
+	    multilist_walk_init, multilist_walk_step, NULL },
 	{ "zfs_acl_node", "given a zfs_acl_t, walk all zfs_acl_nodes",
 	    zfs_acl_node_walk_init, zfs_acl_node_walk_step, NULL },
 	{ "zfs_acl_node_aces", "given a zfs_acl_node_t, walk all ACEs",

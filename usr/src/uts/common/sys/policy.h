@@ -20,7 +20,7 @@
  */
 /*
  * Copyright (c) 2003, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2013, Joyent, Inc. All rights reserved.
+ * Copyright 2015, Joyent, Inc. All rights reserved.
  */
 
 #ifndef	_SYS_POLICY_H
@@ -107,6 +107,7 @@ int secpolicy_ipc_config(const cred_t *);
 int secpolicy_ipc_owner(const cred_t *, const struct kipc_perm *);
 int secpolicy_kmdb(const cred_t *);
 int secpolicy_lock_memory(const cred_t *);
+int secpolicy_meminfo(const cred_t *);
 int secpolicy_modctl(const cred_t *, int);
 int secpolicy_net(const cred_t *, int, boolean_t);
 int secpolicy_net_bindmlp(const cred_t *);
@@ -131,6 +132,7 @@ int secpolicy_proc_access(const cred_t *);
 int secpolicy_proc_excl_open(const cred_t *);
 int secpolicy_proc_owner(const cred_t *, const cred_t *, int);
 int secpolicy_proc_zone(const cred_t *);
+int secpolicy_psecflags(const cred_t *, struct proc *, struct proc *);
 int secpolicy_pset(const cred_t *);
 int secpolicy_rctlsys(const cred_t *, boolean_t);
 int secpolicy_resource(const cred_t *);

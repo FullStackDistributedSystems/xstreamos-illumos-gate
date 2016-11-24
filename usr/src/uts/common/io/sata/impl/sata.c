@@ -23,7 +23,8 @@
  * Copyright (c) 2006, 2010, Oracle and/or its affiliates. All rights reserved.
  */
 /*
- * Copyright 2013 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2015 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2016 Argo Technologies SA
  */
 
 /*
@@ -1952,6 +1953,58 @@ sata_register_pmult(dev_info_t *dip, sata_device_t *sd, sata_pmult_gscr_t *sg)
 }
 
 /*
+ * sata_split_model splits the model ID into vendor and product IDs.
+ * It assumes that a vendor ID cannot be longer than 8 characters, and
+ * that vendor and product ID are separated by a whitespace.
+ */
+void
+sata_split_model(char *model, char **vendor, char **product)
+{
+	int i, modlen;
+	char *vid, *pid;
+
+	/*
+	 * remove whitespace at the end of model
+	 */
+	for (i = SATA_ID_MODEL_LEN; i > 0; i--)
+		if (model[i] == ' ' || model[i] == '\t' || model[i] == '\0')
+			model[i] = '\0';
+		else
+			break;
+
+	/*
+	 * try to split model into into vid/pid
+	 */
+	modlen = strlen(model);
+	for (i = 0, pid = model; i < modlen; i++, pid++)
+		if ((*pid == ' ') || (*pid == '\t'))
+			break;
+
+	/*
+	 * only use vid if it is less than 8 chars (as in SCSI)
+	 */
+	if (i < modlen && i <= 8) {
+		vid = model;
+		/*
+		 * terminate vid, establish pid
+		 */
+		*pid++ = '\0';
+	} else {
+		/*
+		 * vid will stay "ATA     "
+		 */
+		vid = NULL;
+		/*
+		 * model is all pid
+		 */
+		pid = model;
+	}
+
+	*vendor = vid;
+	*product = pid;
+}
+
+/*
  * sata_name_child is for composing the name of the node
  * the format of the name is "target,0".
  */
@@ -1995,7 +2048,6 @@ sata_scsi_tgt_init(dev_info_t *hba_dip, dev_info_t *tgt_dip,
 	char			model[SATA_ID_MODEL_LEN + 1];
 	char			fw[SATA_ID_FW_LEN + 1];
 	char			*vid, *pid;
-	int			i;
 
 	/*
 	 * Fail tran_tgt_init for .conf stub node
@@ -2060,17 +2112,7 @@ sata_scsi_tgt_init(dev_info_t *hba_dip, dev_info_t *tgt_dip,
 	model[SATA_ID_MODEL_LEN] = 0;
 	fw[SATA_ID_FW_LEN] = 0;
 
-	/* split model into into vid/pid */
-	for (i = 0, pid = model; i < SATA_ID_MODEL_LEN; i++, pid++)
-		if ((*pid == ' ') || (*pid == '\t'))
-			break;
-	if (i < SATA_ID_MODEL_LEN) {
-		vid = model;
-		*pid++ = 0;		/* terminate vid, establish pid */
-	} else {
-		vid = NULL;		/* vid will stay "ATA     " */
-		pid = model;		/* model is all pid */
-	}
+	sata_split_model(model, &vid, &pid);
 
 	if (vid)
 		(void) scsi_device_prop_update_inqstring(sd, INQUIRY_VENDOR_ID,
@@ -4475,6 +4517,7 @@ sata_txlt_read_capacity(sata_pkt_txlate_t *spx)
 	struct buf *bp = spx->txlt_sata_pkt->satapkt_cmd.satacmd_bp;
 	sata_drive_info_t *sdinfo;
 	uint64_t val;
+	uint32_t lbsize = DEV_BSIZE;
 	uchar_t *rbuf;
 	int rval, reason;
 	kmutex_t *cport_mutex = &(SATA_TXLT_CPORT_MUTEX(spx));
@@ -4513,17 +4556,28 @@ sata_txlt_read_capacity(sata_pkt_txlate_t *spx)
 		 */
 		val = MIN(sdinfo->satadrv_capacity - 1, UINT32_MAX);
 
+		if (sdinfo->satadrv_id.ai_phys_sect_sz & SATA_L2PS_CHECK_BIT) {
+			/* physical/logical sector size word is valid */
+
+			if (sdinfo->satadrv_id.ai_phys_sect_sz &
+			    SATA_L2PS_BIG_SECTORS) {
+				/* if this set 117-118 words are valid */
+				lbsize = sdinfo->satadrv_id.ai_words_lsec[0] |
+				    (sdinfo->satadrv_id.ai_words_lsec[1] << 16);
+				lbsize <<= 1; /* convert from words to bytes */
+			}
+		}
 		rbuf = (uchar_t *)bp->b_un.b_addr;
 		/* Need to swap endians to match scsi format */
 		rbuf[0] = (val >> 24) & 0xff;
 		rbuf[1] = (val >> 16) & 0xff;
 		rbuf[2] = (val >> 8) & 0xff;
 		rbuf[3] = val & 0xff;
-		/* block size - always 512 bytes, for now */
-		rbuf[4] = 0;
-		rbuf[5] = 0;
-		rbuf[6] = 0x02;
-		rbuf[7] = 0;
+		rbuf[4] = (lbsize >> 24) & 0xff;
+		rbuf[5] = (lbsize >> 16) & 0xff;
+		rbuf[6] = (lbsize >> 8) & 0xff;
+		rbuf[7] = lbsize & 0xff;
+
 		scsipkt->pkt_state |= STATE_XFERRED_DATA;
 		scsipkt->pkt_resid = 0;
 
@@ -4573,6 +4627,7 @@ sata_txlt_read_capacity16(sata_pkt_txlate_t *spx)
 	sata_drive_info_t *sdinfo;
 	uint64_t val;
 	uint16_t l2p_exp;
+	uint32_t lbsize = DEV_BSIZE;
 	uchar_t *rbuf;
 	int rval, reason;
 #define	TPE	0x80
@@ -4656,6 +4711,14 @@ sata_txlt_read_capacity16(sata_pkt_txlate_t *spx)
 				    sdinfo->satadrv_id.ai_phys_sect_sz &
 				    SATA_L2PS_EXP_MASK;
 			}
+
+			if (sdinfo->satadrv_id.ai_phys_sect_sz &
+			    SATA_L2PS_BIG_SECTORS) {
+				/* if this set 117-118 words are valid */
+				lbsize = sdinfo->satadrv_id.ai_words_lsec[0] |
+				    (sdinfo->satadrv_id.ai_words_lsec[1] << 16);
+				lbsize <<= 1; /* convert from words to bytes */
+			}
 		}
 
 		rbuf = (uchar_t *)bp->b_un.b_addr;
@@ -4670,12 +4733,10 @@ sata_txlt_read_capacity16(sata_pkt_txlate_t *spx)
 		rbuf[5] = (val >> 16) & 0xff;
 		rbuf[6] = (val >> 8) & 0xff;
 		rbuf[7] = val & 0xff;
-
-		/* logical block length in bytes = 512 (for now) */
-		/* rbuf[8] = 0; */
-		/* rbuf[9] = 0; */
-		rbuf[10] = 0x02;
-		/* rbuf[11] = 0; */
+		rbuf[8] = (lbsize >> 24) & 0xff;
+		rbuf[9] = (lbsize >> 16) & 0xff;
+		rbuf[10] = (lbsize >> 8) & 0xff;
+		rbuf[11] = lbsize & 0xff;
 
 		/* p_type, prot_en, unspecified by SAT-2 */
 		/* rbuf[12] = 0; */

@@ -20,7 +20,8 @@
  */
 /*
  * Copyright (c) 2006, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2015 Joyent, Inc.  All rights reserved.
+ * Copyright 2015, 2016 Joyent, Inc.  All rights reserved.
+ * Copyright (c) 2014 by Delphix. All rights reserved.
  */
 
 #ifndef _SYS_SDEV_IMPL_H
@@ -332,13 +333,13 @@ typedef enum {
 extern volatile uint_t  devfsadm_state; /* atomic mask for devfsadm status */
 
 #define	DEVNAME_DEVFSADM_SET_RUNNING(devfsadm_state)	\
-	devfsadm_state = DEVNAME_DEVFSADM_RUNNING
+	(devfsadm_state = DEVNAME_DEVFSADM_RUNNING)
 #define	DEVNAME_DEVFSADM_SET_STOP(devfsadm_state)	\
-	devfsadm_state = DEVNAME_DEVFSADM_STOPPED
+	(devfsadm_state = DEVNAME_DEVFSADM_STOPPED)
 #define	DEVNAME_DEVFSADM_SET_RUN(devfsadm_state)	\
-	devfsadm_state = DEVNAME_DEVFSADM_RUN
+	(devfsadm_state = DEVNAME_DEVFSADM_RUN)
 #define	DEVNAME_DEVFSADM_IS_RUNNING(devfsadm_state)	\
-	devfsadm_state == DEVNAME_DEVFSADM_RUNNING
+	(devfsadm_state == DEVNAME_DEVFSADM_RUNNING)
 #define	DEVNAME_DEVFSADM_HAS_RUN(devfsadm_state)	\
 	(devfsadm_state == DEVNAME_DEVFSADM_RUN)
 
@@ -485,6 +486,7 @@ extern int sdev_copyin_mountargs(struct mounta *, struct sdev_mountargs *);
 extern int sdev_reserve_subdirs(struct sdev_node *);
 extern int prof_lookup();
 extern void prof_filldir(struct sdev_node *);
+extern int prof_name_matched(char *, struct sdev_node *);
 extern int devpts_validate(struct sdev_node *dv);
 extern int devnet_validate(struct sdev_node *dv);
 extern int devipnet_validate(struct sdev_node *dv);
@@ -580,20 +582,20 @@ extern int sdev_debug;
 #define	sdcmn_err13(args) if (sdev_debug & SDEV_DEBUG_ZVOL) printf args
 #define	impossible(args) printf args
 #else
-#define	sdcmn_err(args)		/* does nothing */
-#define	sdcmn_err2(args)	/* does nothing */
-#define	sdcmn_err3(args)	/* does nothing */
-#define	sdcmn_err4(args)	/* does nothing */
-#define	sdcmn_err5(args)	/* does nothing */
-#define	sdcmn_err6(args)	/* does nothing */
-#define	sdcmn_err7(args)	/* does nothing */
-#define	sdcmn_err8(args)	/* does nothing */
-#define	sdcmn_err9(args)	/* does nothing */
-#define	sdcmn_err10(args)	/* does nothing */
-#define	sdcmn_err11(args)	/* does nothing */
-#define	sdcmn_err12(args)	/* does nothing */
-#define	sdcmn_err13(args) 	/* does nothing */
-#define	impossible(args)	/* does nothing */
+#define	sdcmn_err(args)		((void)0)
+#define	sdcmn_err2(args)	((void)0)
+#define	sdcmn_err3(args)	((void)0)
+#define	sdcmn_err4(args)	((void)0)
+#define	sdcmn_err5(args)	((void)0)
+#define	sdcmn_err6(args)	((void)0)
+#define	sdcmn_err7(args)	((void)0)
+#define	sdcmn_err8(args)	((void)0)
+#define	sdcmn_err9(args)	((void)0)
+#define	sdcmn_err10(args)	((void)0)
+#define	sdcmn_err11(args)	((void)0)
+#define	sdcmn_err12(args)	((void)0)
+#define	sdcmn_err13(args)	((void)0)
+#define	impossible(args)	((void)0)
 #endif
 
 #ifdef DEBUG
@@ -605,7 +607,7 @@ extern int sdev_debug;
 		    __LINE__);						\
 	}
 #else
-#define	SD_TRACE_FAILED_LOOKUP(ddv, nm, retried)
+#define	SD_TRACE_FAILED_LOOKUP(ddv, nm, retried)	((void)0)
 #endif
 
 #endif	/* _KERNEL */

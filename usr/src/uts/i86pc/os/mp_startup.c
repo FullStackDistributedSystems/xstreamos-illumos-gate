@@ -27,7 +27,7 @@
  * All rights reserved.
  */
 /*
- * Copyright (c) 2012, Joyent, Inc.  All rights reserved.
+ * Copyright 2015 Joyent, Inc.
  * Copyright 2013 Nexenta Systems, Inc.  All rights reserved.
  */
 
@@ -171,6 +171,7 @@ init_cpu_syscall(struct cpu *cp)
 #if defined(__amd64)
 	if (is_x86_feature(x86_featureset, X86FSET_MSR) &&
 	    is_x86_feature(x86_featureset, X86FSET_ASYSC)) {
+		uint64_t flags;
 
 #if !defined(__lint)
 		/*
@@ -199,7 +200,10 @@ init_cpu_syscall(struct cpu *cp)
 		 * This list of flags is masked off the incoming
 		 * %rfl when we enter the kernel.
 		 */
-		wrmsr(MSR_AMD_SFMASK, (uint64_t)(uintptr_t)(PS_IE | PS_T));
+		flags = PS_IE | PS_T;
+		if (is_x86_feature(x86_featureset, X86FSET_SMAP) == B_TRUE)
+			flags |= PS_ACHK;
+		wrmsr(MSR_AMD_SFMASK, flags);
 	}
 #endif
 
@@ -1714,12 +1718,23 @@ mp_startup_common(boolean_t boot)
 	}
 
 	/*
-	 * We do not support cpus with mixed monitor/mwait support if the
-	 * boot cpu supports monitor/mwait.
+	 * There exists a small subset of systems which expose differing
+	 * MWAIT/MONITOR support between CPUs.  If MWAIT support is absent from
+	 * the boot CPU, but is found on a later CPU, the system continues to
+	 * operate as if no MWAIT support is available.
+	 *
+	 * The reverse case, where MWAIT is available on the boot CPU but not
+	 * on a subsequently initialized CPU, is not presently allowed and will
+	 * result in a panic.
 	 */
 	if (is_x86_feature(x86_featureset, X86FSET_MWAIT) !=
-	    is_x86_feature(new_x86_featureset, X86FSET_MWAIT))
-		panic("unsupported mixed cpu monitor/mwait support detected");
+	    is_x86_feature(new_x86_featureset, X86FSET_MWAIT)) {
+		if (!is_x86_feature(x86_featureset, X86FSET_MWAIT)) {
+			remove_x86_feature(new_x86_featureset, X86FSET_MWAIT);
+		} else {
+			panic("unsupported mixed cpu mwait support detected");
+		}
+	}
 
 	/*
 	 * We could be more sophisticated here, and just mark the CPU

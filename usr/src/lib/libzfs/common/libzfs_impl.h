@@ -21,17 +21,18 @@
 
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2013 by Delphix. All rights reserved.
+ * Copyright (c) 2011 Pawel Jakub Dawidek. All rights reserved.
+ * Copyright (c) 2011, 2016 by Delphix. All rights reserved.
  */
 
 #ifndef	_LIBZFS_IMPL_H
 #define	_LIBZFS_IMPL_H
 
-#include <sys/dmu.h>
 #include <sys/fs/zfs.h>
-#include <sys/zfs_ioctl.h>
 #include <sys/spa.h>
 #include <sys/nvpair.h>
+#include <sys/dmu.h>
+#include <sys/zfs_ioctl.h>
 
 #include <libuutil.h>
 #include <libzfs.h>
@@ -71,7 +72,6 @@ struct libzfs_handle {
 	int libzfs_printerr;
 	int libzfs_storeerr; /* stuff error messages into buffer */
 	void *libzfs_sharehdl; /* libshare handle */
-	uint_t libzfs_shareflags;
 	boolean_t libzfs_mnttab_enable;
 	avl_tree_t libzfs_mnttab_cache;
 	int libzfs_pool_iter;
@@ -81,12 +81,10 @@ struct libzfs_handle {
 	char libzfs_chassis_id[256];
 };
 
-#define	ZFSSHARE_MISS	0x01	/* Didn't find entry in cache */
-
 struct zfs_handle {
 	libzfs_handle_t *zfs_hdl;
 	zpool_handle_t *zpool_hdl;
-	char zfs_name[ZFS_MAXNAMELEN];
+	char zfs_name[ZFS_MAX_DATASET_NAME_LEN];
 	zfs_type_t zfs_type; /* type including snapshot */
 	zfs_type_t zfs_head_type; /* type excluding snapshot */
 	dmu_objset_stats_t zfs_dmustats;
@@ -107,7 +105,7 @@ struct zfs_handle {
 struct zpool_handle {
 	libzfs_handle_t *zpool_hdl;
 	zpool_handle_t *zpool_next;
-	char zpool_name[ZPOOL_MAXNAMELEN];
+	char zpool_name[ZFS_MAX_DATASET_NAME_LEN];
 	int zpool_state;
 	size_t zpool_config_size;
 	nvlist_t *zpool_config;
@@ -149,7 +147,7 @@ int zpool_standard_error_fmt(libzfs_handle_t *, int, const char *, ...);
 int get_dependents(libzfs_handle_t *, boolean_t, const char *, char ***,
     size_t *);
 zfs_handle_t *make_dataset_handle_zc(libzfs_handle_t *, zfs_cmd_t *);
-
+zfs_handle_t *make_dataset_simple_handle_zc(zfs_handle_t *, zfs_cmd_t *);
 
 int zprop_parse_value(libzfs_handle_t *, nvpair_t *, int, zfs_type_t,
     nvlist_t *, char **, uint64_t *, const char *);

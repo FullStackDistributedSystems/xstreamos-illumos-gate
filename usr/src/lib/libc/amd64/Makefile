@@ -20,7 +20,7 @@
 #
 #
 # Copyright (c) 2004, 2010, Oracle and/or its affiliates. All rights reserved.
-# Copyright (c) 2015, Joyent, Inc. All rights reserved.
+# Copyright 2016 Joyent, Inc.
 #
 # Copyright (c) 2013, OmniTI Computer Consulting, Inc. All rights reserved.
 # Copyright 2013 Garrett D'Amore <garrett@damore.org>
@@ -115,6 +115,7 @@ GENOBJS=			\
 	byteorder.o		\
 	cuexit.o		\
 	ecvt.o			\
+	endian.o		\
 	errlst.o		\
 	amd64_data.o		\
 	ldivide.o		\
@@ -240,6 +241,7 @@ COMSYSOBJS=			\
 	processor_bind.o	\
 	processor_info.o	\
 	profil.o		\
+	psecflagsset.o		\
 	putmsg.o		\
 	putpmsg.o		\
 	pwrite.o		\
@@ -385,6 +387,7 @@ PORTGEN=			\
 	fdetach.o		\
 	fdopendir.o		\
 	ffs.o			\
+	flock.o			\
 	fls.o			\
 	fmtmsg.o		\
 	ftime.o			\
@@ -491,6 +494,7 @@ PORTGEN=			\
 	priocntl.o		\
 	privlib.o		\
 	priv_str_xlate.o	\
+	psecflags.o		\
 	psiginfo.o		\
 	psignal.o		\
 	pt.o			\
@@ -564,6 +568,7 @@ PORTGEN=			\
 	tfind.o			\
 	time_data.o		\
 	time_gdata.o		\
+	timespec_get.o		\
 	tls_data.o		\
 	truncate.o		\
 	tsdalloc.o		\
@@ -803,12 +808,16 @@ RTOBJS=				\
 	shm.o			\
 	sigev_thread.o
 
+SECFLAGSOBJS=			\
+	secflags.o
+
 TPOOLOBJS=			\
 	thread_pool.o
 
 THREADSOBJS=			\
 	alloc.o			\
 	assfail.o		\
+	c11_thr.o		\
 	cancel.o		\
 	door_calls.o		\
 	tmem.o			\
@@ -863,6 +872,7 @@ PORTSYS=			\
 	chmod.o			\
 	chown.o			\
 	corectl.o		\
+	epoll.o			\
 	exacctsys.o		\
 	execl.o			\
 	execle.o		\
@@ -901,6 +911,7 @@ PORTSYS=			\
 	sidsys.o		\
 	siginterrupt.o		\
 	signal.o		\
+	signalfd.o		\
 	sigpending.o		\
 	sigstack.o		\
 	stat.o			\
@@ -908,6 +919,7 @@ PORTSYS=			\
 	tasksys.o		\
 	time.o			\
 	time_util.o		\
+	timerfd.o		\
 	ucontext.o		\
 	unlink.o		\
 	ustat.o			\
@@ -951,6 +963,7 @@ MOSTOBJS=			\
 	$(PORTSYS64)		\
 	$(AIOOBJS)		\
 	$(RTOBJS)		\
+	$(SECFLAGSOBJS)		\
 	$(TPOOLOBJS)		\
 	$(THREADSOBJS)		\
 	$(THREADSMACHOBJS)	\
@@ -1079,6 +1092,7 @@ SRCS=							\
 	$(PORTSYS:%.o=$(LIBCDIR)/port/sys/%.c)			\
 	$(AIOOBJS:%.o=$(LIBCDIR)/port/aio/%.c)			\
 	$(RTOBJS:%.o=$(LIBCDIR)/port/rt/%.c)			\
+	$(SECFLAGSOBJS:%.o=$(SRC)/common/secflags/%.c)		\
 	$(TPOOLOBJS:%.o=$(LIBCDIR)/port/tpool/%.c)		\
 	$(THREADSOBJS:%.o=$(LIBCDIR)/port/threads/%.c)		\
 	$(THREADSMACHOBJS:%.o=threads/%.c)		\
@@ -1223,7 +1237,7 @@ $(ASSYMDEP_OBJS:%=pics/%): assym.h
 GENASSYM_C = genassym.c
 
 genassym: $(GENASSYM_C)
-	$(NATIVECC) -Iinc -I$(LIBCDIR)/inc $(CPPFLAGS.native)	\
+	$(NATIVECC) $(NATIVE_CFLAGS) -Iinc -I$(LIBCDIR)/inc $(CPPFLAGS.native) \
 		-o $@ $(GENASSYM_C)
 
 OFFSETS = $(LIBCDIR)/$(MACH)/offsets.in

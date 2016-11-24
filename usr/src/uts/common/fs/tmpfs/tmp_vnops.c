@@ -25,8 +25,9 @@
  */
 
 /*
- * Copyright (c) 2012, Joyent, Inc. All rights reserved.
+ * Copyright (c) 2015, Joyent, Inc. All rights reserved.
  * Copyright 2015 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2016 RackTop Systems.
  */
 
 #include <sys/types.h>
@@ -1104,7 +1105,8 @@ tmp_remove(
 
 	if (tp->tn_type != VDIR ||
 	    (error = secpolicy_fs_linkdir(cred, dvp->v_vfsp)) == 0)
-		error = tdirdelete(parent, tp, nm, DR_REMOVE, cred);
+		error = tdirdelete(parent, tp, nm, tp->tn_type == VDIR ?
+		    DR_RMDIR : DR_REMOVE, cred);
 
 	rw_exit(&tp->tn_rwlock);
 	rw_exit(&parent->tn_rwlock);
@@ -1185,6 +1187,7 @@ tmp_rename(
 	struct tmpnode *fromparent;
 	struct tmpnode *toparent;
 	struct tmpnode *fromtp = NULL;	/* source tmpnode */
+	struct tmpnode *totp;		/* target tmpnode */
 	struct tmount *tm = (struct tmount *)VTOTM(odvp);
 	int error;
 	int samedir = 0;	/* set if odvp == ndvp */
@@ -1243,6 +1246,18 @@ tmp_rename(
 			goto done;
 	}
 
+	if (tdirlookup(toparent, nnm, &totp, cred) == 0) {
+		vnevent_pre_rename_dest(TNTOV(totp), ndvp, nnm, ct);
+		tmpnode_rele(totp);
+	}
+
+	/* Notify the target dir. if not the same as the source dir. */
+	if (ndvp != odvp) {
+		vnevent_pre_rename_dest_dir(ndvp, TNTOV(fromtp), nnm, ct);
+	}
+
+	vnevent_pre_rename_src(TNTOV(fromtp), odvp, onm, ct);
+
 	/*
 	 * Link source to new target
 	 */
@@ -1261,15 +1276,6 @@ tmp_rename(
 		if (error == ESAME)
 			error = 0;
 		goto done;
-	}
-	vnevent_rename_src(TNTOV(fromtp), odvp, onm, ct);
-
-	/*
-	 * Notify the target directory if not same as
-	 * source directory.
-	 */
-	if (ndvp != odvp) {
-		vnevent_rename_dest_dir(ndvp, ct);
 	}
 
 	/*
@@ -1293,6 +1299,17 @@ tmp_rename(
 
 	rw_exit(&fromtp->tn_rwlock);
 	rw_exit(&fromparent->tn_rwlock);
+
+	if (error == 0) {
+		vnevent_rename_src(TNTOV(fromtp), odvp, onm, ct);
+		/*
+		 * vnevent_rename_dest is called in tdirenter().
+		 * Notify the target dir if not same as source dir.
+		 */
+		if (ndvp != odvp)
+			vnevent_rename_dest_dir(ndvp, ct);
+	}
+
 done:
 	tmpnode_rele(fromtp);
 	mutex_exit(&tm->tm_renamelck);

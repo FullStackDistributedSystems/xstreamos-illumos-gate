@@ -884,9 +884,9 @@ extern int mac_protect_set(mac_client_handle_t, mac_resource_props_t *);
 extern boolean_t mac_protect_enabled(mac_client_handle_t, uint32_t);
 extern int mac_protect_validate(mac_resource_props_t *);
 extern void mac_protect_update(mac_resource_props_t *, mac_resource_props_t *);
-extern void mac_protect_update_v6_local_addr(mac_client_impl_t *);
-extern void mac_protect_intercept_dhcp(mac_client_impl_t *, mblk_t *);
-extern void mac_protect_flush_dhcp(mac_client_impl_t *);
+extern void mac_protect_update_mac_token(mac_client_impl_t *);
+extern void mac_protect_intercept_dynamic(mac_client_impl_t *, mblk_t *);
+extern void mac_protect_flush_dynamic(mac_client_impl_t *);
 extern void mac_protect_cancel_timer(mac_client_impl_t *);
 extern void mac_protect_init(mac_client_impl_t *);
 extern void mac_protect_fini(mac_client_impl_t *);
@@ -894,6 +894,8 @@ extern void mac_protect_fini(mac_client_impl_t *);
 extern int mac_set_resources(mac_handle_t, mac_resource_props_t *);
 extern void mac_get_resources(mac_handle_t, mac_resource_props_t *);
 extern void mac_get_effective_resources(mac_handle_t, mac_resource_props_t *);
+extern void mac_set_promisc_filtered(mac_client_handle_t, boolean_t);
+extern boolean_t mac_get_promisc_filtered(mac_client_handle_t);
 
 extern cpupart_t *mac_pset_find(mac_resource_props_t *, boolean_t *);
 extern void mac_set_pool_effective(boolean_t, cpupart_t *,

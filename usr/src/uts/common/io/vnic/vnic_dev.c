@@ -20,7 +20,8 @@
  */
 /*
  * Copyright (c) 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2014, Joyent, Inc.  All rights reserved.
+ * Copyright 2015 Joyent, Inc.
+ * Copyright 2016 OmniTI Computer Consulting, Inc. All rights reserved.
  */
 
 #include <sys/types.h>
@@ -52,6 +53,7 @@
 #include <sys/vlan.h>
 #include <sys/vnic.h>
 #include <sys/vnic_impl.h>
+#include <sys/mac_impl.h>
 #include <sys/mac_flow_impl.h>
 #include <inet/ip_impl.h>
 
@@ -571,7 +573,19 @@ vnic_dev_create(datalink_id_t vnic_id, datalink_id_t linkid,
 	ASSERT(err == 0);
 	vnic_count++;
 
+	/*
+	 * Now that we've enabled this VNIC, we should go through and update the
+	 * link state by setting it to our parents.
+	 */
 	vnic->vn_enabled = B_TRUE;
+
+	if (is_anchor) {
+		mac_link_update(vnic->vn_mh, LINK_STATE_UP);
+	} else {
+		mac_link_update(vnic->vn_mh,
+		    mac_client_stat_get(vnic->vn_mch, MAC_STAT_LINK_STATE));
+	}
+
 	rw_exit(&vnic_lock);
 
 	return (0);
@@ -1059,6 +1073,18 @@ vnic_m_setprop(void *m_driver, const char *pr_name, mac_prop_id_t pr_num,
 		err = mac_maxsdu_update(vn->vn_mh, mtu);
 		break;
 	}
+	case MAC_PROP_VN_PROMISC_FILTERED: {
+		boolean_t filtered;
+
+		if (pr_valsize < sizeof (filtered)) {
+			err = EINVAL;
+			break;
+		}
+
+		bcopy(pr_val, &filtered, sizeof (filtered));
+		mac_set_promisc_filtered(vn->vn_mch, filtered);
+		break;
+	}
 	case MAC_PROP_SECONDARY_ADDRS: {
 		mac_secondary_addr_t msa;
 
@@ -1080,13 +1106,19 @@ vnic_m_getprop(void *arg, const char *pr_name, mac_prop_id_t pr_num,
 {
 	vnic_t		*vn = arg;
 	int 		ret = 0;
+	boolean_t	out;
 
 	switch (pr_num) {
+	case MAC_PROP_VN_PROMISC_FILTERED:
+		out = mac_get_promisc_filtered(vn->vn_mch);
+		ASSERT(pr_valsize >= sizeof (boolean_t));
+		bcopy(&out, pr_val, sizeof (boolean_t));
+		break;
 	case MAC_PROP_SECONDARY_ADDRS:
 		ret = vnic_get_secondary_macs(vn, pr_valsize, pr_val);
 		break;
 	default:
-		ret = EINVAL;
+		ret = ENOTSUP;
 		break;
 	}
 

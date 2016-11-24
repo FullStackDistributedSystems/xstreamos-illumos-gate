@@ -20,10 +20,10 @@
  */
 /*
  * Copyright (c) 1983, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2012, Joyent, Inc. All rights reserved.
+ * Copyright 2016 Joyent, Inc.
  */
 /*
- * Copyright 2012 Nexenta Systems, Inc. All rights reserved.
+ * Copyright 2016 Nexenta Systems, Inc. All rights reserved.
  */
 
 #include <stdio.h>
@@ -72,6 +72,7 @@ static char	*dumpfile;		/* source of raw crash dump */
 static long	bounds = -1;		/* numeric suffix */
 static long	pagesize;		/* dump pagesize */
 static int	dumpfd = -1;		/* dumpfile descriptor */
+static boolean_t have_dumpfile = B_TRUE;	/* dumpfile existence */
 static dumphdr_t corehdr, dumphdr;	/* initial and terminal dumphdrs */
 static boolean_t dump_incomplete;	/* dumphdr indicates incomplete */
 static boolean_t fm_panic;		/* dump is the result of fm_panic */
@@ -83,6 +84,7 @@ static int	interactive;		/* user invoked; no syslog */
 static int	csave;			/* save dump compressed */
 static int	filemode;		/* processing file, not dump device */
 static int	percent_done;		/* progress indicator */
+static int	sec_done;		/* progress last report time */
 static hrtime_t	startts;		/* timestamp at start */
 static volatile uint64_t saved;		/* count of pages written */
 static volatile uint64_t zpages;	/* count of zero pages not written */
@@ -238,7 +240,7 @@ logprint(uint32_t flags, char *message, ...)
 
 	case SC_EXIT_ERR:
 	default:
-		if (!mflag && logprint_raised++ == 0)
+		if (!mflag && logprint_raised++ == 0 && have_dumpfile)
 			raise_event(SC_EVENT_SAVECORE_FAILURE, buf);
 		code = 1;
 		break;
@@ -265,8 +267,8 @@ static void
 Fread(void *buf, size_t size, FILE *f)
 {
 	if (fread(buf, size, 1, f) != 1)
-		logprint(SC_SL_ERR | SC_EXIT_ERR, "fread: ferror %d feof %d",
-		    ferror(f), feof(f));
+		logprint(SC_SL_ERR | SC_EXIT_ERR, "fread: %s",
+		    strerror(errno));
 }
 
 static void
@@ -298,9 +300,11 @@ Fstat(int fd, Stat_t *sb, const char *fname)
 static void
 Stat(const char *fname, Stat_t *sb)
 {
-	if (stat64(fname, sb) != 0)
-		logprint(SC_SL_ERR | SC_EXIT_ERR, "stat(\"%s\"): %s", fname,
-		    strerror(errno));
+	if (stat64(fname, sb) != 0) {
+		have_dumpfile = B_FALSE;
+		logprint(SC_SL_ERR | SC_EXIT_ERR, "failed to get status "
+		    "of file %s", fname);
+	}
 }
 
 static void
@@ -1084,11 +1088,12 @@ report_progress()
 		return;
 
 	percent = saved * 100LL / corehdr.dump_npages;
-	if (percent > percent_done) {
-		sec = (gethrtime() - startts) / 1000 / 1000 / 1000;
+	sec = (gethrtime() - startts) / NANOSEC;
+	if (percent > percent_done || sec > sec_done) {
 		(void) printf("\r%2d:%02d %3d%% done", sec / 60, sec % 60,
 		    percent);
 		(void) fflush(stdout);
+		sec_done = sec;
 		percent_done = percent;
 	}
 }
@@ -1709,9 +1714,11 @@ main(int argc, char *argv[])
 
 	if (dumpfile == NULL) {
 		dumpfile = Zalloc(MAXPATHLEN);
-		if (ioctl(dumpfd, DIOCGETDEV, dumpfile) == -1)
+		if (ioctl(dumpfd, DIOCGETDEV, dumpfile) == -1) {
+			have_dumpfile = B_FALSE;
 			logprint(SC_SL_NONE | SC_IF_ISATTY | SC_EXIT_ERR,
 			    "no dump device configured");
+		}
 	}
 
 	if (mflag)
@@ -1929,24 +1936,32 @@ main(int argc, char *argv[])
 			if (sec < 1)
 				sec = 1;
 
-			(void) fprintf(mfile, "[[[[,,,");
-			for (i = 0; i < argc; i++)
-				(void) fprintf(mfile, "%s ", argv[i]);
-			(void) fprintf(mfile, "\n");
-			(void) fprintf(mfile, ",,,%s/%s\n", savedir, corefile);
-			(void) fprintf(mfile, ",,,%s %s %s %s %s\n",
-			    dumphdr.dump_utsname.sysname,
-			    dumphdr.dump_utsname.nodename,
-			    dumphdr.dump_utsname.release,
-			    dumphdr.dump_utsname.version,
-			    dumphdr.dump_utsname.machine);
-			(void) fprintf(mfile, "Uncompress pages,%"PRIu64"\n",
-			    saved);
-			(void) fprintf(mfile, "Uncompress time,%d\n", sec);
-			(void) fprintf(mfile, "Uncompress pages/sec,%"
-			    PRIu64"\n", saved / sec);
-			(void) fprintf(mfile, "]]]]\n");
-			(void) fclose(mfile);
+			if (mfile == NULL) {
+				logprint(SC_SL_WARN,
+				    "Can't create %s: %s",
+				    METRICSFILE, strerror(errno));
+			} else {
+				(void) fprintf(mfile, "[[[[,,,");
+				for (i = 0; i < argc; i++)
+					(void) fprintf(mfile, "%s ", argv[i]);
+				(void) fprintf(mfile, "\n");
+				(void) fprintf(mfile, ",,,%s/%s\n", savedir,
+				    corefile);
+				(void) fprintf(mfile, ",,,%s %s %s %s %s\n",
+				    dumphdr.dump_utsname.sysname,
+				    dumphdr.dump_utsname.nodename,
+				    dumphdr.dump_utsname.release,
+				    dumphdr.dump_utsname.version,
+				    dumphdr.dump_utsname.machine);
+				(void) fprintf(mfile,
+				    "Uncompress pages,%"PRIu64"\n", saved);
+				(void) fprintf(mfile, "Uncompress time,%d\n",
+				    sec);
+				(void) fprintf(mfile, "Uncompress pages/sec,%"
+				    PRIu64"\n", saved / sec);
+				(void) fprintf(mfile, "]]]]\n");
+				(void) fclose(mfile);
+			}
 		}
 	}
 

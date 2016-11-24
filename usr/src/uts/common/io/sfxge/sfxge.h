@@ -1,35 +1,32 @@
 /*
- * CDDL HEADER START
+ * Copyright (c) 2008-2016 Solarflare Communications Inc.
+ * All rights reserved.
  *
- * The contents of this file are subject to the terms of the
- * Common Development and Distribution License (the "License").
- * You may not use this file except in compliance with the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
  *
- * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
- * See the License for the specific language governing permissions
- * and limitations under the License.
+ * 1. Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
  *
- * When distributing Covered Code, include this CDDL HEADER in each
- * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
- * If applicable, add the following below this CDDL HEADER, with the
- * fields enclosed by brackets "[]" replaced with your own identifying
- * information: Portions Copyright [yyyy] [name of copyright owner]
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
+ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * CDDL HEADER END
+ * The views and conclusions contained in the software and documentation are
+ * those of the authors and should not be interpreted as representing official
+ * policies, either expressed or implied, of the FreeBSD Project.
  */
-
-/*
- * Copyright 2008-2013 Solarflare Communications Inc.  All rights reserved.
- * Use is subject to license terms.
- */
-
-/*
- * Solaris 10 9/10 (U9) is required to build this driver, as earlier Solaris
- * releases do not ship with the required header files for GLDv3.  The driver
- * will run on Solaris 10 10/09 (U8) and later versions.
- */
-
 
 #ifndef	_SYS_SFXGE_H
 #define	_SYS_SFXGE_H
@@ -45,15 +42,9 @@ extern "C" {
 #include <sys/ethernet.h>
 #include <sys/cpuvar.h>
 
-#ifdef _USE_GLD_V3
 #include <sys/mac.h>
 #include <sys/mac_ether.h>
 #include <sys/mac_provider.h>
-#endif
-
-#ifdef _USE_GLD_V2
-#include <sys/gld.h>
-#endif
 
 #include "sfxge_ioc.h"
 #include "sfxge_debug.h"
@@ -61,21 +52,11 @@ extern "C" {
 #include "efx.h"
 #include "efx_regs.h"
 
-#ifdef _USE_GLD_V3_SOL10
-#include "compat.h"
-#endif
-
-#if defined(_USE_MAC_PRIV_PROP) && !defined(_USE_GLD_V3_PROPS)
-#error "The _USE_MAC_PRIV_PROP build option is dependent on _USE_GLD_V3_PROPS"
-#endif
-
 #ifdef	_KERNEL
 
 #define	SFXGE_DRIVER_NAME "sfxge"
 
 #define	SFXGE_CPU_CACHE_SIZE	64
-
-#define	IS_POW2(x)  ((x) && ! ((x) & ((x) - 1)))
 
 typedef struct sfxge_s	sfxge_t;
 
@@ -140,7 +121,9 @@ typedef struct sfxge_mac_s {
 	boolean_t		sm_laa_valid;
 	unsigned int		sm_fcntl;
 	sfxge_promisc_type_t	sm_promisc;
-	unsigned int		sm_bucket[EFX_MAC_HASH_BITS];
+	uint8_t			sm_mcast_addr[EFX_MAC_MULTICAST_LIST_MAX *
+	    ETHERADDRL]; /* List of multicast addresses to filter on */
+	int			sm_mcast_count;
 	clock_t			sm_lbolt;
 	kmutex_t		sm_lock;
 	efx_link_mode_t		sm_link_mode;
@@ -174,6 +157,7 @@ typedef struct sfxge_mon_s {
 	kmutex_t		sm_lock;
 	sfxge_mon_state_t	sm_state;
 	efsys_mem_t		sm_mem;
+	int			sm_polling;
 } sfxge_mon_t;
 
 typedef enum sfxge_sram_state_e {
@@ -185,7 +169,7 @@ typedef enum sfxge_sram_state_e {
 typedef struct sfxge_sram_s {
 	sfxge_t			*ss_sp;
 	kmutex_t		ss_lock;
-	vmem_t			*ss_buf_tbl;
+	struct map		*ss_buf_tbl_map;
 	unsigned int		ss_count;
 	sfxge_sram_state_t	ss_state;
 } sfxge_sram_t;
@@ -202,14 +186,16 @@ typedef struct sfxge_mcdi_s {
 	kmutex_t		sm_lock;
 	sfxge_mcdi_state_t	sm_state;
 	efx_mcdi_transport_t	sm_emt;
+	efsys_mem_t		sm_mem;
 	kcondvar_t		sm_kv;		/* MCDI poll complete */
 } sfxge_mcdi_t;
 
-#define	SFXGE_NEVS	4096
-#define	SFXGE_NDESCS	1024
-#define	SFXGE_TX_NDESCS	SFXGE_NDESCS
-#define	SFXGE_DEFAULT_RXQ_SIZE 1024
+#define	SFXGE_NEVS			4096
+#define	SFXGE_RX_NDESCS			1024
+#define	SFXGE_TX_NDESCS			1024
+#define	SFXGE_TX_NLABELS		EFX_EV_TX_NLABELS
 
+#define	SFXGE_DEFAULT_RXQ_SIZE		1024
 #define	SFXGE_DEFAULT_MODERATION	30
 
 typedef enum sfxge_evq_state_e {
@@ -249,15 +235,16 @@ typedef struct sfxge_evq_s {
 			sfxge_txq_t		*__se_stp;
 			sfxge_txq_t		**__se_stpp;
 			processorid_t		__se_cpu_id;
-#ifdef	_USE_CPU_PHYSID
-			id_t			__se_chip_id;
-			id_t			__se_core_id;
-			id_t			__se_cache_id;
-#endif
 			uint16_t		__se_ev_batch;
 		} __se_s2;
 		uint8_t	__se_pad[SFXGE_CPU_CACHE_SIZE];
 	} __se_u2;
+	union {
+		struct {
+			sfxge_txq_t	*__se_label_stp[SFXGE_TX_NLABELS];
+		} __se_s3;
+		uint8_t	__se_pad[SFXGE_CPU_CACHE_SIZE * 4];
+	} __se_u3;
 } sfxge_evq_t;
 
 #define	se_sp		__se_u1.__se_s1.__se_sp
@@ -279,12 +266,10 @@ typedef struct sfxge_evq_s {
 #define	se_stp		__se_u2.__se_s2.__se_stp
 #define	se_stpp		__se_u2.__se_s2.__se_stpp
 #define	se_cpu_id	__se_u2.__se_s2.__se_cpu_id
-#ifdef	_USE_CPU_PHYSID
-#define	se_chip_id	__se_u2.__se_s2.__se_chip_id
-#define	se_core_id	__se_u2.__se_s2.__se_core_id
-#define	se_cache_id	__se_u2.__se_s2.__se_cache_id
-#endif
 #define	se_ev_batch	__se_u2.__se_s2.__se_ev_batch
+
+#define	se_label_stp	__se_u3.__se_s3.__se_label_stp
+
 
 #define	SFXGE_MAGIC_RESERVED	0x8000
 
@@ -304,8 +289,6 @@ typedef struct sfxge_evq_s {
 	(SFXGE_MAGIC_RESERVED | (4 << SFXGE_MAGIC_DMAQ_LABEL_WIDTH))
 
 typedef struct sfxge_rxq_s		sfxge_rxq_t;
-
-#define	SFXGE_IP_ALIGN	2
 
 #define	SFXGE_ETHERTYPE_LOOPBACK	0x9000	/* Xerox loopback */
 
@@ -442,6 +425,7 @@ struct sfxge_rxq_s {
 		struct {
 			sfxge_rx_packet_t		**__sr_srpp;
 			unsigned int			__sr_added;
+			unsigned int			__sr_pushed;
 			unsigned int			__sr_pending;
 			unsigned int			__sr_completed;
 			unsigned int			__sr_loopback;
@@ -472,13 +456,7 @@ struct sfxge_rxq_s {
 		uint32_t    srk_dma_alloc_fail;
 		uint32_t    srk_dma_bind_nomem;
 		uint32_t    srk_dma_bind_fail;
-		/* Following two are mutually exclusive */
-#ifdef _USE_XESBALLOC
-		uint32_t    srk_xesballoc_fail;
-#endif
-#ifdef _USE_DESBALLOC
 		uint32_t    srk_desballoc_fail;
-#endif
 		uint32_t    srk_rxq_empty_discard;
 	} sr_kstat;
 };
@@ -495,6 +473,7 @@ struct sfxge_rxq_s {
 
 #define	sr_srpp		__sr_u2.__sr_s2.__sr_srpp
 #define	sr_added	__sr_u2.__sr_s2.__sr_added
+#define	sr_pushed	__sr_u2.__sr_s2.__sr_pushed
 #define	sr_pending	__sr_u2.__sr_s2.__sr_pending
 #define	sr_completed	__sr_u2.__sr_s2.__sr_completed
 #define	sr_loopback	__sr_u2.__sr_s2.__sr_loopback
@@ -512,6 +491,16 @@ struct sfxge_rxq_s {
 #define	sr_ksp		__sr_u3.__sr_s3.__sr_ksp
 
 typedef struct sfxge_tx_packet_s	sfxge_tx_packet_t;
+
+/* Packet type from parsing transmit packet */
+typedef enum sfxge_packet_type_e {
+	SFXGE_PACKET_TYPE_UNKNOWN = 0,
+	SFXGE_PACKET_TYPE_IPV4_TCP,
+	SFXGE_PACKET_TYPE_IPV4_UDP,
+	SFXGE_PACKET_TYPE_IPV4_SCTP,
+	SFXGE_PACKET_TYPE_IPV4_OTHER,
+	SFXGE_PACKET_NTYPES
+} sfxge_packet_type_t;
 
 struct sfxge_tx_packet_s {
 	sfxge_tx_packet_t	*stp_next;
@@ -583,7 +572,10 @@ typedef struct sfxge_tx_dpl_s {
 typedef enum sfxge_txq_state_e {
 	SFXGE_TXQ_UNINITIALIZED = 0,
 	SFXGE_TXQ_INITIALIZED,
-	SFXGE_TXQ_STARTED
+	SFXGE_TXQ_STARTED,
+	SFXGE_TXQ_FLUSH_PENDING,
+	SFXGE_TXQ_FLUSH_DONE,
+	SFXGE_TXQ_FLUSH_FAILED
 } sfxge_txq_state_t;
 
 typedef enum sfxge_txq_type_e {
@@ -593,7 +585,7 @@ typedef enum sfxge_txq_type_e {
 	SFXGE_TXQ_NTYPES
 } sfxge_txq_type_t;
 
-#define	SFXGE_TXQ_UNBLOCK_LEVEL1	(EFX_TXQ_LIMIT(SFXGE_NDESCS) / 4)
+#define	SFXGE_TXQ_UNBLOCK_LEVEL1	(EFX_TXQ_LIMIT(SFXGE_TX_NDESCS) / 4)
 #define	SFXGE_TXQ_UNBLOCK_LEVEL2	0
 #define	SFXGE_TXQ_NOT_BLOCKED		-1
 
@@ -604,6 +596,7 @@ struct sfxge_txq_s {
 		struct {
 			sfxge_t				*__st_sp;
 			unsigned int			__st_index;
+			unsigned int			__st_label;
 			sfxge_txq_type_t		__st_type;
 			unsigned int			__st_evq;
 			efsys_mem_t			__st_mem;
@@ -646,7 +639,6 @@ struct sfxge_txq_s {
 			sfxge_txq_t			*__st_next;
 			unsigned int			__st_pending;
 			unsigned int			__st_completed;
-			volatile sfxge_flush_state_t	__st_flush;
 
 		} __st_s4;
 		uint8_t	__st_pad[SFXGE_CPU_CACHE_SIZE];
@@ -655,6 +647,7 @@ struct sfxge_txq_s {
 
 #define	st_sp		__st_u1.__st_s1.__st_sp
 #define	st_index	__st_u1.__st_s1.__st_index
+#define	st_label	__st_u1.__st_s1.__st_label
 #define	st_type		__st_u1.__st_s1.__st_type
 #define	st_evq		__st_u1.__st_s1.__st_evq
 #define	st_mem		__st_u1.__st_s1.__st_mem
@@ -682,7 +675,6 @@ struct sfxge_txq_s {
 #define	st_next		__st_u4.__st_s4.__st_next
 #define	st_pending	__st_u4.__st_s4.__st_pending
 #define	st_completed	__st_u4.__st_s4.__st_completed
-#define	st_flush	__st_u4.__st_s4.__st_flush
 
 typedef enum sfxge_rx_scale_state_e {
 	SFXGE_RX_SCALE_UNINITIALIZED = 0,
@@ -695,11 +687,6 @@ typedef enum sfxge_rx_scale_state_e {
 typedef struct sfxge_rx_scale_s {
 	kmutex_t		srs_lock;
 	unsigned int		*srs_cpu;
-#ifdef	_USE_CPU_PHYSID
-	unsigned int		*srs_core;
-	unsigned int		*srs_cache;
-	unsigned int		*srs_chip;
-#endif
 	unsigned int		srs_tbl[SFXGE_RX_SCALE_MAX];
 	unsigned int		srs_count;
 	kstat_t			*srs_ksp;
@@ -707,17 +694,6 @@ typedef struct sfxge_rx_scale_s {
 } sfxge_rx_scale_t;
 
 
-#if defined(_USE_GLD_V2) || defined(_USE_GLD_V3_SOL10)
-typedef struct sfxge_ndd_param_s {
-	sfxge_t		*snp_sp;
-	unsigned int	snp_id;
-	const char	*snp_name;
-	int		(*snp_get)(queue_t *, mblk_t *, caddr_t, cred_t *);
-	int		(*snp_set)(queue_t *, mblk_t *, char *, caddr_t,
-	    cred_t *);
-} sfxge_ndd_param_t;
-
-#endif
 typedef enum sfxge_rx_coalesce_mode_e {
 	SFXGE_RX_COALESCE_OFF = 0,
 	SFXGE_RX_COALESCE_DISALLOW_PUSH = 1,
@@ -731,7 +707,8 @@ typedef enum sfxge_vpd_type_e {
 	SFXGE_VPD_EC = 3,
 	SFXGE_VPD_MN = 4,
 	SFXGE_VPD_VD = 5,
-	SFXGE_VPD_MAX = 6,
+	SFXGE_VPD_VE = 6,
+	SFXGE_VPD_MAX = 7,
 } sfxge_vpd_type_t;
 
 typedef struct sfxge_vpd_kstat_s {
@@ -772,6 +749,8 @@ typedef enum sfxge_action_on_hw_err_e {
 
 typedef char *sfxge_mac_priv_prop_t;
 
+#define	SFXGE_TOEPLITZ_KEY_LEN 40
+
 struct sfxge_s {
 	kmutex_t			s_state_lock;
 	sfxge_state_t			s_state;
@@ -780,6 +759,9 @@ struct sfxge_s {
 	ddi_acc_handle_t		s_pci_handle;
 	uint16_t			s_pci_venid;
 	uint16_t			s_pci_devid;
+#if EFSYS_OPT_MCDI_LOGGING
+	unsigned int			s_bus_addr;
+#endif
 	efx_family_t			s_family;
 	unsigned int			s_pcie_nlanes;
 	unsigned int 			s_pcie_linkspeed;
@@ -805,9 +787,11 @@ struct sfxge_s {
 	volatile uint64_t		s_rx_pkt_mem_alloc;
 	kmem_cache_t			*s_rpc;
 	kmem_cache_t			*s_tqc;
+	unsigned int			s_tx_scale_base[SFXGE_TXQ_NTYPES];
+	unsigned int			s_tx_scale_max[SFXGE_TXQ_NTYPES];
 	int 				s_tx_qcount;
-	sfxge_txq_t			*s_stp[SFXGE_TXQ_NTYPES +
-	    SFXGE_RX_SCALE_MAX];
+	sfxge_txq_t			*s_stp[SFXGE_RX_SCALE_MAX *
+	    SFXGE_TXQ_NTYPES]; /* Sparse array */
 	kmem_cache_t			*s_tpc;
 	int				s_tx_flush_pending;
 	kmutex_t			s_tx_flush_lock;
@@ -820,26 +804,11 @@ struct sfxge_s {
 	kstat_t				*s_cfg_ksp;
 	size_t				s_mtu;
 	int				s_rxq_poll_usec;
-#ifdef _USE_GLD_V3
 	mac_callbacks_t			s_mc;
 	mac_handle_t			s_mh;
-#ifdef _USE_MAC_PRIV_PROP
 	sfxge_mac_priv_prop_t		*s_mac_priv_props;
 	int				s_mac_priv_props_alloc;
-#endif
-#endif
-#if defined(_USE_GLD_V2) || defined(_USE_GLD_V3)
-	sfxge_ndd_param_t		*s_ndp;
-	kstat_named_t			*s_nd_stat;
-	caddr_t				s_ndh;
-	kstat_t				*s_nd_ksp;
-#endif
-#ifdef _USE_GLD_V2
-	gld_mac_info_t			*s_gmip;
-	kmutex_t			s_rx_lock;
-	mblk_t				*s_mp;
-	mblk_t				**s_mpp;
-#endif
+	volatile uint32_t		s_nested_restarts;
 	uint32_t			s_num_restarts;
 	uint32_t			s_num_restarts_hw_err;
 	sfxge_hw_err_t			s_hw_err;
@@ -847,6 +816,10 @@ struct sfxge_s {
 	uint16_t			s_rxq_size;
 	uint16_t			s_evq0_size;
 	uint16_t			s_evqX_size;
+#if EFSYS_OPT_MCDI_LOGGING
+	int				s_mcdi_logging;
+#endif
+	const uint32_t			*s_toeplitz_cache;
 };
 
 typedef struct sfxge_dma_buffer_attr_s {
@@ -867,11 +840,6 @@ extern uint8_t			sfxge_brdcst[];
 extern kmutex_t			sfxge_global_lock;
 
 extern unsigned int		*sfxge_cpu;
-#ifdef	_USE_CPU_PHYSID
-extern unsigned int		*sfxge_core;
-extern unsigned int		*sfxge_cache;
-extern unsigned int		*sfxge_chip;
-#endif
 
 extern int			sfxge_start(sfxge_t *, boolean_t);
 extern void			sfxge_stop(sfxge_t *);
@@ -886,12 +854,6 @@ extern void			sfxge_gld_rx_post(sfxge_t *, unsigned int,
 extern void			sfxge_gld_rx_push(sfxge_t *);
 extern int			sfxge_gld_register(sfxge_t *);
 extern int			sfxge_gld_unregister(sfxge_t *);
-
-extern int			sfxge_gld_nd_register(sfxge_t *);
-extern void			sfxge_gld_nd_unregister(sfxge_t *);
-#ifdef _USE_MAC_PRIV_PROP
-extern void			sfxge_gld_priv_prop_rename(sfxge_t *);
-#endif
 
 extern int			sfxge_dma_buffer_create(efsys_mem_t *,
     const sfxge_dma_buffer_attr_t *);
@@ -915,6 +877,10 @@ extern int			sfxge_ev_qpoll(sfxge_t *, unsigned int);
 extern int			sfxge_ev_qprime(sfxge_t *, unsigned int);
 extern void			sfxge_ev_stop(sfxge_t *);
 extern void			sfxge_ev_fini(sfxge_t *);
+extern int			sfxge_ev_txlabel_alloc(sfxge_t *sp,
+    unsigned int evq, sfxge_txq_t *stp, unsigned int *labelp);
+extern int			sfxge_ev_txlabel_free(sfxge_t *sp,
+    unsigned int evq, sfxge_txq_t *stp, unsigned int label);
 
 extern int			sfxge_mon_init(sfxge_t *);
 extern int			sfxge_mon_start(sfxge_t *);
@@ -939,10 +905,9 @@ extern int			sfxge_mac_unicst_set(sfxge_t *,
 extern int			sfxge_mac_promisc_set(sfxge_t *,
     sfxge_promisc_type_t);
 extern int			sfxge_mac_multicst_add(sfxge_t *,
-    uint8_t *);
+    uint8_t const *addr);
 extern int			sfxge_mac_multicst_remove(sfxge_t *,
-    uint8_t *);
-extern int			sfxge_mac_ioctl(sfxge_t *, sfxge_mac_ioc_t *);
+    uint8_t const *addr);
 extern void			sfxge_mac_stop(sfxge_t *);
 extern void			sfxge_mac_fini(sfxge_t *);
 extern void			sfxge_mac_link_update(sfxge_t *sp,
@@ -952,13 +917,12 @@ extern int			sfxge_mcdi_init(sfxge_t *sp);
 extern void			sfxge_mcdi_fini(sfxge_t *sp);
 extern int			sfxge_mcdi_ioctl(sfxge_t *sp,
     sfxge_mcdi_ioc_t *smip);
+extern int			sfxge_mcdi2_ioctl(sfxge_t *sp,
+    sfxge_mcdi2_ioc_t *smip);
 
 extern int			sfxge_phy_init(sfxge_t *);
 extern void			sfxge_phy_link_mode_get(sfxge_t *,
     efx_link_mode_t *);
-extern int			sfxge_phy_ioctl(sfxge_t *, sfxge_phy_ioc_t *);
-extern int			sfxge_phy_bist_ioctl(sfxge_t *,
-    sfxge_phy_bist_ioc_t *);
 extern void			sfxge_phy_fini(sfxge_t *);
 extern int			sfxge_phy_kstat_init(sfxge_t *sp);
 extern void			sfxge_phy_kstat_fini(sfxge_t *sp);
@@ -970,12 +934,6 @@ extern uint8_t			sfxge_phy_cap_test(sfxge_t *sp, uint32_t flags,
     uint32_t field, boolean_t *mutablep);
 extern int			sfxge_phy_cap_set(sfxge_t *sp, uint32_t field,
     int set);
-#ifdef _USE_MAC_PRIV_PROP
-extern int			sfxge_phy_prop_get(sfxge_t *sp, unsigned int id,
-    uint32_t flags, uint32_t *valp);
-extern int			sfxge_phy_prop_set(sfxge_t *sp, unsigned int id,
-    uint32_t val);
-#endif
 
 extern int			sfxge_rx_init(sfxge_t *);
 extern int			sfxge_rx_start(sfxge_t *);
@@ -993,7 +951,6 @@ extern void			sfxge_rx_qcomplete(sfxge_rxq_t *, boolean_t);
 extern void			sfxge_rx_qflush_done(sfxge_rxq_t *);
 extern void			sfxge_rx_qflush_failed(sfxge_rxq_t *);
 extern void			sfxge_rx_qfpp_trim(sfxge_rxq_t *);
-extern int			sfxge_rx_ioctl(sfxge_t *, sfxge_rx_ioc_t *);
 extern void			sfxge_rx_stop(sfxge_t *);
 extern unsigned int 		sfxge_rx_loaned(sfxge_t *);
 extern void			sfxge_rx_fini(sfxge_t *);
@@ -1003,7 +960,6 @@ extern int			sfxge_tx_start(sfxge_t *);
 extern int			sfxge_tx_packet_add(sfxge_t *, mblk_t *);
 extern void			sfxge_tx_qcomplete(sfxge_txq_t *);
 extern void			sfxge_tx_qflush_done(sfxge_txq_t *);
-extern int			sfxge_tx_ioctl(sfxge_t *, sfxge_tx_ioc_t *);
 extern void			sfxge_tx_stop(sfxge_t *);
 extern void			sfxge_tx_fini(sfxge_t *);
 extern void			sfxge_tx_qdpl_flush(sfxge_txq_t *stp);
@@ -1019,62 +975,54 @@ extern void			sfxge_sram_buf_tbl_clear(sfxge_t *, uint32_t,
 extern void			sfxge_sram_stop(sfxge_t *);
 extern void			sfxge_sram_buf_tbl_free(sfxge_t *, uint32_t,
     size_t);
-extern int			sfxge_sram_ioctl(sfxge_t *, sfxge_sram_ioc_t *);
 extern void			sfxge_sram_fini(sfxge_t *);
 
-extern void			sfxge_tcp_parse(mblk_t *,
-    struct ether_header **, struct ip **, struct tcphdr **, size_t *, size_t *);
+extern sfxge_packet_type_t	sfxge_pkthdr_parse(mblk_t *,
+    struct ether_header **, struct ip **, struct tcphdr **, size_t *, size_t *,
+    uint16_t *, uint16_t *);
 
-#define	SFXGE_TCP_HASH(_raddr, _rport, _laddr, _lport, _hash)		\
-	do {								\
-		uint32_t raddr = (uint32_t)(_raddr);			\
-		uint32_t rport = (uint32_t)(_rport);			\
-		uint32_t laddr = (uint32_t)(_laddr);			\
-		uint32_t lport = (uint32_t)(_lport);			\
-		uint32_t key;						\
-		uint32_t lfsr;						\
-		unsigned int index;					\
-									\
-		key = laddr ^						\
-		    ((lport << 16) | (raddr >> 16)) ^			\
-		    ((raddr << 16) | rport);				\
-									\
-		lfsr = 0xffffffff;					\
-		for (index = 0; index < 32; index++) {			\
-			uint32_t input;					\
-			uint32_t key_bit32;				\
-			uint32_t lfsr_bit16;				\
-			uint32_t lfsr_bit3;				\
-									\
-			key_bit32 = key >> 31;				\
-			key <<= 1;					\
-									\
-			lfsr_bit16 = (lfsr >> 15) & 1;			\
-			lfsr_bit3 = (lfsr >> 2) & 1;			\
-									\
-			input = (lfsr_bit16 ^ lfsr_bit3) ^ key_bit32;	\
-			ASSERT((input & ~1) == 0);			\
-									\
-			lfsr = (lfsr << 1) | input;			\
-		}							\
-									\
-		(_hash) = (uint16_t)lfsr;				\
-	_NOTE(CONSTANTCONDITION)					\
+extern int sfxge_toeplitz_hash_init(sfxge_t *);
+extern void sfxge_toeplitz_hash_fini(sfxge_t *);
+extern uint32_t sfxge_toeplitz_hash(sfxge_t *, unsigned int,
+    uint8_t *, uint16_t, uint8_t *, uint16_t);
+
+/*
+ * 4-tuple hash for TCP/IPv4 used for LRO, TSO and TX queue selection.
+ * To compute the same hash value as Siena/Huntington hardware, the inputs
+ * must be in big endian (network) byte order.
+ */
+#define	SFXGE_TCP_HASH(_sp, _raddr, _rport, _laddr, _lport, _hash)	\
+	do { \
+		(_hash) = sfxge_toeplitz_hash(_sp, \
+					sizeof (struct in_addr), \
+					(uint8_t *)(_raddr), \
+					(_rport), \
+					(uint8_t *)(_laddr), \
+					(_lport)); \
+		_NOTE(CONSTANTCONDITION) \
 	} while (B_FALSE)
+
+/*
+ * 4-tuple hash for non-TCP IPv4 packets, used for TX queue selection.
+ * For UDP or SCTP packets, calculate a 4-tuple hash using port numbers.
+ * For other IPv4 non-TCP packets, use zero for the port numbers.
+ */
+#define	SFXGE_IP_HASH(_sp, _raddr, _rport, _laddr, _lport, _hash)	\
+	SFXGE_TCP_HASH((_sp), (_raddr), (_rport), (_laddr), (_lport), (_hash))
+
 
 extern int		sfxge_nvram_ioctl(sfxge_t *, sfxge_nvram_ioc_t *);
 
 extern int		sfxge_pci_init(sfxge_t *);
 extern void		sfxge_pcie_check_link(sfxge_t *, unsigned int,
     unsigned int);
-extern int		sfxge_pci_ioctl(sfxge_t *, sfxge_pci_ioc_t *);
 extern void		sfxge_pci_fini(sfxge_t *);
 
 extern int		sfxge_bar_init(sfxge_t *);
-extern int		sfxge_bar_ioctl(sfxge_t *, sfxge_bar_ioc_t *);
 extern void		sfxge_bar_fini(sfxge_t *);
 
 extern int		sfxge_vpd_ioctl(sfxge_t *, sfxge_vpd_ioc_t *);
+
 
 #endif /* _KERNEL */
 

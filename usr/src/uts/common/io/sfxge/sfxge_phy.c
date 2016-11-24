@@ -1,34 +1,37 @@
 /*
- * CDDL HEADER START
+ * Copyright (c) 2008-2016 Solarflare Communications Inc.
+ * All rights reserved.
  *
- * The contents of this file are subject to the terms of the
- * Common Development and Distribution License (the "License").
- * You may not use this file except in compliance with the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
  *
- * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
- * See the License for the specific language governing permissions
- * and limitations under the License.
+ * 1. Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
  *
- * When distributing Covered Code, include this CDDL HEADER in each
- * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
- * If applicable, add the following below this CDDL HEADER, with the
- * fields enclosed by brackets "[]" replaced with your own identifying
- * information: Portions Copyright [yyyy] [name of copyright owner]
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
+ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * CDDL HEADER END
- */
-
-/*
- * Copyright 2008-2013 Solarflare Communications Inc.  All rights reserved.
- * Use is subject to license terms.
+ * The views and conclusions contained in the software and documentation are
+ * those of the authors and should not be interpreted as representing official
+ * policies, either expressed or implied, of the FreeBSD Project.
  */
 
 #include <sys/types.h>
 #include <sys/sysmacros.h>
 #include <sys/ddi.h>
 #include <sys/sunddi.h>
-#include <sys/cyclic.h>
 
 #include "sfxge.h"
 #include "efx.h"
@@ -67,30 +70,6 @@ static ddi_dma_attr_t sfxge_phy_dma_attr = {
 };
 
 
-/* The common code requires the loader *without* the REFLASH_HEADER */
-#if EFSYS_OPT_FALCON && EFSYS_OPT_NVRAM_SFT9001
-static const uint8_t SFT9001_FULL_LOADER[] = {
-#include "firmware/image.h"
-#include "firmware/SFT9001A_LOADER.c"
-};
-const uint8_t * const sft9001_loader = SFT9001_FULL_LOADER +
-    sizeof (image_header_t);
-const size_t sft9001_loader_size = sizeof (SFT9001_FULL_LOADER) -
-    sizeof (image_header_t);
-#endif
-
-#if EFSYS_OPT_FALCON && EFSYS_OPT_NVRAM_SFX7101
-static const uint8_t SFX7101_FULL_LOADER[] = {
-#include "firmware/image.h"
-#include "firmware/SFX7101B_LOADER.c"
-};
-const uint8_t * const sfx7101_loader = SFX7101_FULL_LOADER +
-    sizeof (image_header_t);
-const size_t sfx7101_loader_size = sizeof (SFX7101_FULL_LOADER) -
-    sizeof (image_header_t);
-#endif
-
-
 static int
 sfxge_phy_kstat_update(kstat_t *ksp, int rw)
 {
@@ -114,9 +93,7 @@ sfxge_phy_kstat_update(kstat_t *ksp, int rw)
 
 	/* Synchronize the DMA memory for reading */
 	(void) ddi_dma_sync(spp->sp_mem.esm_dma_handle,
-	    0,
-	    EFX_PHY_STATS_SIZE,
-	    DDI_DMA_SYNC_FORKERNEL);
+	    0, EFX_PHY_STATS_SIZE, DDI_DMA_SYNC_FORKERNEL);
 
 	if ((rc = efx_phy_stats_update(enp, &spp->sp_mem, spp->sp_statbuf))
 	    != 0)
@@ -247,186 +224,6 @@ fail1:
 	return (rc);
 }
 
-static int
-sfxge_phy_led_mode_set(sfxge_t *sp, efx_phy_led_mode_t mode)
-{
-	sfxge_mac_t *smp = &(sp->s_mac);
-	int rc;
-
-	ASSERT3U(smp->sm_state, ==, SFXGE_MAC_STARTED);
-
-	if (mode >= EFX_PHY_LED_NMODES) {
-		rc = EINVAL;
-		goto fail1;
-	}
-
-	mutex_enter(&(smp->sm_lock));
-
-	if ((rc = efx_phy_led_set(sp->s_enp, mode)) != 0)
-		goto fail2;
-
-	mutex_exit(&(smp->sm_lock));
-
-	return (0);
-
-fail2:
-	DTRACE_PROBE(fail2);
-
-	mutex_exit(&(smp->sm_lock));
-
-fail1:
-	DTRACE_PROBE1(fail1, int, rc);
-
-	return (rc);
-}
-
-
-int
-sfxge_phy_ioctl(sfxge_t *sp, sfxge_phy_ioc_t *spip)
-{
-	int rc;
-
-	switch (spip->spi_op) {
-	case SFXGE_PHY_OP_LINK: {
-		break;
-	}
-	case SFXGE_PHY_OP_LED: {
-		efx_phy_led_mode_t mode = spip->spi_data;
-
-		if ((rc = sfxge_phy_led_mode_set(sp, mode)) != 0)
-			goto fail1;
-
-		break;
-	}
-	default:
-		rc = ENOTSUP;
-		goto fail1;
-	}
-
-	return (0);
-
-fail1:
-	DTRACE_PROBE1(fail1, int, rc);
-
-	return (rc);
-}
-
-
-static uint8_t
-bist_status(unsigned long value)
-{
-	uint8_t ret;
-
-	efx_phy_cable_status_t status = (efx_phy_cable_status_t)value;
-	switch (status) {
-	case EFX_PHY_CABLE_STATUS_OK:
-		ret = SFXGE_PHY_BIST_CABLE_OK;
-		break;
-	case EFX_PHY_CABLE_STATUS_INVALID:
-		ret =  SFXGE_PHY_BIST_CABLE_INVALID;
-		break;
-	case EFX_PHY_CABLE_STATUS_OPEN:
-		ret = SFXGE_PHY_BIST_CABLE_OPEN;
-		break;
-	case EFX_PHY_CABLE_STATUS_INTRAPAIRSHORT:
-		ret = SFXGE_PHY_BIST_CABLE_INTRAPAIRSHORT;
-		break;
-	case EFX_PHY_CABLE_STATUS_INTERPAIRSHORT:
-		ret = SFXGE_PHY_BIST_CABLE_INTERPAIRSHORT;
-		break;
-	case EFX_PHY_CABLE_STATUS_BUSY:
-		ret = SFXGE_PHY_BIST_CABLE_BUSY;
-		break;
-	default:
-		ret = SFXGE_PHY_BIST_CABLE_UNKNOWN;
-	}
-
-	return (ret);
-}
-
-
-int
-sfxge_phy_bist_ioctl(sfxge_t *sp, sfxge_phy_bist_ioc_t *spbip)
-{
-	sfxge_mac_t *smp = &(sp->s_mac);
-	efx_phy_bist_type_t bist_type;
-	efx_nic_t *enp;
-	const efx_nic_cfg_t *encp;
-	efx_phy_bist_result_t result;
-	unsigned long values[EFX_PHY_BIST_NVALUES];
-	uint32_t mask;
-	int rc;
-
-	mutex_enter(&(smp->sm_lock));
-	enp = sp->s_enp;
-	encp = efx_nic_cfg_get(enp);
-
-	bist_type = spbip->spbi_break_link ? EFX_PHY_BIST_TYPE_CABLE_LONG :
-	    EFX_PHY_BIST_TYPE_CABLE_SHORT;
-
-	if (~encp->enc_bist_mask & (1 << bist_type)) {
-		rc = ENOTSUP;
-		goto fail1;
-	}
-
-	if ((rc = efx_phy_bist_start(enp, bist_type)) != 0)
-		goto fail2;
-
-	do {
-		/* Spin for 1 ms */
-		drv_usecwait(1000);
-
-		if ((rc = efx_phy_bist_poll(enp, bist_type, &result, &mask,
-		    values, sizeof (values) / sizeof (values[0]))) != 0)
-			goto fail3;
-
-		ASSERT3U(result, !=, EFX_PHY_BIST_RESULT_UNKNOWN);
-
-	} while (result == EFX_PHY_BIST_RESULT_RUNNING);
-
-	ASSERT3U(mask, ==, ((1 << EFX_PHY_BIST_CABLE_LENGTH_A) |
-			    (1 << EFX_PHY_BIST_CABLE_LENGTH_B) |
-			    (1 << EFX_PHY_BIST_CABLE_LENGTH_C) |
-			    (1 << EFX_PHY_BIST_CABLE_LENGTH_D) |
-			    (1 << EFX_PHY_BIST_CABLE_STATUS_A) |
-			    (1 << EFX_PHY_BIST_CABLE_STATUS_B) |
-			    (1 << EFX_PHY_BIST_CABLE_STATUS_C) |
-			    (1 << EFX_PHY_BIST_CABLE_STATUS_D)));
-
-	spbip->spbi_status_a = bist_status(values[EFX_PHY_BIST_CABLE_STATUS_A]);
-	spbip->spbi_status_b = bist_status(values[EFX_PHY_BIST_CABLE_STATUS_B]);
-	spbip->spbi_status_c = bist_status(values[EFX_PHY_BIST_CABLE_STATUS_C]);
-	spbip->spbi_status_d = bist_status(values[EFX_PHY_BIST_CABLE_STATUS_D]);
-
-	spbip->spbi_length_ind_a =
-	    (uint16_t)values[EFX_PHY_BIST_CABLE_LENGTH_A];
-	spbip->spbi_length_ind_b =
-	    (uint16_t)values[EFX_PHY_BIST_CABLE_LENGTH_B];
-	spbip->spbi_length_ind_c =
-	    (uint16_t)values[EFX_PHY_BIST_CABLE_LENGTH_C];
-	spbip->spbi_length_ind_d =
-	    (uint16_t)values[EFX_PHY_BIST_CABLE_LENGTH_D];
-
-	/* Bring the PHY back to life */
-	efx_phy_bist_stop(enp, bist_type);
-
-	mutex_exit(&(smp->sm_lock));
-
-	return (0);
-
-fail3:
-	DTRACE_PROBE(fail3);
-	efx_phy_bist_stop(enp, bist_type);
-fail2:
-	DTRACE_PROBE(fail2);
-fail1:
-	mutex_exit(&(smp->sm_lock));
-	DTRACE_PROBE1(fail1, int, rc);
-
-	return (rc);
-}
-
-
 uint8_t
 sfxge_phy_lp_cap_test(sfxge_t *sp, uint32_t field)
 {
@@ -485,13 +282,10 @@ sfxge_phy_cap_apply(sfxge_t *sp, boolean_t use_default)
 			efx_phy_adv_cap_get(enp, EFX_PHY_CAP_DEFAULT, &adv_cap);
 			if ((rc = efx_phy_adv_cap_set(enp, adv_cap)) != 0)
 				goto fail1;
-			cmn_err(CE_WARN, SFXGE_CMN_ERR
-			    "[%s%d] Setting of advertised link "
-			    "capabilities failed. "
+			dev_err(sp->s_dip, CE_WARN, SFXGE_CMN_ERR
+			    "Setting of advertised link capabilities failed. "
 			    "Using default settings. "
 			    "(Requested 0x%x Given 0x%x Supported 0x%x)",
-			    ddi_driver_name(sp->s_dip),
-			    ddi_get_instance(sp->s_dip),
 			    requested,
 			    adv_cap,
 			    supported);
@@ -514,7 +308,7 @@ fail1:
 
 uint8_t
 sfxge_phy_cap_test(sfxge_t *sp, uint32_t flag, uint32_t field,
-	boolean_t *mutablep)
+    boolean_t *mutablep)
 {
 	sfxge_mac_t *smp = &(sp->s_mac);
 	efx_nic_t *enp;
@@ -567,48 +361,6 @@ sfxge_phy_cap_set(sfxge_t *sp, uint32_t field, int set)
 		cap &= ~(1 << field);
 
 	rc = efx_phy_adv_cap_set(enp, cap);
-done:
-	mutex_exit(&(smp->sm_lock));
-
-	return (rc);
-}
-
-
-int
-sfxge_phy_prop_get(sfxge_t *sp, unsigned int id, uint32_t flags, uint32_t *valp)
-{
-	sfxge_mac_t *smp = &(sp->s_mac);
-	efx_nic_t *enp = sp->s_enp;
-	int rc = 0;
-
-	mutex_enter(&(smp->sm_lock));
-
-	if (smp->sm_state != SFXGE_MAC_STARTED)
-		goto done;
-
-	rc = efx_phy_prop_get(enp, id, flags, valp);
-
-done:
-	mutex_exit(&(smp->sm_lock));
-
-	return (rc);
-}
-
-
-int
-sfxge_phy_prop_set(sfxge_t *sp, unsigned int id, uint32_t val)
-{
-	sfxge_mac_t *smp = &(sp->s_mac);
-	efx_nic_t *enp = sp->s_enp;
-	int rc = 0;
-
-	mutex_enter(&(smp->sm_lock));
-
-	if (smp->sm_state != SFXGE_MAC_STARTED)
-		goto done;
-
-	rc = efx_phy_prop_set(enp, id, val);
-
 done:
 	mutex_exit(&(smp->sm_lock));
 

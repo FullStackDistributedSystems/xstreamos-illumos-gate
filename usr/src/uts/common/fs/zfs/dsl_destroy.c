@@ -23,6 +23,7 @@
  * Copyright (c) 2012, 2015 by Delphix. All rights reserved.
  * Copyright (c) 2013 Steven Hartland. All rights reserved.
  * Copyright (c) 2013 by Joyent, Inc. All rights reserved.
+ * Copyright (c) 2014 Integros [integros.com]
  */
 
 #include <sys/zfs_context.h>
@@ -245,7 +246,9 @@ dsl_destroy_snapshot_sync_impl(dsl_dataset_t *ds, boolean_t defer, dmu_tx_t *tx)
 	uint64_t obj;
 
 	ASSERT(RRW_WRITE_HELD(&dp->dp_config_rwlock));
+	rrw_enter(&ds->ds_bp_rwlock, RW_READER, FTAG);
 	ASSERT3U(dsl_dataset_phys(ds)->ds_bp.blk_birth, <=, tx->tx_txg);
+	rrw_exit(&ds->ds_bp_rwlock, FTAG);
 	ASSERT(refcount_is_zero(&ds->ds_longholds));
 
 	if (defer &&
@@ -719,7 +722,9 @@ dsl_destroy_head_sync_impl(dsl_dataset_t *ds, dmu_tx_t *tx)
 	ASSERT3U(dsl_dataset_phys(ds)->ds_num_children, <=, 1);
 	ASSERT(ds->ds_prev == NULL ||
 	    dsl_dataset_phys(ds->ds_prev)->ds_next_snap_obj != ds->ds_object);
+	rrw_enter(&ds->ds_bp_rwlock, RW_READER, FTAG);
 	ASSERT3U(dsl_dataset_phys(ds)->ds_bp.blk_birth, <=, tx->tx_txg);
+	rrw_exit(&ds->ds_bp_rwlock, FTAG);
 	ASSERT(RRW_WRITE_HELD(&dp->dp_config_rwlock));
 
 	/* We need to log before removing it from the namespace. */
@@ -811,10 +816,12 @@ dsl_destroy_head_sync_impl(dsl_dataset_t *ds, dmu_tx_t *tx)
 		ASSERT(!DS_UNIQUE_IS_ACCURATE(ds) ||
 		    dsl_dataset_phys(ds)->ds_unique_bytes == used);
 
+		rrw_enter(&ds->ds_bp_rwlock, RW_READER, FTAG);
 		bptree_add(mos, dp->dp_bptree_obj,
 		    &dsl_dataset_phys(ds)->ds_bp,
 		    dsl_dataset_phys(ds)->ds_prev_snap_txg,
 		    used, comp, uncomp, tx);
+		rrw_exit(&ds->ds_bp_rwlock, FTAG);
 		dsl_dir_diduse_space(ds->ds_dir, DD_USED_HEAD,
 		    -used, -comp, -uncomp, tx);
 		dsl_dir_diduse_space(dp->dp_free_dir, DD_USED_HEAD,
@@ -968,9 +975,17 @@ dsl_destroy_inconsistent(const char *dsname, void *arg)
 	objset_t *os;
 
 	if (dmu_objset_hold(dsname, FTAG, &os) == 0) {
-		boolean_t inconsistent = DS_IS_INCONSISTENT(dmu_objset_ds(os));
+		boolean_t need_destroy = DS_IS_INCONSISTENT(dmu_objset_ds(os));
+
+		/*
+		 * If the dataset is inconsistent because a resumable receive
+		 * has failed, then do not destroy it.
+		 */
+		if (dsl_dataset_has_resume_receive_state(dmu_objset_ds(os)))
+			need_destroy = B_FALSE;
+
 		dmu_objset_rele(os, FTAG);
-		if (inconsistent)
+		if (need_destroy)
 			(void) dsl_destroy_head(dsname);
 	}
 	return (0);
