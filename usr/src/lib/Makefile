@@ -239,7 +239,6 @@ SUBDIRS +=				\
 	libzfs_core	\
 	libzfs_jni	\
 	libzonecfg	\
-	libinstzones	\
 	libzoneinfo	\
 	libzonestat	\
 	libzpool	\
