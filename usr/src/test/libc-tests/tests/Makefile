@@ -22,6 +22,7 @@ SUBDIRS = \
 	nl_langinfo \
 	priv_gettext \
 	random \
+	select \
 	strerror \
 	symbols \
 	threads \
@@ -37,6 +38,7 @@ PROGS = \
 	env-7076 \
 	quick_exit_order \
 	quick_exit_status \
+	strcoll-strxfrm-6907 \
 	timespec_get \
 	wcsncasecmp \
 	wcsncasecmp-7344 \

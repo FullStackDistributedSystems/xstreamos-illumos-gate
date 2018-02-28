@@ -83,6 +83,7 @@ usr/src/cmd/krb5/ldap_util/kdb5_ldap_list.h
 usr/src/cmd/krb5/ldap_util/kdb5_ldap_policy.h
 usr/src/cmd/krb5/ldap_util/kdb5_ldap_realm.h
 usr/src/cmd/krb5/ldap_util/kdb5_ldap_services.h
+usr/src/cmd/localedef/data/manual-input.UTF-8
 usr/src/cmd/smbsrv/smbd/eventlog.dll
 usr/src/cmd/terminfo/termcap.src
 usr/src/cmd/terminfo/terminfo.src
@@ -381,6 +382,7 @@ usr/src/lib/libsmbfs/netsmb/spnego.h
 usr/src/lib/libsmbfs/smb/derparse.[ch]
 usr/src/lib/libsmbfs/smb/spnego.c
 usr/src/lib/libsmbfs/smb/spnegoparse.[ch]
+usr/src/test/util-tests/tests/dis/*/*.out
 usr/src/test/zfs-tests/tests/functional/history/*Z
 usr/src/test/zfs-tests/tests/functional/history/*txt
 usr/src/tools/btxld/btx.h

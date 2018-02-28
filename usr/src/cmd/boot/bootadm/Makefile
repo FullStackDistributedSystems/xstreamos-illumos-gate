@@ -21,9 +21,9 @@
 #
 # Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
-# 
-# Copyright 2011 Nexenta Systems, Inc. All rights reserved.
+#
 # Copyright 2016 Toomas Soome <tsoome@me.com>
+# Copyright 2016 Nexenta Systems, Inc.
 #
 
 PROG= bootadm
@@ -42,8 +42,8 @@ POFILE= bootadm_cmd.po
 .KEEP_STATE:
 
 LDLIBS_i386= -lfdisk
-LDLIBS += -lficl-sys -lpkcs11 -lcryptoutil -lnvpair -lgen -ladm -lefi
-LDLIBS += -lscf -lz -lbe -lzfs $(LDLIBS_$(MACH))
+LDLIBS += -lficl-sys -lmd -lcryptoutil -lnvpair -lgen -ladm -lefi
+LDLIBS += -lz -lbe -lzfs $(LDLIBS_$(MACH))
 
 # Writing into string literals is incorrect.  We need to match gcc's
 # behavior, which causes us to take SIGSEGV on such a write.

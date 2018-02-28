@@ -15,9 +15,11 @@
 #
 
 include $(SRC)/Makefile.master
+include $(SRC)/boot/Makefile.version
 
-CFLAGS= -O2
-CPPFLAGS= -DSTAND -nostdinc -I../../../../include -I../../..
+CFLAGS=		-O2
+CPPFLAGS=	-DSTAND -nostdinc -I../../../../include -I../../..
+CPPFLAGS +=	-I$(SRC)/uts/intel/sys/acpi
 LOADER=		zfsloader
 NEWVERSWHAT=	"ZFS enabled bootstrap loader" x86
 MAN=
@@ -53,7 +55,7 @@ INTERNALPROG=
 # architecture-specific loader code
 SRCS=		main.c conf.c vers.c chain.c
 
-CPPFLAGS +=	-DLOADER_TFTP_SUPPORT -DLOADER_GZIP_SUPPORT
+CPPFLAGS +=	-DLOADER_GZIP_SUPPORT
 
 # Enable BootForth
 CPPFLAGS +=	-DBOOT_FORTH -I$(SRC)/common/ficl -I../../ficl
@@ -62,7 +64,7 @@ LIBFICL=	../../ficl/i386/libficl.a
 # Always add MI sources
 SRCS +=	boot.c commands.c console.c devopen.c interp.c
 SRCS +=	interp_backslash.c interp_parse.c ls.c misc.c
-SRCS +=	module.c panic.c linenoise.c
+SRCS +=	module.c panic.c linenoise.c multiboot2.c
 
 SRCS +=	load_elf32.c load_elf32_obj.c reloc_elf32.c
 SRCS +=	load_elf64.c load_elf64_obj.c reloc_elf64.c
@@ -106,11 +108,14 @@ CPPFLAGS +=	-I../btx/lib
 
 include ../Makefile.inc
 
-vers.c:	../../common/newvers.sh version
-	$(SH) ../../common/newvers.sh version ${NEWVERSWHAT}
+# For multiboot2.h, must be last, to avoid conflicts
+CPPFLAGS +=	-I$(SRC)/uts/common
+
+vers.c:	../../common/newvers.sh $(SRC)/boot/Makefile.version
+	$(SH) ../../common/newvers.sh ${LOADER_VERSION} ${NEWVERSWHAT}
 
 ${LOADER}: ${LOADER}.bin ${BTXLDR} ${BTXKERN}
-	$(BTXLD) -v -f aout -e ${LOADER_ADDRESS} -o $@ -l ${BTXLDR} \
+	$(BTXLD) -f aout -e ${LOADER_ADDRESS} -o $@ -l ${BTXLDR} \
 		-b ${BTXKERN} ${LOADER}.bin
 
 ${LOADER}.bin: ${LOADER}.sym
@@ -134,7 +139,6 @@ DPADD=	${LIBFICL} ${LIBZFSBOOT} ${LIBI386} ${LIBSTAND}
 LDADD=	${LIBFICL} ${LIBZFSBOOT} ${LIBI386} ${LIBSTAND}
 
 CLEANFILES +=	machine x86
-CFLAGS +=	-DLOADER_PREFER_AMD64
 
 machine:
 	$(RM) machine

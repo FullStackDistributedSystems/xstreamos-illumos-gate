@@ -22,8 +22,6 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- * $FreeBSD$
  */
 
 #ifndef _BOOTSTRAP_H_
@@ -73,12 +71,12 @@ int	kern_pread(int fd, vm_offset_t dest, size_t len, off_t off);
 void	*alloc_pread(int fd, off_t off, size_t len);
 
 /* bcache.c */
-void	bcache_init(u_int nblks, size_t bsize);
+void	bcache_init(size_t nblks, size_t bsize);
 void	bcache_add_dev(int);
 void	*bcache_allocate(void);
 void	bcache_free(void *);
 int	bcache_strategy(void *devdata, int rw, daddr_t blk,
-    size_t offset, size_t size, char *buf, size_t *rsize);
+    size_t size, char *buf, size_t *rsize);
 
 /*
  * Disk block cache
@@ -86,7 +84,7 @@ int	bcache_strategy(void *devdata, int rw, daddr_t blk,
 struct bcache_devdata
 {
     int         (*dv_strategy)(void *devdata, int rw, daddr_t blk,
-		    size_t offset, size_t size, char *buf, size_t *rsize);
+		    size_t size, char *buf, size_t *rsize);
     void	*dv_devdata;
     void	*dv_cache;
 };
@@ -103,7 +101,8 @@ struct console
 #define C_PRESENTOUT	(1<<1)	    /* console can provide output */
 #define C_ACTIVEIN	(1<<2)	    /* user wants input from console */
 #define C_ACTIVEOUT	(1<<3)	    /* user wants output to console */
-#define C_MODERAW	(1<<4)	    /* raw mode */
+#define C_WIDEOUT	(1<<4)	    /* c_out routine groks wide chars */
+#define C_MODERAW	(1<<5)	    /* raw mode */
     void	(*c_probe)(struct console *);	/* set c_flags to match hardware */
     int		(*c_init)(struct console *, int);	/* reinit XXX may need more args */
     void	(*c_out)(struct console *, int);	/* emit c */
@@ -233,6 +232,8 @@ void file_discard(struct preloaded_file *fp);
 void file_addmetadata(struct preloaded_file *fp, int type, size_t size, void *p);
 int  file_addmodule(struct preloaded_file *fp, char *modname, int version,
 	struct kernel_module **newmp);
+void build_environment_module(void);
+vm_offset_t bi_copyenv(vm_offset_t);
 
 /* MI module loaders */
 #ifdef __elfN
@@ -305,7 +306,13 @@ struct arch_switch
      */
     uint64_t	(*arch_loadaddr)(u_int type, void *data, uint64_t addr);
 #define	LOAD_ELF	1	/* data points to the ELF header. */
-#define	LOAD_RAW	2	/* data points to the file name. */
+#define	LOAD_RAW	2	/* data points to the module file name. */
+#define	LOAD_KERN	3	/* data points to the kernel file name. */
+#define	LOAD_MEM	4	/* data points to int for buffer size. */
+    /*
+     * Interface to release the load address.
+     */
+    void	(*arch_free_loadaddr)(uint64_t addr, uint64_t pages);
 
     /*
      * Interface to inform MD code about a loaded (ELF) segment. This

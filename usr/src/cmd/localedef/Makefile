@@ -10,10 +10,10 @@
 #
 
 #
-# Copyright 2011 Nexenta Systems, Inc.  All rights reserved.
+# Copyright 2017 Nexenta Systems, Inc.
 # Copyright 2011 EveryCity Ltd. All rights reserved.
 # Copyright 2013 DEY Storage Systems, Inc.
-# Copyright 2015 Joyent, Inc.
+# Copyright 2016 Joyent, Inc.
 #
 
 PROG=localedef
@@ -32,9 +32,7 @@ HDRS	= localedef.h
 SRCS   = $(OBJS:%.o=%.c)
 
 CPPFLAGS	+= -I $(SRC)/lib/libc/port/locale
-NATIVE_CPPFLAGS	+= -I $(SRC)/lib/libc/port/locale
-CERRWARN	+= -_gcc=-Wno-char-subscripts
-CERRWARN	+= -_gcc=-Wno-uninitialized
+NATIVE_CPPFLAGS	+= -I $(SRC)/lib/libc/port/locale -DNATIVE
 CERRWARN	+= -_gcc=-Wno-unused-label
 LDLIBS		+= -lgen
 LDLIBS 		+= -lavl
@@ -228,6 +226,10 @@ CATDIRS		= \
 
 DATA		= $(CATDIRS:%=%/LCL_DATA)
 
+.PARALLEL:
+# The output from yacc must be emitted serially
+.NO_PARALLEL: parser.tab.c parser.tab.h
+
 DCOLL		= LC_COLLATE/LCL_DATA
 DCTYPE		= LC_CTYPE/LCL_DATA
 DMSGS		= LC_MESSAGES/LCL_DATA
@@ -258,6 +260,8 @@ ROOTTRANSLATIONS = $(TRANSLOCS:%=$(ROOTLIB)/locale/%/$(OSTMOFILE))
 ROOTPRIVTRANS = $(PRIVTRANSLOCS:%=$(ROOTLIB)/locale/%/$(PRIVFILE))
 
 $(ROOTDATA)	:= FILEMODE=0444
+
+.KEEP_STATE:
 
 all: $(PROG) $(DATA)
 
@@ -295,7 +299,7 @@ parser.tab.c parser.tab.h: parser.y $(HDRS)
 lint:	$(SRCS)
 	$(LINT.c) $(CPPFLAGS) $(SRCS)
 
-clean:	
+clean:
 	$(RM) $(CLEANFILES)
 	$(RM) $(STAMPFILES)
 
@@ -372,7 +376,7 @@ locale/%/$(DTIME):	locale/%/stamp
 UTF-8.cm: data/UTF-8.cm
 	$(LN) -sf data/UTF-8.cm  $@
 
-UTF-8.ct: $(UTF8SRCS)
+UTF-8.ct: data/ctype.sh data/manual-input.UTF-8 $(UTF8SRCS)
 	$(SH) data/ctype.sh $(UTF8SRCS) > $@
 
 GB18030.cm: data/GB18030.cm

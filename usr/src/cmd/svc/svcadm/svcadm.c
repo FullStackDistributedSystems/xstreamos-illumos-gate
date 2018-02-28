@@ -24,7 +24,7 @@
  */
 
 /*
- * Copyright 2013, Joyent, Inc. All rights reserved.
+ * Copyright 2015, Joyent, Inc. All rights reserved.
  */
 
 /*
@@ -71,16 +71,9 @@
  */
 #define	WAIT_INTERVAL		3
 
-#ifndef NDEBUG
-#define	bad_error(func, err)	{					\
-	pr_warn("%s:%d: %s() failed with unexpected error %d.\n",	\
-	    __FILE__, __LINE__, (func), (err));				\
-	abort();							\
-}
-#else
-#define	bad_error(func, err)	abort()
-#endif
-
+#define	bad_error(func, err)						\
+	uu_panic("%s:%d: %s() failed with unexpected error %d.\n",	\
+	    __FILE__, __LINE__, (func), (err));
 
 struct ht_elt {
 	struct ht_elt	*next;
@@ -526,7 +519,7 @@ restarter_setup(const char *fmri, const scf_instance_t *inst)
 		b = B_TRUE;
 
 	/* Create and set state to disabled */
-	switch (set_bool_prop(pg, SCF_PROPERTY_AUX_TTY, b) != 0) {
+	switch (set_bool_prop(pg, SCF_PROPERTY_AUX_TTY, b)) {
 	case 0:
 		break;
 
@@ -608,7 +601,7 @@ set_inst_enabled(const char *fmri, scf_instance_t *inst, boolean_t temp,
 
 	if (get_bool_prop(pg, SCF_PROPERTY_ENABLED, &b) != 0) {
 		/* Create and set state to disabled */
-		switch (set_bool_prop(pg, SCF_PROPERTY_ENABLED, B_FALSE) != 0) {
+		switch (set_bool_prop(pg, SCF_PROPERTY_ENABLED, B_FALSE)) {
 		case 0:
 			break;
 
@@ -639,7 +632,7 @@ set_inst_enabled(const char *fmri, scf_instance_t *inst, boolean_t temp,
 		    SCF_PG_GENERAL_OVR_FLAGS, pg) != 0)
 			goto eperm;
 
-		switch (set_bool_prop(pg, SCF_PROPERTY_ENABLED, enable) != 0) {
+		switch (set_bool_prop(pg, SCF_PROPERTY_ENABLED, enable)) {
 		case 0:
 			break;
 

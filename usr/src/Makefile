@@ -25,6 +25,7 @@
 # Copyright 2014 Garrett D'Amore <garrett@damore.org>
 # Copyright 2015 OmniTI Computer Consulting, Inc. All rights reserved.
 # Copyright 2016 Toomas Soome <tsoome@me.com>
+# Copyright 2016 Joyent, Inc.
 #
 
 #
@@ -37,7 +38,8 @@ include Makefile.master
 # it defines TARGETDIRS and ROOTDIRS.
 include Targetdirs
 
-COMMON_SUBDIRS=	uts lib cmd ucblib ucbcmd psm man test
+#COMMON_SUBDIRS=	uts lib cmd ucblib ucbcmd psm man test
+COMMON_SUBDIRS=	uts lib cmd ucblib ucbcmd psm man
 sparc_SUBDIRS= stand
 i386_SUBDIRS= grub boot
 
@@ -217,6 +219,7 @@ sysheaders: FRC
 	@cd uts; pwd; $(MAKE) install_h
 
 cmdheaders: FRC
+	@cd cmd/devfsadm; pwd; $(MAKE) install_h
 	@cd cmd/fm; pwd; $(MAKE) install_h
 	@cd cmd/mdb; pwd; $(MAKE) install_h
 

@@ -56,10 +56,10 @@ set -A args "create" "add" "destroy" "import fakepool" \
     "add mirror fakepool" "add raidz fakepool" \
     "add raidz1 fakepool" "add raidz2 fakepool" \
     "setvprop" "blah blah" "-%" "--?" "-*" "-=" \
-    "-a" "-f" "-g" "-h" "-j" "-k" "-m" "-n" "-o" "-p" "-p /tmp" \
-    "-q" "-r" "-t" "-w" "-x" "-y" "-z" \
+    "-a" "-f" "-g" "-h" "-j" "-k" "-m" "-n" "-o" "-p" \
+    "-p /tmp" "-r" "-t" "-w" "-x" "-y" "-z" \
     "-D" "-E" "-G" "-H" "-I" "-J" "-K" "-M" \
-    "-N" "-Q" "-R" "-S" "-T" "-V" "-W" "-Y" "-Z"
+    "-N" "-Q" "-R" "-S" "-T" "-W" "-Y" "-Z"
 
 log_assert "Execute zdb using invalid parameters."
 
