@@ -21,7 +21,7 @@
 
 #
 # Copyright (c) 1989, 2010, Oracle and/or its affiliates. All rights reserved.
-# Copyright 2016 Joyent, Inc.
+# Copyright (c) 2017, Joyent, Inc.
 # Copyright (c) 2012 by Delphix. All rights reserved.
 # Copyright (c) 2013 DEY Storage Systems, Inc. All rights reserved.
 # Copyright 2014 Garrett D'Amore <garrett@damore.org>
@@ -81,7 +81,6 @@ COMMON_SUBDIRS=		\
 	boot		\
 	busstat		\
 	cal		\
-	calendar	\
 	captoinfo	\
 	cat		\
 	cdrw		\
@@ -132,6 +131,7 @@ COMMON_SUBDIRS=		\
 	dispadmin	\
 	dladm		\
 	dlstat		\
+	dlutil		\
 	dmesg		\
 	dodatadm	\
 	dtrace		\
@@ -141,7 +141,6 @@ COMMON_SUBDIRS=		\
 	echo		\
 	ed		\
 	eeprom		\
-	egrep		\
 	eject		\
 	emul64ioctl	\
 	enhance		\
@@ -159,7 +158,6 @@ COMMON_SUBDIRS=		\
 	fdisk		\
 	ficl		\
 	filesync	\
-	fgrep		\
 	file		\
 	find		\
 	flowadm		\
@@ -187,7 +185,6 @@ COMMON_SUBDIRS=		\
 	gettext		\
 	gettxt		\
 	grep		\
-	grep_xpg4	\
 	groups		\
 	growfs		\
 	grpck		\
@@ -199,7 +196,6 @@ COMMON_SUBDIRS=		\
 	hostname	\
 	hotplug		\
 	hotplugd	\
-	hwdata		\
 	ibd_upgrade	\
 	iconv		\
 	id		\
@@ -410,7 +406,6 @@ COMMON_SUBDIRS=		\
 	tbl		\
 	tcopy		\
 	tcpd		\
-	terminfo	\
 	th_tools	\
 	tic		\
 	time		\
@@ -446,6 +441,7 @@ COMMON_SUBDIRS=		\
 	vrrpadm		\
 	vscan		\
 	vt		\
+	vtfontcvt	\
 	w		\
 	wall		\
 	which		\
@@ -482,6 +478,7 @@ i386_SUBDIRS=		\
 	addbadsec	\
 	biosdev		\
 	diskscan	\
+	nvmeadm		\
 	rtc		\
 	ucodeadm	\
 	xvm
@@ -574,7 +571,6 @@ MSGSUBDIRS=		\
 	expand		\
 	expr		\
 	fcinfo		\
-	fgrep		\
 	file		\
 	filesync	\
 	find		\
@@ -591,7 +587,6 @@ MSGSUBDIRS=		\
 	gettext		\
 	gettxt		\
 	grep		\
-	grep_xpg4	\
 	grpck		\
 	gss		\
 	halt		\
@@ -828,9 +823,8 @@ _dc: $(DCSUBDIRS)
 #
 # Dependencies
 #
-fs.d: fstyp
+fs.d:	fstyp
 ksh:	shcomp isaexec
-mdb:	terminfo
 print:	lp
 fmt:	mailx
 

@@ -27,7 +27,9 @@
 # Copyright 2014 Garrett D'Amore <garrett@damore.org>
 # Copyright (c) 2015 Gary Mills
 # Copyright 2016 Toomas Soome <tsoome@me.com>
-# Copyright 2017 Nexenta Systems, Inc.
+# Copyright 2018 Nexenta Systems, Inc.
+# Copyright (c) 2016, Chris Fraire <cfraire@me.com>.
+# Copyright 2017 RackTop Systems.
 #
 
 include ../Makefile.master
@@ -43,7 +45,7 @@ include ../Makefile.master
 
 # Build libc and its dependencies
 SUBDIRS=			\
-	common			\
+	crt			\
 	../cmd/sgs/libconv	\
 	../cmd/sgs/libdl	\
 	libc			\
@@ -168,6 +170,7 @@ SUBDIRS +=				\
 	libnls		\
 	libnsctl	\
 	libnwam		\
+	libofmt		\
 	libpam		\
 	libpcidb	\
 	libpctx		\
@@ -197,6 +200,7 @@ SUBDIRS +=				\
 	libsec		\
 	libsecdb	\
 	libsendfile	\
+	libsff		\
 	libshare	\
 	libshell	\
 	libsip		\
@@ -229,8 +233,6 @@ SUBDIRS +=				\
 	libvrrpadm	\
 	libvscan	\
 	libw		\
-	libwanboot	\
-	libwanbootutil	\
 	libwrap		\
 	libxcurses	\
 	libxcurses2	\
@@ -316,7 +318,6 @@ MSGSUBDIRS=		\
 	libgss		\
 	libidmap	\
 	libilb		\
-	libinetutil	\
 	libinstzones	\
 	libipadm	\
 	libipmp		\
@@ -324,6 +325,7 @@ MSGSUBDIRS=		\
 	libldap5	\
 	libnsl		\
 	libnwam		\
+	libofmt		\
 	libpam		\
 	libpicl		\
 	libpkg		\
@@ -344,8 +346,6 @@ MSGSUBDIRS=		\
 	libuutil	\
 	libvrrpadm	\
 	libvscan	\
-	libwanboot	\
-	libwanbootutil	\
 	libzfs		\
 	libzonecfg	\
 	madv		\
@@ -427,6 +427,7 @@ HDRSUBDIRS=				\
 	libnsl		\
 	libnvpair	\
 	libnwam		\
+	libofmt		\
 	libpam		\
 	libpcidb	\
 	libpctx		\
@@ -446,6 +447,7 @@ HDRSUBDIRS=				\
 	libsasl		\
 	libscf		\
 	libsec		\
+	libsff		\
 	libshare	\
 	libshell	\
 	libsip		\
@@ -474,8 +476,6 @@ HDRSUBDIRS=				\
 	libvolmgt	\
 	libvrrpadm	\
 	libvscan	\
-	libwanboot	\
-	libwanbootutil	\
 	libwrap		\
 	libxcurses2	\
 	libzfs		\
@@ -546,8 +546,8 @@ _msg:			$(MSGSUBDIRS:%=%-nodepend) .WAIT _dc
 _dc:			$(DCSUBDIRS:%=%-nodepend)
 
 # Library interdependencies are called out explicitly here.
-../cmd/sgs/libconv: common
-../cmd/sgs/libdl: common
+../cmd/sgs/libconv: crt
+../cmd/sgs/libdl: crt
 libc:		../cmd/sgs/libconv ../cmd/sgs/libdl
 
 libm:		libc
@@ -572,7 +572,7 @@ auditd_plugins: libbsm libsecdb libgss libmtmalloc
 brand:		libzonecfg libmapmalloc
 cfgadm_plugins:	libdevice libdevinfo libhotplug librcm hbaapi libkstat libscf
 fm:		libexacct libipmi libzfs scsi libdevinfo libdevid libcfgadm \
-		libcontract libsysevent ../cmd/sgs/libelf
+		libcontract libsysevent ../cmd/sgs/libelf libdladm libsff
 $(SPARC_BLD)fm:	libpri
 gss_mechs/mech_dh: libgss
 gss_mechs/mech_dummy: libgss
@@ -617,7 +617,7 @@ $(INTEL_BLD)libgrubmgmt: libfdisk
 libidmap:	libavl libuutil
 libinetsvc:	libscf
 libinstzones:	libzonecfg libcontract
-libipadm:	libinetutil libdlpi libdhcpagent libdladm libsecdb
+libipadm:	libinetutil libdlpi libdhcpagent libdladm libsecdb libdhcputil
 libipmp:	libinetutil
 libipsecutil:	libtecla libtsol
 libiscsit:	libstmf libuuid
@@ -627,10 +627,10 @@ libldap5:	libsasl
 libmapid:	libresolv2 libscf
 libndmp:	libscf
 libnisdb:	libldap5
-libnwam:	libscf libbsm libdladm
+libnwam:	libscf libbsm libdladm libipadm
 libpcp:		libumem libdevinfo
 libpctx:	libproc
-libpkg:		libwanboot libscf libadm
+libpkg:		libscf libadm
 libpool:	libscf libexacct
 libpp:		libast
 libproc:	../cmd/sgs/librtld_db ../cmd/sgs/libelf libctf
@@ -645,6 +645,7 @@ libsasl:	libgss pkcs11
 libsaveargs:	libdisasm
 libscf:		libuutil libgen libsmbios
 libsec:		libavl libidmap
+libsff:		libnvpair
 libshare:	libscf libzfs libuuid libfsmgt libsecdb libumem libsmbfs
 libshell:	libast libcmd libdll libsecdb
 libsip:		libmd5
@@ -668,14 +669,13 @@ libv12n:	libds libuuid
 libvolmgt:	libadm
 libvrrpadm:	libdladm libscf
 libvscan:	libscf libsecdb
-libwanboot:	libresolv2 libdevinfo libinetutil libdhcputil
 libzfs:		libdevid libgen libuutil libadm libavl libefi libidmap \
-		libumem libtsol libzfs_core
+		libumem libtsol libzfs_core libcmdutils
 libzfs_jni:	libdiskmgt libzfs
 libzonecfg:	libuuid libsysevent libsec libbrand libpool libscf libproc \
 		libuutil libbsm libsecdb
 libzonestat:	libcmdutils libumem
-libzpool:	libavl libumem libcmdutils libsysevent
+libzpool:	libavl libumem libcmdutils libsysevent libfakekernel
 madv:		libgen
 mpapi:		libpthread libdevinfo libsysevent
 mpss:		libgen

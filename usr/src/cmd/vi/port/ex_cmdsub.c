@@ -1020,12 +1020,14 @@ zop(int hadpr)
 
 	case '^':
 		zweight = 1;
+		/* FALLTHROUGH */
 	case '-':
 	case '+':
 		while (peekchar() == op) {
 			ignchar();
 			zweight++;
 		}
+		/* FALLTHROUGH */
 	case '=':
 	case '.':
 		c = getchar();
@@ -1080,6 +1082,7 @@ zop2(int nlines, int op)
 	case EOF:
 		if (addr2 == dol)
 			error(gettext("\nAt EOF"));
+		/* FALLTHROUGH */
 	case '+':
 		if (addr2 == dol)
 			error(gettext("At EOF"));
@@ -1087,6 +1090,7 @@ zop2(int nlines, int op)
 		if (addr2 > dol)
 			error(gettext("Hit BOTTOM"));
 		addr2++;
+		/* FALLTHROUGH */
 	default:
 		addr1 = addr2;
 		addr2 += nlines-1;
@@ -1621,7 +1625,7 @@ addmac(unsigned char *src, unsigned char *dest, unsigned char *dname,
 		if (src[1] == 0 && src[0] == dest[strlen(dest)-1])
 			error(gettext("No tail recursion"));
 		/*
-		 * We don't let the user rob himself of ":", and making
+		 * We don't let the user rob themself of ":", and making
 		 * multi char words is a bad idea so we don't allow it.
 		 * Note that if user sets mapinput and maps all of return,
 		 * linefeed, and escape, they can hurt themself. This is

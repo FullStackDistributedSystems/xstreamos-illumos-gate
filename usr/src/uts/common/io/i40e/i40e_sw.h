@@ -11,7 +11,7 @@
 
 /*
  * Copyright 2015 OmniTI Computer Consulting, Inc. All rights reserved.
- * Copyright 2017 Joyent, Inc.
+ * Copyright (c) 2017, Joyent, Inc.
  * Copyright 2017 Tegile Systems, Inc.  All rights reserved.
  */
 
@@ -150,7 +150,6 @@ typedef enum i40e_itr_index {
 	I40E_ITR_INDEX_OTHER	= 0x2,
 	I40E_ITR_INDEX_NONE 	= 0x3
 } i40e_itr_index_t;
-
 
 /*
  * Table 1-5 of the PRM notes that LSO supports up to 256 KB.
@@ -308,11 +307,22 @@ typedef enum i40e_itr_index {
 #define	I40E_PBANUM_STRLEN	13
 
 /*
- * Define the maximum size of a number of queues for a traffic class. While this
- * would ideally be a part of the common code parts, because it's not at this
- * time, we define it here.
+ * Define the maximum number of queues for a traffic class. These values come
+ * from the 'Number and offset of queue pairs per TCs' section of the 'Add VSI
+ * Command Buffer' table. For the 710 controller family this is table 7-62
+ * (r2.5) and for the 722 this is table 38-216 (r2.0).
  */
-#define	I40E_AQ_VSI_TC_QUE_SIZE_MAX	(1 << 0x6)
+#define	I40E_710_MAX_TC_QUEUES	64
+#define	I40E_722_MAX_TC_QUEUES	128
+
+/*
+ * Define the size of the HLUT table size. The HLUT table can either be 128 or
+ * 512 bytes. We always set the table size to be 512 bytes in i40e_chip_start().
+ * Note, this should not be confused with the common code's macro
+ * I40E_HASH_LUT_SIZE_512 which is the bit pattern needed to tell the card to
+ * use a 512 byte HLUT.
+ */
+#define	I40E_HLUT_TABLE_SIZE	512
 
 /*
  * Bit flags for attach_progress
@@ -872,6 +882,13 @@ typedef struct i40e {
 	 */
 	uint64_t	i40e_s_link_status_errs;
 	uint32_t	i40e_s_link_status_lasterr;
+
+	/*
+	 * LED information. Note this state is only modified in
+	 * i40e_gld_set_led() which is protected by MAC's serializer lock.
+	 */
+	uint32_t	i40e_led_status;
+	boolean_t	i40e_led_saved;
 } i40e_t;
 
 /*
@@ -935,8 +952,8 @@ extern uint_t i40e_intr_legacy(void *, void *);
 extern void i40e_intr_io_enable_all(i40e_t *);
 extern void i40e_intr_io_disable_all(i40e_t *);
 extern void i40e_intr_io_clear_cause(i40e_t *);
-extern void i40e_intr_rx_queue_disable(i40e_t *, uint_t);
-extern void i40e_intr_rx_queue_enable(i40e_t *, uint_t);
+extern void i40e_intr_rx_queue_disable(i40e_trqpair_t *);
+extern void i40e_intr_rx_queue_enable(i40e_trqpair_t *);
 extern void i40e_intr_set_itr(i40e_t *, i40e_itr_index_t, uint_t);
 
 /*

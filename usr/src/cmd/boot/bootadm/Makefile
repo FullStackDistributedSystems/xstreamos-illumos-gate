@@ -43,7 +43,7 @@ POFILE= bootadm_cmd.po
 
 LDLIBS_i386= -lfdisk
 LDLIBS += -lficl-sys -lmd -lcryptoutil -lnvpair -lgen -ladm -lefi
-LDLIBS += -lz -lbe -lzfs $(LDLIBS_$(MACH))
+LDLIBS += -lz -lbe -lzfs -lofmt $(LDLIBS_$(MACH))
 
 # Writing into string literals is incorrect.  We need to match gcc's
 # behavior, which causes us to take SIGSEGV on such a write.
@@ -51,7 +51,7 @@ CFLAGS +=	$(XSTRCONST)
 CPPFLAGS +=	-D_FILE_OFFSET_BITS=64
 CPPFLAGS +=	-I$(SRC)/uts/common -I$(SRC)/common -I$(SRC)/common/ficl
 
-C99MODE=	$(C99_ENABLE)
+CSTD=	$(CSTD_GNU99)
 
 LINTFLAGS += -erroff=E_INCONS_ARG_DECL2
 LINTFLAGS += -erroff=E_INCONS_VAL_TYPE_DECL2

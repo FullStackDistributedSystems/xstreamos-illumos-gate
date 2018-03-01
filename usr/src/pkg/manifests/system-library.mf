@@ -23,7 +23,8 @@
 # Copyright (c) 2010, Oracle and/or its affiliates. All rights reserved.
 # Copyright 2012 OmniTI Computer Consulting, Inc.  All rights reserved.
 # Copyright (c) 2013 Gary Mills
-# Copyright 2014 Nexenta Systems, Inc.  All rights reserved.
+# Copyright 2017 Nexenta Systems, Inc.
+# Copyright 2017 RackTop Systems.
 #
 
 <include system-library.man3.inc>
@@ -53,6 +54,7 @@
 <include system-library.man3mp.inc>
 <include system-library.man3nsl.inc>
 <include system-library.man3nvpair.inc>
+<include system-library.man3ofmt.inc>
 <include system-library.man3pam.inc>
 <include system-library.man3proc.inc>
 <include system-library.man3project.inc>
@@ -154,6 +156,7 @@ dir path=usr/share/man/man3malloc
 dir path=usr/share/man/man3mp
 dir path=usr/share/man/man3nsl
 dir path=usr/share/man/man3nvpair
+dir path=usr/share/man/man3ofmt
 dir path=usr/share/man/man3pam
 dir path=usr/share/man/man3pool
 dir path=usr/share/man/man3proc
@@ -200,6 +203,7 @@ file path=lib/$(ARCH64)/libdlpi.so.1
 file path=lib/$(ARCH64)/libdoor.so.1
 file path=lib/$(ARCH64)/libefi.so.1
 file path=lib/$(ARCH64)/libelf.so.1
+file path=lib/$(ARCH64)/libfakekernel.so.1
 $(i386_ONLY)file path=lib/$(ARCH64)/libfdisk.so.1
 file path=lib/$(ARCH64)/libgen.so.1
 file path=lib/$(ARCH64)/libinetutil.so.1
@@ -214,6 +218,7 @@ file path=lib/$(ARCH64)/libmd5.so.1
 file path=lib/$(ARCH64)/libmp.so.2
 file path=lib/$(ARCH64)/libnsl.so.1
 file path=lib/$(ARCH64)/libnvpair.so.1
+file path=lib/$(ARCH64)/libofmt.so.1
 file path=lib/$(ARCH64)/libpam.so.1
 file path=lib/$(ARCH64)/libproc.so.1
 file path=lib/$(ARCH64)/libpthread.so.1
@@ -258,7 +263,7 @@ file path=lib/libadm.so.1
 file path=lib/libaio.so.1
 file path=lib/libavl.so.1
 file path=lib/libbsm.so.1
-file path=lib/libc.so.1 reboot-needed=true
+file path=lib/libc.so.1 mountpoint=true reboot-needed=true
 file path=lib/libc_db.so.1
 file path=lib/libcmdutils.so.1
 file path=lib/libcontract.so.1
@@ -277,6 +282,7 @@ file path=lib/libdoor.so.1
 file path=lib/libefi.so.1
 file path=lib/libelf.so.1
 file path=lib/libelfsign.so.1
+file path=lib/libfakekernel.so.1
 $(i386_ONLY)file path=lib/libfdisk.so.1
 file path=lib/libgen.so.1
 file path=lib/libinetutil.so.1
@@ -296,6 +302,7 @@ file path=lib/libmp.so.2
 file path=lib/libnsl.so.1
 file path=lib/libnvpair.so.1
 file path=lib/libnwam.so.1
+file path=lib/libofmt.so.1
 file path=lib/libpam.so.1
 file path=lib/libproc.so.1
 file path=lib/libpthread.so.1
@@ -371,6 +378,7 @@ file path=usr/lib/$(ARCH64)/libreparse.so.1
 $(i386_ONLY)file path=usr/lib/$(ARCH64)/libsaveargs.so.1
 file path=usr/lib/$(ARCH64)/libsched.so.1
 file path=usr/lib/$(ARCH64)/libsctp.so.1
+file path=usr/lib/$(ARCH64)/libsff.so.1
 file path=usr/lib/$(ARCH64)/libshell.so.1
 file path=usr/lib/$(ARCH64)/libsip.so.1
 file path=usr/lib/$(ARCH64)/libsldap.so.1
@@ -446,6 +454,7 @@ file path=usr/lib/libraidcfg.so.1
 file path=usr/lib/libreparse.so.1
 file path=usr/lib/libsched.so.1
 file path=usr/lib/libsctp.so.1
+file path=usr/lib/libsff.so.1
 file path=usr/lib/libshell.so.1
 file path=usr/lib/libsip.so.1
 file path=usr/lib/libsldap.so.1
@@ -639,6 +648,7 @@ link path=lib/$(ARCH64)/libmd5.so target=libmd5.so.1
 link path=lib/$(ARCH64)/libmp.so target=libmp.so.2
 link path=lib/$(ARCH64)/libnsl.so target=libnsl.so.1
 link path=lib/$(ARCH64)/libnvpair.so target=libnvpair.so.1
+link path=lib/$(ARCH64)/libofmt.so target=libofmt.so.1
 link path=lib/$(ARCH64)/libpam.so target=libpam.so.1
 link path=lib/$(ARCH64)/libposix4.so target=libposix4.so.1
 link path=lib/$(ARCH64)/libposix4.so.1 target=librt.so.1
@@ -706,6 +716,7 @@ link path=lib/libmp.so target=libmp.so.2
 link path=lib/libnsl.so target=libnsl.so.1
 link path=lib/libnvpair.so target=libnvpair.so.1
 link path=lib/libnwam.so target=libnwam.so.1
+link path=lib/libofmt.so target=libofmt.so.1
 link path=lib/libpam.so target=libpam.so.1
 link path=lib/libposix4.so target=libposix4.so.1
 link path=lib/libposix4.so.1 target=librt.so.1
@@ -847,6 +858,8 @@ link path=usr/lib/$(ARCH64)/libelf.so \
 link path=usr/lib/$(ARCH64)/libelf.so.1 \
     target=../../../lib/$(ARCH64)/libelf.so.1
 link path=usr/lib/$(ARCH64)/libexacct.so target=libexacct.so.1
+link path=usr/lib/$(ARCH64)/libfakekernel.so.1 \
+    target=../../../lib/$(ARCH64)/libfakekernel.so.1
 $(i386_ONLY)link path=usr/lib/$(ARCH64)/libfdisk.so \
     target=../../../lib/$(ARCH64)/libfdisk.so.1
 $(i386_ONLY)link path=usr/lib/$(ARCH64)/libfdisk.so.1 \
@@ -1100,6 +1113,7 @@ link path=usr/lib/libefi.so.1 target=../../lib/libefi.so.1
 link path=usr/lib/libelf.so target=../../lib/libelf.so.1
 link path=usr/lib/libelf.so.1 target=../../lib/libelf.so.1
 link path=usr/lib/libexacct.so target=./libexacct.so.1
+link path=usr/lib/libfakekernel.so.1 target=../../lib/libfakekernel.so.1
 $(i386_ONLY)link path=usr/lib/libfdisk.so target=../../lib/libfdisk.so.1
 $(i386_ONLY)link path=usr/lib/libfdisk.so.1 target=../../lib/libfdisk.so.1
 link path=usr/lib/libform.so target=./libform.so.1

@@ -20,7 +20,7 @@
  */
 /*
  * Copyright (c) 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2012 by Delphix. All rights reserved.
+ * Copyright (c) 2012, 2015 by Delphix. All rights reserved.
  * Copyright (c) 2014 Spectra Logic Corporation, All rights reserved.
  * Copyright (c) 2014 Integros [integros.com]
  */
@@ -85,7 +85,7 @@ dsl_deadlist_load_tree(dsl_deadlist_t *dl)
 	    zap_cursor_retrieve(&zc, &za) == 0;
 	    zap_cursor_advance(&zc)) {
 		dsl_deadlist_entry_t *dle = kmem_alloc(sizeof (*dle), KM_SLEEP);
-		dle->dle_mintxg = strtonum(za.za_name, NULL);
+		dle->dle_mintxg = zfs_strtonum(za.za_name, NULL);
 		VERIFY3U(0, ==, bpobj_open(&dle->dle_bpobj, dl->dl_os,
 		    za.za_first_integer));
 		avl_add(&dl->dl_tree, dle);
@@ -98,6 +98,8 @@ void
 dsl_deadlist_open(dsl_deadlist_t *dl, objset_t *os, uint64_t object)
 {
 	dmu_object_info_t doi;
+
+	ASSERT(!dsl_deadlist_is_open(dl));
 
 	mutex_init(&dl->dl_lock, NULL, MUTEX_DEFAULT, NULL);
 	dl->dl_os = os;
@@ -117,17 +119,25 @@ dsl_deadlist_open(dsl_deadlist_t *dl, objset_t *os, uint64_t object)
 	dl->dl_havetree = B_FALSE;
 }
 
+boolean_t
+dsl_deadlist_is_open(dsl_deadlist_t *dl)
+{
+	return (dl->dl_os != NULL);
+}
+
 void
 dsl_deadlist_close(dsl_deadlist_t *dl)
 {
 	void *cookie = NULL;
 	dsl_deadlist_entry_t *dle;
 
-	dl->dl_os = NULL;
+	ASSERT(dsl_deadlist_is_open(dl));
 
 	if (dl->dl_oldfmt) {
 		dl->dl_oldfmt = B_FALSE;
 		bpobj_close(&dl->dl_bpobj);
+		dl->dl_os = NULL;
+		dl->dl_object = 0;
 		return;
 	}
 
@@ -143,6 +153,8 @@ dsl_deadlist_close(dsl_deadlist_t *dl)
 	mutex_destroy(&dl->dl_lock);
 	dl->dl_dbuf = NULL;
 	dl->dl_phys = NULL;
+	dl->dl_os = NULL;
+	dl->dl_object = 0;
 }
 
 uint64_t
@@ -309,7 +321,7 @@ static void
 dsl_deadlist_regenerate(objset_t *os, uint64_t dlobj,
     uint64_t mrs_obj, dmu_tx_t *tx)
 {
-	dsl_deadlist_t dl;
+	dsl_deadlist_t dl = { 0 };
 	dsl_pool_t *dp = dmu_objset_pool(os);
 
 	dsl_deadlist_open(&dl, os, dlobj);
@@ -365,6 +377,7 @@ void
 dsl_deadlist_space(dsl_deadlist_t *dl,
     uint64_t *usedp, uint64_t *compp, uint64_t *uncompp)
 {
+	ASSERT(dsl_deadlist_is_open(dl));
 	if (dl->dl_oldfmt) {
 		VERIFY3U(0, ==, bpobj_space(&dl->dl_bpobj,
 		    usedp, compp, uncompp));
@@ -490,7 +503,7 @@ dsl_deadlist_merge(dsl_deadlist_t *dl, uint64_t obj, dmu_tx_t *tx)
 	for (zap_cursor_init(&zc, dl->dl_os, obj);
 	    zap_cursor_retrieve(&zc, &za) == 0;
 	    zap_cursor_advance(&zc)) {
-		uint64_t mintxg = strtonum(za.za_name, NULL);
+		uint64_t mintxg = zfs_strtonum(za.za_name, NULL);
 		dsl_deadlist_insert_bpobj(dl, za.za_first_integer, mintxg, tx);
 		VERIFY3U(0, ==, zap_remove_int(dl->dl_os, obj, mintxg, tx));
 	}

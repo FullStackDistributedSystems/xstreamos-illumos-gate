@@ -28,8 +28,6 @@
  *
  */
 
-/* $Id: attribute.c 157 2006-04-26 15:07:55Z ktou $ */
-
 /*LINTLIBRARY*/
 
 #include <stdio.h>
@@ -51,7 +49,7 @@ static void papiAttributeFree(papi_attribute_t *attribute);
 
 static void
 papiAttributeValueFree(papi_attribute_value_type_t type,
-		    papi_attribute_value_t *value)
+    papi_attribute_value_t *value)
 {
 	if (value != NULL) {
 		switch (type) {
@@ -79,7 +77,7 @@ papiAttributeValueFree(papi_attribute_value_type_t type,
 
 static void
 papiAttributeValuesFree(papi_attribute_value_type_t type,
-		    papi_attribute_value_t **values)
+    papi_attribute_value_t **values)
 {
 	if (values != NULL) {
 		int i;
@@ -95,12 +93,11 @@ static void
 papiAttributeFree(papi_attribute_t *attribute)
 {
 	if (attribute != NULL) {
-		if (attribute->name != NULL)
-			free(attribute->name);
+		free(attribute->name);
 		if (attribute->values != NULL)
 			papiAttributeValuesFree(attribute->type,
-						attribute->values);
-			free(attribute);
+			    attribute->values);
+		free(attribute);
 	}
 }
 
@@ -128,22 +125,19 @@ collection_dup(papi_attribute_t **collection)
 		int i;
 
 		for (i = 0; ((collection[i] != NULL) && (status == PAPI_OK));
-		     i++) {
+		    i++) {
 			papi_attribute_t *a = collection[i];
 
 			status = papiAttributeListAddValue(&result,
-					PAPI_ATTR_APPEND, a->name, a->type,
-					NULL);
+			    PAPI_ATTR_APPEND, a->name, a->type, NULL);
 			if ((status == PAPI_OK) && (a->values != NULL)) {
 				int j;
 
 				for (j = 0; ((a->values[j] != NULL) &&
-					     (status == PAPI_OK)); j++)
+				    (status == PAPI_OK)); j++)
 					status = papiAttributeListAddValue(
-							&result,
-							PAPI_ATTR_APPEND,
-							a->name, a->type,
-							a->values[j]);
+					    &result, PAPI_ATTR_APPEND,
+					    a->name, a->type, a->values[j]);
 			}
 		}
 		if (status != PAPI_OK) {
@@ -157,7 +151,7 @@ collection_dup(papi_attribute_t **collection)
 
 static papi_attribute_value_t *
 papiAttributeValueDup(papi_attribute_value_type_t type,
-		papi_attribute_value_t *v)
+    papi_attribute_value_t *v)
 {
 	papi_attribute_value_t *result = NULL;
 
@@ -218,8 +212,8 @@ papiAttributeAlloc(const char *name, papi_attribute_value_type_t type)
 
 static papi_status_t
 papiAttributeListAppendValue(papi_attribute_value_t ***values,
-		papi_attribute_value_type_t type,
-		papi_attribute_value_t *value)
+    papi_attribute_value_type_t type,
+    papi_attribute_value_t *value)
 {
 
 	if (values == NULL)
@@ -239,8 +233,8 @@ papiAttributeListAppendValue(papi_attribute_value_t ***values,
 
 papi_status_t
 papiAttributeListAddValue(papi_attribute_t ***list, int flgs,
-		const char *name, papi_attribute_value_type_t type,
-		papi_attribute_value_t *value)
+    const char *name, papi_attribute_value_type_t type,
+    papi_attribute_value_t *value)
 {
 	papi_status_t result;
 	int flags = flgs;
@@ -299,7 +293,7 @@ papiAttributeListAddValue(papi_attribute_t ***list, int flgs,
 
 papi_status_t
 papiAttributeListAddString(papi_attribute_t ***list, int flags,
-			char *name, char *string)
+    char *name, char *string)
 {
 	papi_attribute_value_t v;
 
@@ -309,7 +303,7 @@ papiAttributeListAddString(papi_attribute_t ***list, int flags,
 
 papi_status_t
 papiAttributeListAddInteger(papi_attribute_t ***list, int flags,
-			char *name, int integer)
+    char *name, int integer)
 {
 	papi_attribute_value_t v;
 
@@ -319,7 +313,7 @@ papiAttributeListAddInteger(papi_attribute_t ***list, int flags,
 
 papi_status_t
 papiAttributeListAddBoolean(papi_attribute_t ***list, int flags,
-			const char *name, char boolean)
+	const char *name, char boolean)
 {
 	papi_attribute_value_t v;
 
@@ -329,7 +323,7 @@ papiAttributeListAddBoolean(papi_attribute_t ***list, int flags,
 
 papi_status_t
 papiAttributeListAddRange(papi_attribute_t ***list, int flags,
-			char *name, int lower, int upper)
+    char *name, int lower, int upper)
 {
 	papi_attribute_value_t v;
 
@@ -340,8 +334,7 @@ papiAttributeListAddRange(papi_attribute_t ***list, int flags,
 
 papi_status_t
 papiAttributeListAddResolution(papi_attribute_t ***list, int flags,
-			char *name, int xres, int yres,
-			papi_resolution_unit_t units)
+    char *name, int xres, int yres, papi_resolution_unit_t units)
 {
 	papi_attribute_value_t v;
 
@@ -349,40 +342,40 @@ papiAttributeListAddResolution(papi_attribute_t ***list, int flags,
 	v.resolution.yres = yres;
 	v.resolution.units = units;
 	return (papiAttributeListAddValue(list, flags, name,
-				PAPI_RESOLUTION, &v));
+	    PAPI_RESOLUTION, &v));
 }
 
 papi_status_t
 papiAttributeListAddDatetime(papi_attribute_t ***list, int flags,
-			char *name, time_t datetime)
+    char *name, time_t datetime)
 {
 	papi_attribute_value_t v;
 
 	v.datetime = datetime;
 	return (papiAttributeListAddValue(list, flags, name,
-				PAPI_DATETIME, &v));
+	    PAPI_DATETIME, &v));
 }
 
 papi_status_t
 papiAttributeListAddCollection(papi_attribute_t ***list, int flags,
-			char *name, papi_attribute_t **collection)
+    char *name, papi_attribute_t **collection)
 {
 	papi_attribute_value_t v;
 
 	v.collection = (papi_attribute_t **)collection;
 	return (papiAttributeListAddValue(list, flags, name,
-				PAPI_COLLECTION, &v));
+	    PAPI_COLLECTION, &v));
 }
 
 papi_status_t
 papiAttributeListAddMetadata(papi_attribute_t ***list, int flags,
-			char *name, papi_metadata_t metadata)
+    char *name, papi_metadata_t metadata)
 {
 	papi_attribute_value_t v;
 
 	v.metadata = metadata;
 	return (papiAttributeListAddValue(list, flags, name,
-				PAPI_METADATA, &v));
+	    PAPI_METADATA, &v));
 }
 
 papi_status_t
@@ -436,8 +429,8 @@ papiAttributeListGetNext(papi_attribute_t **list, void **iter)
 
 papi_status_t
 papiAttributeListGetValue(papi_attribute_t **list, void **iter,
-			char *name, papi_attribute_value_type_t type,
-			papi_attribute_value_t **value)
+    char *name, papi_attribute_value_type_t type,
+    papi_attribute_value_t **value)
 {
 	papi_attribute_value_t **tmp;
 	void *fodder = NULL;
@@ -476,7 +469,7 @@ papiAttributeListGetValue(papi_attribute_t **list, void **iter,
 
 papi_status_t
 papiAttributeListGetString(papi_attribute_t **list, void **iter,
-			char *name, char **vptr)
+    char *name, char **vptr)
 {
 	papi_status_t status;
 	papi_attribute_value_t *value = NULL;
@@ -485,7 +478,7 @@ papiAttributeListGetString(papi_attribute_t **list, void **iter,
 		return (PAPI_BAD_ARGUMENT);
 
 	status = papiAttributeListGetValue(list, iter, name,
-				PAPI_STRING, &value);
+	    PAPI_STRING, &value);
 	if (status == PAPI_OK)
 		*vptr = value->string;
 
@@ -494,7 +487,7 @@ papiAttributeListGetString(papi_attribute_t **list, void **iter,
 
 papi_status_t
 papiAttributeListGetInteger(papi_attribute_t **list, void **iter,
-			char *name, int *vptr)
+    char *name, int *vptr)
 {
 	papi_status_t status;
 	papi_attribute_value_t *value = NULL;
@@ -503,7 +496,7 @@ papiAttributeListGetInteger(papi_attribute_t **list, void **iter,
 		return (PAPI_BAD_ARGUMENT);
 
 	status = papiAttributeListGetValue(list, iter, name,
-				PAPI_INTEGER, &value);
+	    PAPI_INTEGER, &value);
 	if (status == PAPI_OK)
 		*vptr = value->integer;
 
@@ -512,7 +505,7 @@ papiAttributeListGetInteger(papi_attribute_t **list, void **iter,
 
 papi_status_t
 papiAttributeListGetBoolean(papi_attribute_t **list, void **iter,
-			char *name, char *vptr)
+    char *name, char *vptr)
 {
 	papi_status_t status;
 	papi_attribute_value_t *value = NULL;
@@ -521,7 +514,7 @@ papiAttributeListGetBoolean(papi_attribute_t **list, void **iter,
 		return (PAPI_BAD_ARGUMENT);
 
 	status = papiAttributeListGetValue(list, iter, name,
-				PAPI_BOOLEAN, &value);
+	    PAPI_BOOLEAN, &value);
 	if (status == PAPI_OK)
 		*vptr = value->boolean;
 
@@ -530,7 +523,7 @@ papiAttributeListGetBoolean(papi_attribute_t **list, void **iter,
 
 papi_status_t
 papiAttributeListGetRange(papi_attribute_t **list, void **iter,
-			char *name, int *min, int *max)
+    char *name, int *min, int *max)
 {
 	papi_status_t status;
 	papi_attribute_value_t *value = NULL;
@@ -539,7 +532,7 @@ papiAttributeListGetRange(papi_attribute_t **list, void **iter,
 		return (PAPI_BAD_ARGUMENT);
 
 	status = papiAttributeListGetValue(list, iter, name,
-				PAPI_RANGE, &value);
+	    PAPI_RANGE, &value);
 	if (status == PAPI_OK) {
 		*min = value->range.lower;
 		*max = value->range.upper;
@@ -550,8 +543,7 @@ papiAttributeListGetRange(papi_attribute_t **list, void **iter,
 
 papi_status_t
 papiAttributeListGetResolution(papi_attribute_t **list, void **iter,
-			char *name, int *x, int *y,
-			papi_resolution_unit_t *units)
+    char *name, int *x, int *y, papi_resolution_unit_t *units)
 {
 	papi_status_t status;
 	papi_attribute_value_t *value = NULL;
@@ -560,7 +552,7 @@ papiAttributeListGetResolution(papi_attribute_t **list, void **iter,
 		return (PAPI_BAD_ARGUMENT);
 
 	status = papiAttributeListGetValue(list, iter, name,
-				PAPI_RESOLUTION, &value);
+	    PAPI_RESOLUTION, &value);
 	if (status == PAPI_OK) {
 		*x = value->resolution.xres;
 		*y = value->resolution.yres;
@@ -572,7 +564,7 @@ papiAttributeListGetResolution(papi_attribute_t **list, void **iter,
 
 papi_status_t
 papiAttributeListGetDatetime(papi_attribute_t **list, void **iter,
-			char *name, time_t *dt)
+    char *name, time_t *dt)
 {
 	papi_status_t status;
 	papi_attribute_value_t *value = NULL;
@@ -581,7 +573,7 @@ papiAttributeListGetDatetime(papi_attribute_t **list, void **iter,
 		return (PAPI_BAD_ARGUMENT);
 
 	status = papiAttributeListGetValue(list, iter, name,
-				PAPI_DATETIME, &value);
+	    PAPI_DATETIME, &value);
 	if (status == PAPI_OK) {
 		*dt = value->datetime;
 	}
@@ -591,7 +583,7 @@ papiAttributeListGetDatetime(papi_attribute_t **list, void **iter,
 
 papi_status_t
 papiAttributeListGetCollection(papi_attribute_t **list, void **iter,
-			char *name, papi_attribute_t ***collection)
+    char *name, papi_attribute_t ***collection)
 {
 	papi_status_t status;
 	papi_attribute_value_t *value = NULL;
@@ -600,7 +592,7 @@ papiAttributeListGetCollection(papi_attribute_t **list, void **iter,
 		return (PAPI_BAD_ARGUMENT);
 
 	status = papiAttributeListGetValue(list, iter, name,
-				PAPI_COLLECTION, &value);
+	    PAPI_COLLECTION, &value);
 	if (status == PAPI_OK) {
 		*collection = value->collection;
 	}
@@ -610,7 +602,7 @@ papiAttributeListGetCollection(papi_attribute_t **list, void **iter,
 
 papi_status_t
 papiAttributeListGetMetadata(papi_attribute_t **list, void **iter,
-			char *name, papi_metadata_t *vptr)
+    char *name, papi_metadata_t *vptr)
 {
 	papi_status_t status;
 	papi_attribute_value_t *value = NULL;
@@ -619,7 +611,7 @@ papiAttributeListGetMetadata(papi_attribute_t **list, void **iter,
 		return (PAPI_BAD_ARGUMENT);
 
 	status = papiAttributeListGetValue(list, iter, name,
-				PAPI_METADATA, &value);
+	    PAPI_METADATA, &value);
 	if (status == PAPI_OK)
 		*vptr = value->metadata;
 
@@ -650,7 +642,7 @@ _process_value(char *string, char ***parts)
 		int	compiled;
 		regex_t re;
 	} types[] = {
-		{ PAPI_BOOLEAN,	   1, "^(true|false|yes|no)$", 0 }, 
+		{ PAPI_BOOLEAN,	   1, "^(true|false|yes|no)$", 0 },
 		{ PAPI_COLLECTION, 1, "^\\{(.+)\\}$", 0 },
 		/* PAPI_DATETIME is unsupported, too much like an integer */
 		{ PAPI_INTEGER,	   1, "^([+-]{0,1}[[:digit:]]+)$", 0 },
@@ -666,14 +658,14 @@ _process_value(char *string, char ***parts)
 
 		if (types[i].compiled == 0) {
 			(void) regcomp(&(types[i].re), types[i].expression,
-						REG_EXTENDED|REG_ICASE);
+			    REG_EXTENDED|REG_ICASE);
 			types[i].compiled = 1;
 		}
 		if (regexec(&(types[i].re), string, (size_t)types[i].vals,
-				matches, 0) == REG_NOMATCH)
+		    matches, 0) == REG_NOMATCH)
 			continue;
 
-		for (j = 0 ; j < types[i].vals; j++)
+		for (j = 0; j < types[i].vals; j++)
 			list_append(parts, regvalue(matches[j], string));
 		return (types[i].type);
 	}
@@ -684,12 +676,12 @@ _process_value(char *string, char ***parts)
 
 static void
 _add_attribute_value(papi_attribute_value_t ***list,
-			papi_attribute_value_type_t type,
-			papi_attribute_value_type_t dtype, char **parts)
+    papi_attribute_value_type_t type,
+    papi_attribute_value_type_t dtype, char **parts)
 {
 	papi_attribute_value_t *value = calloc(1, sizeof (*value));
 
-	switch(type) {
+	switch (type) {
 	case PAPI_STRING:
 		value->string = strdup(parts[0]);
 		list_append(list, value);
@@ -752,7 +744,7 @@ _add_attribute_value(papi_attribute_value_t ***list,
 
 static papi_status_t
 _papiAttributeFromStrings(papi_attribute_t ***list, int flags,
-			char *key, char **values)
+    char *key, char **values)
 {
 	int i;
 	papi_status_t result = PAPI_OK;
@@ -761,7 +753,7 @@ _papiAttributeFromStrings(papi_attribute_t ***list, int flags,
 	/* these are specified in the papi spec as ranges */
 	char *ranges[] = { "copies-supported", "job-impressions-supported",
 				"job-k-octets-supported",
-				"job-media-sheets-supported", "page-ranges", 
+				"job-media-sheets-supported", "page-ranges",
 				NULL };
 
 	if ((attr == NULL) || ((attr->name = strdup(key)) == NULL))
@@ -843,8 +835,8 @@ _parse_attribute_list(papi_attribute_t ***list, int flags, char *string)
 				} else {
 					/* value */
 					while ((*ptr != '\0') &&
-					       (*ptr != ',') &&
-					       (isspace(*ptr) == 0))
+					    (*ptr != ',') &&
+					    (isspace(*ptr) == 0))
 						ptr++;
 				}
 				if (*ptr == ',')
@@ -871,14 +863,13 @@ _parse_attribute_list(papi_attribute_t ***list, int flags, char *string)
 }
 
 papi_status_t
-papiAttributeListFromString(papi_attribute_t ***attrs,
-		int flags, char *string)
+papiAttributeListFromString(papi_attribute_t ***attrs, int flags, char *string)
 {
 	papi_status_t result = PAPI_OK;
 
 	if ((attrs != NULL) && (string != NULL) &&
 	    ((flags & ~(PAPI_ATTR_APPEND+PAPI_ATTR_REPLACE+PAPI_ATTR_EXCL))
-			== 0)) {
+	    == 0)) {
 		result = _parse_attribute_list(attrs, flags, string);
 	} else {
 		result = PAPI_BAD_ARGUMENT;
@@ -889,7 +880,7 @@ papiAttributeListFromString(papi_attribute_t ***attrs,
 
 static papi_status_t
 papiAttributeToString(papi_attribute_t *attribute, char *delim,
-		char *buffer, size_t buflen)
+    char *buffer, size_t buflen)
 {
 	papi_attribute_value_t **values = attribute->values;
 	int rc, i;
@@ -919,25 +910,25 @@ papiAttributeToString(papi_attribute_t *attribute, char *delim,
 			char string[24];
 
 			snprintf(string, sizeof (string), "%d",
-				values[i]->integer);
+			    values[i]->integer);
 			rc = strlcat(buffer, string, buflen);
 			}
 			break;
 		case PAPI_BOOLEAN:
 			if (values[1] != NULL)
-				rc = strlcat(buffer, (values[i]->boolean ?
-						"true" : "false"), buflen);
+				rc = strlcat(buffer, values[i]->boolean ?
+				    "true" : "false", buflen);
 			break;
 		case PAPI_RANGE: {
 			char string[24];
 
 			if (values[i]->range.lower == values[i]->range.upper)
 				snprintf(string, sizeof (string), "%d",
-						values[i]->range.lower);
+				    values[i]->range.lower);
 			else
 				snprintf(string, sizeof (string), "%d-%d",
-						values[i]->range.lower,
-						values[i]->range.upper);
+				    values[i]->range.lower,
+				    values[i]->range.upper);
 			rc = strlcat(buffer, string, buflen);
 			}
 			break;
@@ -945,10 +936,10 @@ papiAttributeToString(papi_attribute_t *attribute, char *delim,
 			char string[24];
 
 			snprintf(string, sizeof (string), "%dx%ddp%c",
-				values[i]->resolution.xres,
-				values[i]->resolution.yres,
-				(values[i]->resolution.units == PAPI_RES_PER_CM
-							? 'c' : 'i'));
+			    values[i]->resolution.xres,
+			    values[i]->resolution.yres,
+			    values[i]->resolution.units == PAPI_RES_PER_CM ?
+			    'c' : 'i');
 			rc = strlcat(buffer, string, buflen);
 			}
 			break;
@@ -966,7 +957,7 @@ papiAttributeToString(papi_attribute_t *attribute, char *delim,
 			char *string = alloca(buflen);
 
 			papiAttributeListToString(values[i]->collection,
-					delim, string, buflen);
+			    delim, string, buflen);
 			rc = strlcat(buffer, string, buflen);
 			}
 			break;
@@ -974,7 +965,7 @@ papiAttributeToString(papi_attribute_t *attribute, char *delim,
 			char string[32];
 
 			snprintf(string, sizeof (string), "unknown-type-0x%x",
-				attribute->type);
+			    attribute->type);
 			rc = strlcat(buffer, string, buflen);
 			}
 		}
@@ -991,7 +982,7 @@ papiAttributeToString(papi_attribute_t *attribute, char *delim,
 
 papi_status_t
 papiAttributeListToString(papi_attribute_t **attrs,
-		char *delim, char *buffer, size_t buflen)
+    char *delim, char *buffer, size_t buflen)
 {
 	papi_status_t status = PAPI_OK;
 	int i;
@@ -1037,12 +1028,10 @@ copy_attribute(papi_attribute_t ***list, papi_attribute_t *attribute)
 		return (PAPI_BAD_ARGUMENT);
 
 	for (status = papiAttributeListAddValue(list, PAPI_ATTR_EXCL,
-					attribute->name, attribute->type,
-					attribute->values[i]);
-	     ((status == PAPI_OK) && (attribute->values[i] != NULL));
-	     status = papiAttributeListAddValue(list, PAPI_ATTR_APPEND,
-					attribute->name, attribute->type,
-					attribute->values[i]))
+	    attribute->name, attribute->type, attribute->values[i]);
+	    ((status == PAPI_OK) && (attribute->values[i] != NULL));
+	    status = papiAttributeListAddValue(list, PAPI_ATTR_APPEND,
+	    attribute->name, attribute->type, attribute->values[i]))
 		i++;
 
 	return (status);
@@ -1062,7 +1051,7 @@ copy_attributes(papi_attribute_t ***result, papi_attribute_t **attributes)
 
 void
 split_and_copy_attributes(char **list, papi_attribute_t **attributes,
-		papi_attribute_t ***in, papi_attribute_t ***out)
+    papi_attribute_t ***in, papi_attribute_t ***out)
 {
 	int i;
 
@@ -1078,7 +1067,7 @@ split_and_copy_attributes(char **list, papi_attribute_t **attributes,
 
 void
 papiAttributeListPrint(FILE *fp, papi_attribute_t **attributes,
-		char *prefix_fmt, ...)
+    char *prefix_fmt, ...)
 {
 	char *prefix = NULL;
 	char *buffer = NULL;
@@ -1102,7 +1091,7 @@ papiAttributeListPrint(FILE *fp, papi_attribute_t **attributes,
 	if (attributes) {
 		size = 0;
 		while (papiAttributeListToString(attributes, prefix, buffer,
-						size) != PAPI_OK) {
+		    size) != PAPI_OK) {
 			size += 1024;
 			mem = realloc(buffer, size);
 			if (!mem) goto error;
@@ -1113,7 +1102,7 @@ papiAttributeListPrint(FILE *fp, papi_attribute_t **attributes,
 	fprintf(fp, "%s%s\n", prefix, buffer ? buffer : "");
 	fflush(fp);
 
- error:
+error:
 	free(newfmt);
 	free(prefix);
 	free(buffer);

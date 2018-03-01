@@ -11,6 +11,7 @@
 
 #
 # Copyright 2011 Nexenta Systems, Inc.  All rights reserved.
+# Copyright 2017 Joyent Inc.
 #
 
 PROG=iconv
@@ -22,7 +23,7 @@ OBJS = iconv_main.o iconv_list.o charmap.o parser.tab.o scanner.o
 
 SRCS	= $(OBJS:%.o=%.c)
 
-C99MODE=	$(C99_ENABLE)
+CSTD=	$(CSTD_GNU99)
 LDLIBS		+= -lcmdutils -lavl
 YFLAGS		= -d -b parser
 CPPFLAGS	+= -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE
@@ -44,6 +45,7 @@ $(PROG): $(OBJS)
 	$(POST_PROCESS)
 
 $(OBJS):	parser.tab.h
+$(PIFILES):	parser.tab.h
 
 parser.tab.c parser.tab.h: parser.y
 	$(YACC) $(YFLAGS) parser.y

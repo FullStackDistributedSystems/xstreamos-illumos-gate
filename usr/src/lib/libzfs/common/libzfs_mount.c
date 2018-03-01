@@ -24,6 +24,8 @@
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2014, 2016 by Delphix. All rights reserved.
  * Copyright 2016 Igor Kozhukhov <ikozhukhov@gmail.com>
+ * Copyright 2017 Joyent, Inc.
+ * Copyright 2017 RackTop Systems.
  */
 
 /*
@@ -91,7 +93,7 @@ zfs_share_type_t zfs_is_shared_proto(zfs_handle_t *, char **,
     zfs_share_proto_t);
 
 /*
- * The share protocols table must be in the same order as the zfs_share_prot_t
+ * The share protocols table must be in the same order as the zfs_share_proto_t
  * enum in libzfs_impl.h
  */
 typedef struct {
@@ -209,6 +211,7 @@ dir_is_empty_readdir(const char *dirname)
 	}
 
 	if ((dirp = fdopendir(dirfd)) == NULL) {
+		(void) close(dirfd);
 		return (B_TRUE);
 	}
 
@@ -662,8 +665,14 @@ _zfs_init_libshare(void)
 static int
 zfs_init_libshare_impl(libzfs_handle_t *zhandle, int service, void *arg)
 {
+	/*
+	 * libshare is either not installed or we're in a branded zone. The
+	 * rest of the wrapper functions around the libshare calls already
+	 * handle NULL function pointers, but we don't want the callers of
+	 * zfs_init_libshare() to fail prematurely if libshare is not available.
+	 */
 	if (_sa_init == NULL)
-		return (SA_CONFIG_ERR);
+		return (SA_OK);
 
 	/*
 	 * Attempt to refresh libshare. This is necessary if there was a cache
@@ -915,7 +924,7 @@ unshare_one(libzfs_handle_t *hdl, const char *name, const char *mountpoint,
 	if ((err = zfs_init_libshare_arg(hdl, SA_INIT_ONE_SHARE_FROM_NAME,
 	    (void *)name)) != SA_OK) {
 		free(mntpt);	/* don't need the copy anymore */
-		return (zfs_error_fmt(hdl, EZFS_UNSHARENFSFAILED,
+		return (zfs_error_fmt(hdl, proto_table[proto].p_unshare_err,
 		    dgettext(TEXT_DOMAIN, "cannot unshare '%s': %s"),
 		    name, _sa_errorstr(err)));
 	}
@@ -926,12 +935,13 @@ unshare_one(libzfs_handle_t *hdl, const char *name, const char *mountpoint,
 	if (share != NULL) {
 		err = zfs_sa_disable_share(share, proto_table[proto].p_name);
 		if (err != SA_OK) {
-			return (zfs_error_fmt(hdl, EZFS_UNSHARENFSFAILED,
+			return (zfs_error_fmt(hdl,
+			    proto_table[proto].p_unshare_err,
 			    dgettext(TEXT_DOMAIN, "cannot unshare '%s': %s"),
 			    name, _sa_errorstr(err)));
 		}
 	} else {
-		return (zfs_error_fmt(hdl, EZFS_UNSHARENFSFAILED,
+		return (zfs_error_fmt(hdl, proto_table[proto].p_unshare_err,
 		    dgettext(TEXT_DOMAIN, "cannot unshare '%s': not found"),
 		    name));
 	}

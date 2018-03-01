@@ -18,7 +18,9 @@
  * kernel. This code is only built to support the illumos kernel, it does
  * not support xen.
  */
+
 #include <sys/cdefs.h>
+#include <sys/stddef.h>
 
 #include <sys/param.h>
 #include <sys/exec.h>
@@ -28,6 +30,7 @@
 #include <sys/multiboot2.h>
 #include <stand.h>
 #include <stdbool.h>
+#include <machine/elf.h>
 #include "libzfs.h"
 
 #include "bootstrap.h"
@@ -35,12 +38,20 @@
 #include <machine/metadata.h>
 #include <machine/pc/bios.h>
 
+#define	SUPPORT_DHCP
+#include <bootp.h>
+
+#if !defined(EFI)
 #include "../i386/libi386/libi386.h"
 #include "../i386/btx/lib/btxv86.h"
-#include "pxe.h"
 
-extern BOOTPLAYER bootplayer;	/* dhcp info */
-extern void multiboot_tramp();
+#else
+#include <efi.h>
+#include <efilib.h>
+#include "loader_efi.h"
+
+static void (*trampoline)(uint32_t, struct relocator *, uint64_t);
+#endif
 
 #include "platform/acfreebsd.h"
 #include "acconfig.h"
@@ -54,8 +65,6 @@ extern ACPI_TABLE_RSDP *rsdp;
 static vm_offset_t last_addr;
 extern char bootprog_info[];
 
-extern int elf32_loadfile_raw(char *filename, u_int64_t dest,
-    struct preloaded_file **result, int multiboot);
 static int multiboot2_loadfile(char *, u_int64_t, struct preloaded_file **);
 static int multiboot2_exec(struct preloaded_file *);
 
@@ -275,6 +284,12 @@ multiboot2_loadfile(char *filename, u_int64_t dest,
 		fp->f_metadata = NULL;
 		error = 0;
 	} else {
+#if defined(EFI)
+		/* 32-bit kernel is not yet supported for EFI */
+		printf("32-bit kernel is not supported by UEFI loader\n");
+		error = ENOTSUP;
+		goto out;
+#endif
 		/* elf32_loadfile_raw will fill the attributes in fp. */
 		error = elf32_loadfile_raw(filename, dest, &fp, 2);
 		if (error != 0) {
@@ -294,128 +309,16 @@ multiboot2_loadfile(char *filename, u_int64_t dest,
 	}
 
 	setenv("kernelname", fp->f_name, 1);
+#if defined(EFI)
+	efi_addsmapdata(fp);
+#else
 	bios_addsmapdata(fp);
+#endif
 	*result = fp;
 out:
 	free(header_search);
 	close(fd);
 	return (error);
-}
-
-/*
- * Since for now we have no way to pass the environment to the kernel other than
- * through arguments, we need to take care of console setup.
- *
- * If the console is in mirror mode, set the kernel console from $os_console.
- * If it's unset, use first item from $console.
- * If $console is "ttyX", also pass $ttyX-mode, since it may have been set by
- * the user.
- *
- * In case of memory allocation errors, just return the original command line
- * so we have a chance of booting.
- *
- * On success, cl will be freed and a new, allocated command line string is
- * returned.
- */
-static char *
-update_cmdline(char *cl)
-{
-	char *os_console = getenv("os_console");
-	char *ttymode = NULL;
-	char mode[10];
-	char *tmp;
-	int len;
-
-	if (os_console == NULL) {
-		tmp = strdup(getenv("console"));
-		os_console = strsep(&tmp, ", ");
-	} else {
-		os_console = strdup(os_console);
-	}
-
-	if (os_console == NULL)
-		return (cl);
-
-	if (strncmp(os_console, "tty", 3) == 0) {
-		snprintf(mode, sizeof (mode), "%s-mode", os_console);
-		ttymode = getenv(mode);	/* We will never get NULL. */
-	}
-
-	if (strstr(cl, "-B") != NULL) {
-		len = strlen(cl) + 1;
-		/*
-		 * If console is not present, add it.
-		 * If console is ttyX, add ttymode.
-		 */
-		tmp = strstr(cl, "console");
-		if (tmp == NULL) {
-			len += 12;	/* " -B console=" */
-			len += strlen(os_console);
-			if (ttymode != NULL) {
-				len += 13;	/* ",ttyX-mode=\"\"" */
-				len += strlen(ttymode);
-			}
-			tmp = malloc(len);
-			if (tmp == NULL) {
-				free(os_console);
-				return (cl);
-			}
-			if (ttymode != NULL) {
-				snprintf(tmp, len,
-				    "%s -B console=%s,%s-mode=\"%s\"",
-				    cl, os_console, os_console, ttymode);
-			} else {
-				snprintf(tmp, len, "%s -B console=%s",
-				    cl, os_console);
-			}
-		} else {
-			/* console is set, do we need tty mode? */
-			tmp += 8;
-			if (strstr(tmp, "tty") == tmp) {
-				strncpy(mode, tmp, 4);
-				mode[4] = '\0';
-				strncat(mode, "-mode", 5);
-				ttymode = getenv(mode);
-			} else { /* nope */
-				free(os_console);
-				return (cl);
-			}
-			len = strlen(cl) + 1;
-			len += 13;	/* ",ttyX-mode=\"\"" */
-			len += strlen(ttymode);
-			tmp = malloc(len);
-			if (tmp == NULL) {
-				free(os_console);
-				return (cl);
-			}
-			snprintf(tmp, len, "%s,%s=\"%s\"", cl, mode, ttymode);
-		}
-	} else {
-		/*
-		 * no -B, so we need to add " -B console=%s[,ttyX-mode=\"%s\"]"
-		 */
-		len = strlen(cl) + 1;
-		len += 12;		/* " -B console=" */
-		len += strlen(os_console);
-		if (ttymode != NULL) {
-			len += 13;	/* ",ttyX-mode=\"\"" */
-			len += strlen(ttymode);
-		}
-		tmp = malloc(len);
-		if (tmp == NULL) {
-			free(os_console);
-			return (cl);
-		}
-		if (ttymode != NULL) {
-			snprintf(tmp, len, "%s -B console=%s,%s-mode=\"%s\"",
-			    cl, os_console, os_console, ttymode);
-		} else {
-			snprintf(tmp, len, "%s -B console=%s", cl, os_console);
-		}
-	}
-	free(os_console);
-	free(cl);
-	return (tmp);
 }
 
 /*
@@ -505,17 +408,194 @@ find_property_value(const char *cmd, const char *name, const char **value,
 }
 
 /*
+ * If command line has " -B ", insert property after "-B ", otherwise
+ * append to command line.
+ */
+static char *
+insert_cmdline(const char *head, const char *prop)
+{
+	const char *prop_opt = " -B ";
+	char *cmdline, *tail;
+	int len = 0;
+
+	tail = strstr(head, prop_opt);
+	if (tail != NULL) {
+		ptrdiff_t diff;
+		tail += strlen(prop_opt);
+		diff = tail - head;
+		if (diff >= INT_MAX)
+			return (NULL);
+		len = (int)diff;
+	}
+
+	if (tail == NULL)
+		asprintf(&cmdline, "%s%s%s", head, prop_opt, prop);
+	else
+		asprintf(&cmdline, "%.*s%s,%s", len, head, prop, tail);
+
+	return (cmdline);
+}
+
+/*
+ * Since we have no way to pass the environment to the mb1 kernel other than
+ * through arguments, we need to take care of console setup.
+ *
+ * If the console is in mirror mode, set the kernel console from $os_console.
+ * If it's unset, use first item from $console.
+ * If $console is "ttyX", also pass $ttyX-mode, since it may have been set by
+ * the user.
+ *
+ * In case of memory allocation errors, just return the original command line
+ * so we have a chance of booting.
+ *
+ * On success, cl will be freed and a new, allocated command line string is
+ * returned.
+ *
+ * For the mb2 kernel, we only set command line console if os_console is set.
+ * We can not overwrite console in the environment, as it can disrupt the
+ * loader console messages, and we do not want to deal with the os_console
+ * in the kernel.
+ */
+static char *
+update_cmdline(char *cl, bool mb2)
+{
+	char *os_console = getenv("os_console");
+	char *ttymode = NULL;
+	char mode[10];
+	char *tmp;
+	const char *prop;
+	size_t plen;
+	int rv;
+
+	if (mb2 == true && os_console == NULL)
+		return (cl);
+
+	if (os_console == NULL) {
+		tmp = strdup(getenv("console"));
+		os_console = strsep(&tmp, ", ");
+	} else {
+		os_console = strdup(os_console);
+	}
+
+	if (os_console == NULL)
+		return (cl);
+
+	if (mb2 == false && strncmp(os_console, "tty", 3) == 0) {
+		snprintf(mode, sizeof (mode), "%s-mode", os_console);
+		/*
+		 * The ttyX-mode variable is set by our serial console
+		 * driver for ttya-ttyd. However, since the os_console
+		 * values are not verified, it is possible we get bogus
+		 * name and no mode variable. If so, we do not set console
+		 * property and let the kernel use defaults.
+		 */
+		if ((ttymode = getenv(mode)) == NULL)
+			return (cl);
+	}
+
+	rv = find_property_value(cl, "console", &prop, &plen);
+	if (rv != 0 && rv != ENOENT) {
+		free(os_console);
+		return (cl);
+	}
+
+	/* If console is set and this is MB2 boot, we are done. */
+	if (rv == 0 && mb2 == true) {
+		free(os_console);
+		return (cl);
+	}
+
+	/* If console is set, do we need to set tty mode? */
+	if (rv == 0) {
+		const char *ttyp = NULL;
+		size_t ttylen;
+
+		free(os_console);
+		os_console = NULL;
+		*mode = '\0';
+		if (strncmp(prop, "tty", 3) == 0 && plen == 4) {
+			strncpy(mode, prop, plen);
+			mode[plen] = '\0';
+			strncat(mode, "-mode", 5);
+			find_property_value(cl, mode, &ttyp, &ttylen);
+		}
+
+		if (*mode != '\0' && ttyp == NULL)
+			ttymode = getenv(mode);
+		else
+			return (cl);
+	}
+
+	/* Build updated command line. */
+	if (os_console != NULL) {
+		char *propstr;
+
+		asprintf(&propstr, "console=%s", os_console);
+		free(os_console);
+		if (propstr == NULL) {
+			return (cl);
+		}
+
+		tmp = insert_cmdline(cl, propstr);
+                free(propstr);
+                if (tmp == NULL)
+			return (cl);
+
+                free(cl);
+                cl = tmp;
+	}
+	if (ttymode != NULL) {
+		char *propstr;
+
+		asprintf(&propstr, "%s=\"%s\"", mode, ttymode);
+		if (propstr == NULL)
+			return (cl);
+
+		tmp = insert_cmdline(cl, propstr);
+                free(propstr);
+                if (tmp == NULL)
+			return (cl);
+                free(cl);
+                cl = tmp;
+	}
+
+	return (cl);
+}
+
+/*
  * Build the kernel command line. Shared function between MB1 and MB2.
+ *
+ * In both cases, if fstype is set and is not zfs, we do not set up
+ * zfs-bootfs property. But we set kernel file name and options.
+ *
+ * For the MB1, we only can pass properties on command line, so
+ * we will set console, ttyX-mode (for serial console) and zfs-bootfs.
+ *
+ * For the MB2, we can pass properties in environment, but if os_console
+ * is set in environment, we need to add console property on the kernel
+ * command line.
+ *
+ * The console properties are managed in update_cmdline().
  */
 int
 mb_kernel_cmdline(struct preloaded_file *fp, struct devdesc *rootdev,
     char **line)
 {
 	const char *fs = getenv("fstype");
-	char *cmdline = NULL;
+	char *cmdline;
 	size_t len;
 	bool zfs_root = false;
-	int rv = 0;
+	bool mb2;
+	int rv;
+
+	/*
+	 * 64-bit kernel has aout header, 32-bit kernel is elf, and the
+	 * type strings are different. Lets just search for "multiboot2".
+	 */
+	if (strstr(fp->f_type, "multiboot2") == NULL)
+		mb2 = false;
+	else
+		mb2 = true;
 
 	if (rootdev->d_type == DEVT_ZFS)
 		zfs_root = true;
@@ -529,44 +609,36 @@ mb_kernel_cmdline(struct preloaded_file *fp, struct devdesc *rootdev,
 	 * reset zfs_root if needed.
 	 */
 	rv = find_property_value(fp->f_args, "fstype", &fs, &len);
-	switch (rv) {
-	case EINVAL:		/* invalid command line */
-	default:
+	if (rv != 0 && rv != ENOENT)
 		return (rv);
-	case ENOENT:		/* fall through */
-	case 0:
-		break;
-	}
 
 	if (fs != NULL && strncmp(fs, "zfs", len) != 0)
 		zfs_root = false;
 
-	len = strlen(fp->f_name) + 1;
-
-	if (fp->f_args != NULL)
-		len += strlen(fp->f_args) + 1;
-
+	/* zfs_bootfs() will set the environment, it must be called. */
 	if (zfs_root == true)
-		len += 3 + strlen(zfs_bootfs(rootdev)) + 1;
+		fs = zfs_bootfs(rootdev);
 
-	cmdline = malloc(len);
+	if (fp->f_args == NULL)
+		cmdline = strdup(fp->f_name);
+	else
+		asprintf(&cmdline, "%s %s", fp->f_name, fp->f_args);
+
 	if (cmdline == NULL)
 		return (ENOMEM);
 
-	if (zfs_root == true) {
-		if (fp->f_args != NULL) {
-			snprintf(cmdline, len, "%s %s -B %s", fp->f_name,
-			    fp->f_args, zfs_bootfs(rootdev));
-		} else {
-			snprintf(cmdline, len, "%s -B %s", fp->f_name,
-			    zfs_bootfs(rootdev));
-		}
-	} else if (fp->f_args != NULL)
-		snprintf(cmdline, len, "%s %s", fp->f_name, fp->f_args);
-	else
-		snprintf(cmdline, len, "%s", fp->f_name);
+	/* Append zfs-bootfs for MB1 command line. */
+	if (mb2 == false && zfs_root == true) {
+		char *tmp;
 
-	*line =  update_cmdline(cmdline);
+		tmp = insert_cmdline(cmdline, fs);
+		free(cmdline);
+		if (tmp == NULL)
+			return (ENOMEM);
+		cmdline = tmp;
+	}
+
+	*line = update_cmdline(cmdline, mb2);
 	return (0);
 }
 
@@ -602,6 +674,42 @@ module_size(struct preloaded_file *fp)
 	return (size);
 }
 
+#if defined (EFI)
+/*
+ * Calculate size for UEFI memory map tag.
+ */
+static int
+efimemmap_size(void)
+{
+	UINTN size, cur_size, desc_size;
+	EFI_MEMORY_DESCRIPTOR *mmap;
+	EFI_STATUS ret;
+
+	size = EFI_PAGE_SIZE;		/* Start with 4k. */
+	while (1) {
+		cur_size = size;
+		mmap = malloc(cur_size);
+		if (mmap == NULL)
+			return (0);
+		ret = BS->GetMemoryMap(&cur_size, mmap, NULL, &desc_size, NULL);
+		free(mmap);
+		if (ret == EFI_SUCCESS)
+			break;
+		if (ret == EFI_BUFFER_TOO_SMALL) {
+			if (size < cur_size)
+				size = cur_size;
+			size += (EFI_PAGE_SIZE);
+		} else
+			return (0);
+	}
+
+	/* EFI MMAP will grow when we allocate MBI, set some buffer. */
+	size += (3 << EFI_PAGE_SHIFT);
+	size = roundup(size, desc_size);
+	return (sizeof (multiboot_tag_efi_mmap_t) + size);
+}
+#endif
+
 /*
  * Calculate size for bios smap tag.
  */
@@ -630,15 +738,28 @@ mbi_size(struct preloaded_file *fp, char *cmdline)
 	size = roundup2(size, MULTIBOOT_TAG_ALIGN);
 	size += sizeof (multiboot_tag_string_t) + strlen(bootprog_info) + 1;
 	size = roundup2(size, MULTIBOOT_TAG_ALIGN);
+#if !defined (EFI)
 	size += sizeof (multiboot_tag_basic_meminfo_t);
 	size = roundup2(size, MULTIBOOT_TAG_ALIGN);
+#endif
 	size += module_size(fp);
 	size = roundup2(size, MULTIBOOT_TAG_ALIGN);
+#if defined (EFI)
+	size += sizeof (multiboot_tag_efi64_t);
+	size = roundup2(size, MULTIBOOT_TAG_ALIGN);
+	size += efimemmap_size();
+	size = roundup2(size, MULTIBOOT_TAG_ALIGN);
+
+	if (have_framebuffer == true) {
+		size += sizeof (multiboot_tag_framebuffer_t);
+		size = roundup2(size, MULTIBOOT_TAG_ALIGN);
+	}
+#endif
 	size += biossmap_size(fp);
 	size = roundup2(size, MULTIBOOT_TAG_ALIGN);
 
-	if (strstr(getenv("loaddev"), "pxe") != NULL) {
-		size += sizeof(multiboot_tag_network_t) + sizeof (BOOTPLAYER);
+	if (bootp_response != NULL) {
+		size += sizeof(multiboot_tag_network_t) + bootp_response_size;
 		size = roundup2(size, MULTIBOOT_TAG_ALIGN);
 	}
 
@@ -669,8 +790,19 @@ multiboot2_exec(struct preloaded_file *fp)
 	int rootfs = 0;
 	size_t size;
 	struct bios_smap *smap;
+#if defined (EFI)
+	multiboot_tag_module_t *module, *mp;
+	EFI_MEMORY_DESCRIPTOR *map;
+	UINTN map_size, desc_size;
+	struct relocator *relocator;
+	struct chunk_head *head;
+	struct chunk *chunk;
 	vm_offset_t tmp;
+
+	efi_getdev((void **)(&rootdev), NULL, NULL);
+#else
 	i386_getdev((void **)(&rootdev), NULL, NULL);
+#endif
 
 	error = EINVAL;
 	if (rootdev == NULL) {
@@ -702,10 +834,30 @@ multiboot2_exec(struct preloaded_file *fp)
 	size = mbi_size(fp, cmdline);	/* Get the size for MBI. */
 
 	/* Set up the base for mb_malloc. */
-	for (mfp = fp; mfp->f_next != NULL; mfp = mfp->f_next);
+	i = 0;
+	for (mfp = fp; mfp->f_next != NULL; mfp = mfp->f_next)
+		i++;
 
+#if defined (EFI)
+	/* We need space for kernel + MBI + # modules */
+	num = (EFI_PAGE_SIZE - offsetof(struct relocator, rel_chunklist)) /
+	    sizeof (struct chunk);
+	if (i + 2 >= num) {
+		printf("Too many modules, do not have space for relocator.\n");
+		error = ENOMEM;
+		goto error;
+	}
+
+	last_addr = efi_loadaddr(LOAD_MEM, &size, mfp->f_addr + mfp->f_size);
+	mbi = (multiboot2_info_header_t *)last_addr;
+	if (mbi == NULL) {
+		error = ENOMEM;
+		goto error;
+	}
+	last_addr = (vm_offset_t)mbi->mbi_tags;
+#else
 	/* Start info block from the new page. */
-	last_addr = roundup(mfp->f_addr + mfp->f_size, MULTIBOOT_MOD_ALIGN);
+	last_addr = i386_loadaddr(LOAD_MEM, &size, mfp->f_addr + mfp->f_size);
 
 	/* Do we have space for multiboot info? */
 	if (last_addr + size >= memtop_copyin) {
@@ -715,6 +867,7 @@ multiboot2_exec(struct preloaded_file *fp)
 
 	mbi = (multiboot2_info_header_t *)PTOV(last_addr);
 	last_addr = (vm_offset_t)mbi->mbi_tags;
+#endif	/* EFI */
 
 	{
 		multiboot_tag_string_t *tag;
@@ -739,6 +892,8 @@ multiboot2_exec(struct preloaded_file *fp)
 		    strlen(bootprog_info) + 1);
 	}
 
+#if !defined (EFI)
+	/* Only set in case of BIOS. */
 	{
 		multiboot_tag_basic_meminfo_t *tag;
 		tag = (multiboot_tag_basic_meminfo_t *)
@@ -749,6 +904,7 @@ multiboot2_exec(struct preloaded_file *fp)
 		tag->mb_mem_lower = bios_basemem / 1024;
 		tag->mb_mem_upper = bios_extmem / 1024;
 	}
+#endif
 
 	num = 0;
 	for (mfp = fp->f_next; mfp != NULL; mfp = mfp->f_next) {
@@ -770,8 +926,12 @@ multiboot2_exec(struct preloaded_file *fp)
 	 * - Modules are aligned to page boundary.
 	 * - MBI is aligned to page boundary.
 	 * - Set the tmp to point to physical address of the first module.
+	 * - tmp != mfp->f_addr only in case of EFI.
 	 */
-	tmp = roundup2(load_addr + fp->f_size, MULTIBOOT_MOD_ALIGN);
+#if defined (EFI)
+	tmp = roundup2(load_addr + fp->f_size + 1, MULTIBOOT_MOD_ALIGN);
+	module = (multiboot_tag_module_t *)last_addr;
+#endif
 
 	for (mfp = fp->f_next; mfp != NULL; mfp = mfp->f_next) {
 		multiboot_tag_module_t *tag;
@@ -798,9 +958,17 @@ multiboot2_exec(struct preloaded_file *fp)
 
 		tag->mb_type = MULTIBOOT_TAG_TYPE_MODULE;
 		tag->mb_size = sizeof (*tag) + num;
-		tag->mb_mod_start = tmp;
-		tag->mb_mod_end = tmp + mfp->f_size;
-		tmp = roundup2(tag->mb_mod_end, MULTIBOOT_MOD_ALIGN);
+#if defined (EFI)
+		/*
+		 * We can assign module addresses only after BS have been
+		 * switched off.
+		 */
+		tag->mb_mod_start = 0;
+		tag->mb_mod_end = mfp->f_size;
+#else
+		tag->mb_mod_start = mfp->f_addr;
+		tag->mb_mod_end = mfp->f_addr + mfp->f_size;
+#endif
 		memcpy(tag->mb_cmdline, cmdline, num);
 		free(cmdline);
 		cmdline = NULL;
@@ -839,35 +1007,161 @@ multiboot2_exec(struct preloaded_file *fp)
 		}
 	}
 
-	if (strstr(getenv("loaddev"), "pxe") != NULL) {
+	if (bootp_response != NULL) {
 		multiboot_tag_network_t *tag;
 		tag = (multiboot_tag_network_t *)
-		    mb_malloc(sizeof(*tag) + sizeof (BOOTPLAYER));
+		    mb_malloc(sizeof(*tag) + bootp_response_size);
 
 		tag->mb_type = MULTIBOOT_TAG_TYPE_NETWORK;
-		tag->mb_size = sizeof(*tag) + sizeof (BOOTPLAYER);
-		memcpy(tag->mb_dhcpack, &bootplayer, sizeof (BOOTPLAYER));
+		tag->mb_size = sizeof(*tag) + bootp_response_size;
+		memcpy(tag->mb_dhcpack, bootp_response, bootp_response_size);
 	}
 
 	if (rsdp != NULL) {
 		multiboot_tag_new_acpi_t *ntag;
 		multiboot_tag_old_acpi_t *otag;
-		int size;
+		uint32_t tsize;
 
 		if (rsdp->Revision == 0) {
-			size = sizeof (*otag) + rsdp->Length;
-			otag = (multiboot_tag_old_acpi_t *)mb_malloc(size);
+			tsize = sizeof (*otag) + sizeof (ACPI_RSDP_COMMON);
+			otag = (multiboot_tag_old_acpi_t *)mb_malloc(tsize);
 			otag->mb_type = MULTIBOOT_TAG_TYPE_ACPI_OLD;
-			otag->mb_size = size;
+			otag->mb_size = tsize;
 			memcpy(otag->mb_rsdp, rsdp, sizeof (ACPI_RSDP_COMMON));
 		} else {
-			size = sizeof (*ntag) + rsdp->Length;
-			ntag = (multiboot_tag_new_acpi_t *)mb_malloc(size);
+			tsize = sizeof (*ntag) + rsdp->Length;
+			ntag = (multiboot_tag_new_acpi_t *)mb_malloc(tsize);
 			ntag->mb_type = MULTIBOOT_TAG_TYPE_ACPI_NEW;
-			ntag->mb_size = size;
+			ntag->mb_size = tsize;
 			memcpy(ntag->mb_rsdp, rsdp, rsdp->Length);
 		}
 	}
+
+#if defined (EFI)
+	{
+		multiboot_tag_efi64_t *tag;
+		tag = (multiboot_tag_efi64_t *)
+		    mb_malloc(sizeof (*tag));
+
+		tag->mb_type = MULTIBOOT_TAG_TYPE_EFI64;
+		tag->mb_size = sizeof (*tag);
+		tag->mb_pointer = (uint64_t)(uintptr_t)ST;
+	}
+
+	if (have_framebuffer == true) {
+		multiboot_tag_framebuffer_t *tag;
+		int bpp;
+		struct efi_fb fb;
+		extern int efi_find_framebuffer(struct efi_fb *efifb);
+
+		if (efi_find_framebuffer(&fb) == 0) {
+			tag = (multiboot_tag_framebuffer_t *)
+			    mb_malloc(sizeof (*tag));
+
+			/*
+			 * We assume contiguous color bitmap, and use
+			 * the msb for bits per pixel calculation.
+			 */
+			bpp = fls(fb.fb_mask_red | fb.fb_mask_green |
+			    fb.fb_mask_blue | fb.fb_mask_reserved);
+
+			tag->framebuffer_common.mb_type =
+			    MULTIBOOT_TAG_TYPE_FRAMEBUFFER;
+			tag->framebuffer_common.mb_size =
+			    sizeof (multiboot_tag_framebuffer_t);
+			tag->framebuffer_common.framebuffer_addr = fb.fb_addr;
+			tag->framebuffer_common.framebuffer_width = fb.fb_width;
+			tag->framebuffer_common.framebuffer_height =
+			    fb.fb_height;
+			tag->framebuffer_common.framebuffer_bpp = bpp;
+			/*
+			 * Pitch is stride * bytes per pixel.
+			 * Stride is pixels per scanline.
+			 */
+			tag->framebuffer_common.framebuffer_pitch =
+			    fb.fb_stride * (bpp / 8);
+			tag->framebuffer_common.framebuffer_type =
+			    MULTIBOOT_FRAMEBUFFER_TYPE_RGB;
+			tag->framebuffer_common.mb_reserved = 0;
+
+			/*
+			 * The RGB or BGR color ordering.
+			 */
+			if (fb.fb_mask_red & 0x000000ff) {
+				tag->u.fb2.framebuffer_red_field_position = 0;
+				tag->u.fb2.framebuffer_blue_field_position = 16;
+			} else {
+				tag->u.fb2.framebuffer_red_field_position = 16;
+				tag->u.fb2.framebuffer_blue_field_position = 0;
+			}
+			tag->u.fb2.framebuffer_red_mask_size = 8;
+			tag->u.fb2.framebuffer_green_field_position = 8;
+			tag->u.fb2.framebuffer_green_mask_size = 8;
+			tag->u.fb2.framebuffer_blue_mask_size = 8;
+		}
+	}
+
+	/* Leave EFI memmap last as we will also switch off the BS. */
+	{
+		multiboot_tag_efi_mmap_t *tag;
+		UINTN key;
+		EFI_STATUS status;
+
+		tag = (multiboot_tag_efi_mmap_t *)
+		    mb_malloc(sizeof (*tag));
+
+		map_size = 0;
+		status = BS->GetMemoryMap(&map_size,
+		    (EFI_MEMORY_DESCRIPTOR *)tag->mb_efi_mmap, &key,
+		    &desc_size, &tag->mb_descr_vers);
+		if (status != EFI_BUFFER_TOO_SMALL) {
+			error = EINVAL;
+			goto error;
+		}
+		status = BS->GetMemoryMap(&map_size,
+		    (EFI_MEMORY_DESCRIPTOR *)tag->mb_efi_mmap, &key,
+		    &desc_size, &tag->mb_descr_vers);
+		if (EFI_ERROR(status)) {
+			error = EINVAL;
+			goto error;
+		}
+		tag->mb_type = MULTIBOOT_TAG_TYPE_EFI_MMAP;
+		tag->mb_size = sizeof (*tag) + map_size;
+		tag->mb_descr_size = (uint32_t) desc_size;
+
+		/*
+		 * Find relocater pages. We assume we have free pages
+		 * below kernel load address.
+		 * In this version we are using 5 pages:
+		 * relocator data, trampoline, copy, memmove, stack.
+		 */
+		for (i = 0, map = (EFI_MEMORY_DESCRIPTOR *)tag->mb_efi_mmap;
+		    i < map_size / desc_size;
+		    i++, map = NextMemoryDescriptor(map, desc_size)) {
+			if (map->PhysicalStart == 0)
+				continue;
+			if (map->Type != EfiConventionalMemory)
+				continue;
+			if (map->PhysicalStart < load_addr &&
+			    map->NumberOfPages > 5)
+				break;
+		}
+		if (map->PhysicalStart == 0)
+			panic("Could not find memory for relocater\n");
+
+		if (keep_bs == 0) {
+			status = BS->ExitBootServices(IH, key);
+			if (EFI_ERROR(status)) {
+				printf("Call to ExitBootServices failed\n");
+				error = EINVAL;
+				goto error;
+			}
+		}
+
+		last_addr += map_size;
+		last_addr = roundup2(last_addr, MULTIBOOT_TAG_ALIGN);
+	}
+#endif
 
 	/*
 	 * MB tag list end marker.
@@ -882,13 +1176,78 @@ multiboot2_exec(struct preloaded_file *fp)
 	mbi->mbi_total_size = last_addr - (vm_offset_t)mbi;
 	mbi->mbi_reserved = 0;
 
+#if defined (EFI)
+	/* At this point we have load_addr pointing to kernel load
+	 * address, module list in MBI having physical addresses,
+	 * module list in fp having logical addresses and tmp pointing to
+	 * physical address for MBI.
+	 * Now we must move all pieces to place and start the kernel.
+	 */
+	relocator = (struct relocator *)(uintptr_t)map->PhysicalStart;
+	head = &relocator->rel_chunk_head;
+	STAILQ_INIT(head);
+
+	i = 0;
+	chunk = &relocator->rel_chunklist[i++];
+	chunk->chunk_vaddr = fp->f_addr;
+	chunk->chunk_paddr = load_addr;
+	chunk->chunk_size = fp->f_size;
+
+	STAILQ_INSERT_TAIL(head, chunk, chunk_next);
+
+	mp = module;
+	for (mfp = fp->f_next; mfp != NULL; mfp = mfp->f_next) {
+		chunk = &relocator->rel_chunklist[i++];
+		chunk->chunk_vaddr = mfp->f_addr;
+
+		/*
+		 * fix the mb_mod_start and mb_mod_end.
+		 */
+		mp->mb_mod_start = efi_physaddr(module, tmp, map,
+		    map_size / desc_size, desc_size, mp->mb_mod_end);
+		if (mp->mb_mod_start == 0)
+			panic("Could not find memory for module\n");
+
+		mp->mb_mod_end += mp->mb_mod_start;
+		chunk->chunk_paddr = mp->mb_mod_start;
+		chunk->chunk_size = mfp->f_size;
+		STAILQ_INSERT_TAIL(head, chunk, chunk_next);
+
+		mp = (multiboot_tag_module_t *)
+		    roundup2((uintptr_t)mp + mp->mb_size,
+		    MULTIBOOT_TAG_ALIGN);
+	}
+	chunk = &relocator->rel_chunklist[i++];
+	chunk->chunk_vaddr = (EFI_VIRTUAL_ADDRESS)mbi;
+	chunk->chunk_paddr = efi_physaddr(module, tmp, map,
+		    map_size / desc_size, desc_size, mbi->mbi_total_size);
+	chunk->chunk_size = mbi->mbi_total_size;
+	STAILQ_INSERT_TAIL(head, chunk, chunk_next);
+
+	trampoline = (void *)(uintptr_t)relocator + EFI_PAGE_SIZE;
+	memmove(trampoline, multiboot_tramp, EFI_PAGE_SIZE);
+
+	relocator->rel_copy = (uintptr_t)trampoline + EFI_PAGE_SIZE;
+	memmove((void *)relocator->rel_copy, efi_copy_finish, EFI_PAGE_SIZE);
+
+	relocator->rel_memmove = (uintptr_t)relocator->rel_copy + EFI_PAGE_SIZE;
+	memmove((void *)relocator->rel_memmove, memmove, EFI_PAGE_SIZE);
+	relocator->rel_stack = relocator->rel_memmove + EFI_PAGE_SIZE - 8;
+
+	trampoline(MULTIBOOT2_BOOTLOADER_MAGIC, relocator, entry_addr);
+#else
 	dev_cleanup();
 	__exec((void *)VTOP(multiboot_tramp), MULTIBOOT2_BOOTLOADER_MAGIC,
 	    (void *)entry_addr, (void *)VTOP(mbi));
+#endif
 	panic("exec returned");
 
 error:
 	if (cmdline != NULL)
 		free(cmdline);
+#if defined (EFI)
+	if (mbi != NULL)
+		efi_free_loadaddr((uint64_t)mbi, EFI_SIZE_TO_PAGES(size));
+#endif
 	return (error);
 }

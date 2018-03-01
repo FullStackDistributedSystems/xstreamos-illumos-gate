@@ -20,9 +20,10 @@
  */
 
 /*
- * Copyright (c) 2012, 2014 by Delphix. All rights reserved.
+ * Copyright (c) 2012, 2017 by Delphix. All rights reserved.
  * Copyright (c) 2013 Steven Hartland. All rights reserved.
  * Copyright (c) 2014 Integros [integros.com]
+ * Copyright 2017 RackTop Systems.
  */
 
 /*
@@ -141,7 +142,12 @@ lzc_ioctl(zfs_ioc_t ioc, const char *name,
 
 	if (resultp != NULL) {
 		*resultp = NULL;
-		zc.zc_nvlist_dst_size = MAX(size * 2, 128 * 1024);
+		if (ioc == ZFS_IOC_CHANNEL_PROGRAM) {
+			zc.zc_nvlist_dst_size = fnvlist_lookup_uint64(source,
+			    ZCP_ARG_MEMLIMIT);
+		} else {
+			zc.zc_nvlist_dst_size = MAX(size * 2, 128 * 1024);
+		}
 		zc.zc_nvlist_dst = (uint64_t)(uintptr_t)
 		    malloc(zc.zc_nvlist_dst_size);
 		if (zc.zc_nvlist_dst == NULL) {
@@ -151,7 +157,15 @@ lzc_ioctl(zfs_ioc_t ioc, const char *name,
 	}
 
 	while (ioctl(g_fd, ioc, &zc) != 0) {
-		if (errno == ENOMEM && resultp != NULL) {
+		/*
+		 * If ioctl exited with ENOMEM, we retry the ioctl after
+		 * increasing the size of the destination nvlist.
+		 *
+		 * Channel programs that exit with ENOMEM ran over the
+		 * lua memory sandbox; they should not be retried.
+		 */
+		if (errno == ENOMEM && resultp != NULL &&
+		    ioc != ZFS_IOC_CHANNEL_PROGRAM) {
 			free((void *)(uintptr_t)zc.zc_nvlist_dst);
 			zc.zc_nvlist_dst_size *= 2;
 			zc.zc_nvlist_dst = (uint64_t)(uintptr_t)
@@ -199,6 +213,38 @@ lzc_clone(const char *fsname, const char *origin,
 	if (props != NULL)
 		fnvlist_add_nvlist(args, "props", props);
 	error = lzc_ioctl(ZFS_IOC_CLONE, fsname, args, NULL);
+	nvlist_free(args);
+	return (error);
+}
+
+int
+lzc_promote(const char *fsname, char *snapnamebuf, int snapnamelen)
+{
+	/*
+	 * The promote ioctl is still legacy, so we need to construct our
+	 * own zfs_cmd_t rather than using lzc_ioctl().
+	 */
+	zfs_cmd_t zc = { 0 };
+
+	ASSERT3S(g_refcount, >, 0);
+	VERIFY3S(g_fd, !=, -1);
+
+	(void) strlcpy(zc.zc_name, fsname, sizeof (zc.zc_name));
+	if (ioctl(g_fd, ZFS_IOC_PROMOTE, &zc) != 0) {
+		int error = errno;
+		if (error == EEXIST && snapnamebuf != NULL)
+			(void) strlcpy(snapnamebuf, zc.zc_string, snapnamelen);
+		return (error);
+	}
+	return (0);
+}
+
+int
+lzc_remap(const char *fsname)
+{
+	int error;
+	nvlist_t *args = fnvlist_alloc();
+	error = lzc_ioctl(ZFS_IOC_REMAP, fsname, args, NULL);
 	nvlist_free(args);
 	return (error);
 }
@@ -330,7 +376,7 @@ lzc_exists(const char *dataset)
 {
 	/*
 	 * The objset_stats ioctl is still legacy, so we need to construct our
-	 * own zfs_cmd_t rather than using zfsc_ioctl().
+	 * own zfs_cmd_t rather than using lzc_ioctl().
 	 */
 	zfs_cmd_t zc = { 0 };
 
@@ -705,6 +751,9 @@ lzc_receive_with_header(const char *snapname, nvlist_t *props,
  * Roll back this filesystem or volume to its most recent snapshot.
  * If snapnamebuf is not NULL, it will be filled in with the name
  * of the most recent snapshot.
+ * Note that the latest snapshot may change if a new one is concurrently
+ * created or the current one is destroyed.  lzc_rollback_to can be used
+ * to roll back to a specific latest snapshot.
  *
  * Return 0 on success or an errno on failure.
  */
@@ -724,6 +773,27 @@ lzc_rollback(const char *fsname, char *snapnamebuf, int snapnamelen)
 	}
 	nvlist_free(result);
 
+	return (err);
+}
+
+/*
+ * Roll back this filesystem or volume to the specified snapshot,
+ * if possible.
+ *
+ * Return 0 on success or an errno on failure.
+ */
+int
+lzc_rollback_to(const char *fsname, const char *snapname)
+{
+	nvlist_t *args;
+	nvlist_t *result;
+	int err;
+
+	args = fnvlist_alloc();
+	fnvlist_add_string(args, "target", snapname);
+	err = lzc_ioctl(ZFS_IOC_ROLLBACK, fsname, args, &result);
+	nvlist_free(args);
+	nvlist_free(result);
 	return (err);
 }
 
@@ -819,4 +889,84 @@ lzc_destroy_bookmarks(nvlist_t *bmarks, nvlist_t **errlist)
 	error = lzc_ioctl(ZFS_IOC_DESTROY_BOOKMARKS, pool, bmarks, errlist);
 
 	return (error);
+}
+
+static int
+lzc_channel_program_impl(const char *pool, const char *program, boolean_t sync,
+    uint64_t instrlimit, uint64_t memlimit, nvlist_t *argnvl, nvlist_t **outnvl)
+{
+	int error;
+	nvlist_t *args;
+
+	args = fnvlist_alloc();
+	fnvlist_add_string(args, ZCP_ARG_PROGRAM, program);
+	fnvlist_add_nvlist(args, ZCP_ARG_ARGLIST, argnvl);
+	fnvlist_add_boolean_value(args, ZCP_ARG_SYNC, sync);
+	fnvlist_add_uint64(args, ZCP_ARG_INSTRLIMIT, instrlimit);
+	fnvlist_add_uint64(args, ZCP_ARG_MEMLIMIT, memlimit);
+	error = lzc_ioctl(ZFS_IOC_CHANNEL_PROGRAM, pool, args, outnvl);
+	fnvlist_free(args);
+
+	return (error);
+}
+
+/*
+ * Executes a channel program.
+ *
+ * If this function returns 0 the channel program was successfully loaded and
+ * ran without failing. Note that individual commands the channel program ran
+ * may have failed and the channel program is responsible for reporting such
+ * errors through outnvl if they are important.
+ *
+ * This method may also return:
+ *
+ * EINVAL   The program contains syntax errors, or an invalid memory or time
+ *          limit was given. No part of the channel program was executed.
+ *          If caused by syntax errors, 'outnvl' contains information about the
+ *          errors.
+ *
+ * ECHRNG   The program was executed, but encountered a runtime error, such as
+ *          calling a function with incorrect arguments, invoking the error()
+ *          function directly, failing an assert() command, etc. Some portion
+ *          of the channel program may have executed and committed changes.
+ *          Information about the failure can be found in 'outnvl'.
+ *
+ * ENOMEM   The program fully executed, but the output buffer was not large
+ *          enough to store the returned value. No output is returned through
+ *          'outnvl'.
+ *
+ * ENOSPC   The program was terminated because it exceeded its memory usage
+ *          limit. Some portion of the channel program may have executed and
+ *          committed changes to disk. No output is returned through 'outnvl'.
+ *
+ * ETIME    The program was terminated because it exceeded its Lua instruction
+ *          limit. Some portion of the channel program may have executed and
+ *          committed changes to disk. No output is returned through 'outnvl'.
+ */
+int
+lzc_channel_program(const char *pool, const char *program, uint64_t instrlimit,
+    uint64_t memlimit, nvlist_t *argnvl, nvlist_t **outnvl)
+{
+	return (lzc_channel_program_impl(pool, program, B_TRUE, instrlimit,
+	    memlimit, argnvl, outnvl));
+}
+
+/*
+ * Executes a read-only channel program.
+ *
+ * A read-only channel program works programmatically the same way as a
+ * normal channel program executed with lzc_channel_program(). The only
+ * difference is it runs exclusively in open-context and therefore can
+ * return faster. The downside to that, is that the program cannot change
+ * on-disk state by calling functions from the zfs.sync submodule.
+ *
+ * The return values of this function (and their meaning) are exactly the
+ * same as the ones described in lzc_channel_program().
+ */
+int
+lzc_channel_program_nosync(const char *pool, const char *program,
+    uint64_t timeout, uint64_t memlimit, nvlist_t *argnvl, nvlist_t **outnvl)
+{
+	return (lzc_channel_program_impl(pool, program, B_FALSE, timeout,
+	    memlimit, argnvl, outnvl));
 }

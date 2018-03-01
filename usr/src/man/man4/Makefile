@@ -100,6 +100,7 @@ _MANFILES=	Intro.4				\
 		ldapfilter.conf.4		\
 		ldapsearchprefs.conf.4		\
 		ldaptemplates.conf.4		\
+		loader.conf.4			\
 		logadm.conf.4			\
 		logindevperm.4			\
 		loginlog.4			\
@@ -165,7 +166,6 @@ _MANFILES=	Intro.4				\
 		sasl_appname.conf.4		\
 		scsi.4				\
 		securenets.4			\
-		sel_config.4			\
 		sendmail.4			\
 		service_bundle.4		\
 		service_provider.conf.4		\
@@ -197,7 +197,6 @@ _MANFILES=	Intro.4				\
 		utmp.4				\
 		utmpx.4				\
 		vfstab.4			\
-		wanboot.conf.4			\
 		warn.conf.4			\
 		ypfiles.4			\
 		yppasswdd.4			\

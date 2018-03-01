@@ -21,7 +21,7 @@
 
 /*
  * Copyright (c) 1991, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2011 Nexenta Systems, Inc. All rights reserved.
+ * Copyright 2017 Nexenta Systems, Inc.
  * Copyright 2013 OmniTI Computer Consulting, Inc. All rights reserved.
  * Copyright (c) 2013 Gary Mills
  * Copyright 2014 Garrett D'Amore <garrett@damore.org>
@@ -50,6 +50,7 @@
 #include <float.h>
 #include <fmtmsg.h>
 #include <fnmatch.h>
+#include <fts.h>
 #include <ftw.h>
 #include <glob.h>
 #include <getwidth.h>
@@ -398,6 +399,26 @@ char *ecvt(double value, int ndigit, int *_RESTRICT_KYWD decpt,
 char *fcvt(double value, int ndigit, int *_RESTRICT_KYWD decpt,
 	int *_RESTRICT_KYWD sign);
 
+/* endian.c */
+uint16_t htole16(uint16_t);
+uint32_t htole32(uint32_t);
+uint64_t htole64(uint64_t);
+uint16_t letoh16(uint16_t);
+uint32_t letoh32(uint32_t);
+uint64_t letoh64(uint64_t);
+uint16_t le16toh(uint16_t);
+uint32_t le32toh(uint32_t);
+uint64_t le64toh(uint64_t);
+uint16_t htobe16(uint16_t);
+uint32_t htobe32(uint32_t);
+uint64_t htobe64(uint64_t);
+uint16_t betoh16(uint16_t);
+uint32_t betoh32(uint32_t);
+uint64_t betoh64(uint64_t);
+uint16_t be16toh(uint16_t);
+uint32_t be32toh(uint32_t);
+uint64_t be64toh(uint64_t);
+
 /* err.c */
 void _errfp(FILE *, int, const char *, ...);
 void _verrfp(FILE *, int, const char *, va_list);
@@ -435,13 +456,23 @@ int flock(int filedes, int operation);
 /* fmtmsg.c */
 int addseverity(int value, const char *string);
 int fmtmsg(long class, const char *label, int severity, const char *text,
-		const char *action, const char *tag);
+    const char *action, const char *tag);
+
+/* freezero.c */
+void freezero(void *, size_t);
 
 /* ftime.c */
 int ftime(struct timeb *tp);
 
 /* ftok.c */
 key_t ftok(const char *path, int id);
+
+/* fts.c */
+FTSENT *fts_children(FTS *, int);
+int fts_close(FTS *);
+FTS *fts_open(char * const *, int, int (*)(const FTSENT **, const FTSENT **));
+FTSENT *fts_read(FTS *);
+int fts_set(FTS *, FTSENT *, int);
 
 /* gcvt.c */
 char *gcvt(double number, int ndigit, char *buf);
@@ -820,6 +851,12 @@ size_t rctlblk_size(void);
 /* readdir.c */
 struct dirent *readdir(DIR *dirp);
 
+/* reallocarray.c */
+void *reallocarray(void *, size_t, size_t);
+
+/* recallocarray.c */
+void *recallocarray(void *, size_t, size_t, size_t);
+
 /* realpath.c */
 char *realpath(const char *_RESTRICT_KYWD raw, char *_RESTRICT_KYWD canon);
 
@@ -972,6 +1009,9 @@ char *strtok_r(char *_RESTRICT_KYWD, const char *_RESTRICT_KYWD,
 /* strtol.c */
 long strtol(const char *_RESTRICT_KYWD str, char **_RESTRICT_KYWD nptr,
 	int base);
+
+/* strtonum.c */
+long long strtonum(const char *, long long, long long, const char **);
 
 /* strtoul.c */
 unsigned long strtoul(const char *_RESTRICT_KYWD str,

@@ -21,7 +21,7 @@
 
 /*
  * Copyright (c) 1989, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2013 by Delphix. All rights reserved.
+ * Copyright (c) 2013, 2016 by Delphix. All rights reserved.
  * Copyright 2011 Nexenta Systems, Inc. All rights reserved.
  * Copyright (c) 2015, Joyent, Inc. All rights reserved.
  * Copyright (c) 2014, OmniTI Computer Consulting, Inc. All rights reserved.
@@ -1274,11 +1274,15 @@ const struct ioc {
 		"zfs_cmd_t" },
 	{ (uint_t)ZFS_IOC_CLONE,		"ZFS_IOC_CLONE",
 		"zfs_cmd_t" },
+	{ (uint_t)ZFS_IOC_REMAP,		"ZFS_IOC_REMAP",
+		"zfs_cmd_t" },
 	{ (uint_t)ZFS_IOC_BOOKMARK,		"ZFS_IOC_BOOKMARK",
 		"zfs_cmd_t" },
 	{ (uint_t)ZFS_IOC_GET_BOOKMARKS,	"ZFS_IOC_GET_BOOKMARKS",
 		"zfs_cmd_t" },
 	{ (uint_t)ZFS_IOC_DESTROY_BOOKMARKS,	"ZFS_IOC_DESTROY_BOOKMARKS",
+		"zfs_cmd_t" },
+	{ (uint_t)ZFS_IOC_CHANNEL_PROGRAM,	"ZFS_IOC_CHANNEL_PROGRAM",
 		"zfs_cmd_t" },
 
 	/* kssl ioctls */

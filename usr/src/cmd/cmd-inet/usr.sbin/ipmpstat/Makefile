@@ -28,9 +28,9 @@ ROOTUSRSBINLINKS = $(PROG:%=$(ROOTUSRSBIN)/%)
 
 include $(SRC)/cmd/Makefile.cmd
 
-C99MODE = $(C99_ENABLE)
+CSTD = $(CSTD_GNU99)
 CERRWARN += -_gcc=-Wno-uninitialized
-LDLIBS += -lipmp -lsocket -lsysevent -lnvpair -linetutil
+LDLIBS += -lipmp -lsocket -lsysevent -lnvpair -lofmt
 XGETFLAGS += -a -x $(PROG).xcl
 
 .KEEP_STATE:

@@ -27,6 +27,7 @@
 
 /*
  * Copyright 2011 Nexenta Systems, Inc. All rights reserved.
+ * Copyright (c) 2017 by Delphix. All rights reserved.
  */
 
 #include <sys/types.h>
@@ -213,7 +214,7 @@ RGX_COMMENT	"//".*\n
 		return (MDB_TOK_DCMD);
 	}
 
-<S_INITIAL>[/\\?][ \t]*[vwWZlLM]	{
+<S_INITIAL>[/\\?][ \t]*[vwzWZlLM]	{
 		/*
 		 * Format verb followed by write or match signifier -- switch
 		 * to the value list state and return the verb character.  We
@@ -316,7 +317,7 @@ RGX_COMMENT	"//".*\n
 		 * Immediate value -- in the format list, all immediates
 		 * are assumed to be in decimal.
 		 */
-		yylval.l_immediate = strtonum(yytext, 10);
+		yylval.l_immediate = mdb_strtonum(yytext, 10);
 		return (MDB_TOK_IMMEDIATE);
 	}
 
@@ -415,7 +416,7 @@ RGX_COMMENT	"//".*\n
 		/*
 		 * Binary immediate value.
 		 */
-		yylval.l_immediate = strtonum(yytext + 2, 2);
+		yylval.l_immediate = mdb_strtonum(yytext + 2, 2);
 		return (MDB_TOK_IMMEDIATE);
 	}
 
@@ -424,7 +425,7 @@ RGX_COMMENT	"//".*\n
 		/*
 		 * Octal immediate value.
 		 */
-		yylval.l_immediate = strtonum(yytext + 2, 8);
+		yylval.l_immediate = mdb_strtonum(yytext + 2, 8);
 		return (MDB_TOK_IMMEDIATE);
 	}
 
@@ -443,7 +444,7 @@ RGX_COMMENT	"//".*\n
 		if ((p = strsplit(yytext, '.')) == NULL)
 			yyerror("internal scanning error -- expected '.'\n");
 
-		d = (double)strtonum(yytext + 2, 10);
+		d = (double)mdb_strtonum(yytext + 2, 10);
 
 		for (i = 0; (c = *p++) != '\0'; i++)
 			d = d * 10 + c - '0';
@@ -461,7 +462,7 @@ RGX_COMMENT	"//".*\n
 		/*
 		 * Decimal immediate value.
 		 */
-		yylval.l_immediate = strtonum(yytext + 2, 10);
+		yylval.l_immediate = mdb_strtonum(yytext + 2, 10);
 		return (MDB_TOK_IMMEDIATE);
 	}
 
@@ -470,7 +471,7 @@ RGX_COMMENT	"//".*\n
 		/*
 		 * Hexadecimal value.
 		 */
-		yylval.l_immediate = strtonum(yytext + 2, 16);
+		yylval.l_immediate = mdb_strtonum(yytext + 2, 16);
 		return (MDB_TOK_IMMEDIATE);
 	}
 
@@ -488,7 +489,7 @@ RGX_COMMENT	"//".*\n
 		    MDB_TGT_OBJ_EVERY, yytext, &sym, NULL) == 0)
 			yylval.l_immediate = (uintmax_t)sym.st_value;
 		else
-			yylval.l_immediate = strtonum(yytext, mdb.m_radix);
+			yylval.l_immediate = mdb_strtonum(yytext, mdb.m_radix);
 		return (MDB_TOK_IMMEDIATE);
 	}
 

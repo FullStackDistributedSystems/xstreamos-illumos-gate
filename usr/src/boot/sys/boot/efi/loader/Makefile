@@ -26,10 +26,10 @@ PROG=		loader.sym
 MACHINE=	$(MACH64)
 
 # architecture-specific loader code
-SRCS=	autoload.c bootinfo.c conf.c copy.c devicename.c main.c self_reloc.c \
-	smbios.c acpi.c vers.c
-OBJS= autoload.o bootinfo.o conf.o copy.o devicename.o main.o self_reloc.o \
-	smbios.o acpi.o vers.o
+SRCS=	autoload.c bootinfo.c conf.c copy.c efi_main.c main.c \
+	self_reloc.c smbios.c acpi.c vers.c memmap.c multiboot2.c
+OBJS= autoload.o bootinfo.o conf.o copy.o efi_main.o main.o \
+	self_reloc.o smbios.o acpi.o vers.o memmap.o multiboot2.o
 
 ASFLAGS=-m64 -fPIC
 CFLAGS=	-O2
@@ -49,7 +49,6 @@ CPPFLAGS +=	-I./../../..
 CPPFLAGS +=	-I./../../i386/libi386
 CPPFLAGS +=	-I./../../zfs
 CPPFLAGS +=	-I./../../../cddl/boot/zfs
-CPPFLAGS +=	-DEFI_ZFS_BOOT
 CPPFLAGS +=	-DNO_PCI -DEFI -DTERM_EMU
 
 # Export serial numbers, UUID, and asset tag from loader.
@@ -62,7 +61,7 @@ CPPFLAGS += -DSMBIOS_LITTLE_ENDIAN_UUID
 LIBSTAND=	../../libstand/${MACHINE}/libstand.a
 
 BOOT_FORTH=	yes
-CPPFLAGS +=	-DBOOT_FORTH -DSTAND
+CPPFLAGS +=	-DBOOT_FORTH -D_STANDALONE
 CPPFLAGS +=	-I$(SRC)/common/ficl
 CPPFLAGS +=	-I../../ficl
 LIBFICL=	../../ficl/${MACHINE}/libficl.a
@@ -82,6 +81,9 @@ LIBZFSBOOT=	../../zfs/${MACHINE}/libzfsboot.a
 # Always add MI sources
 include	./Makefile.common
 CPPFLAGS +=	-I../../common
+
+# For multiboot2.h, must be last, to avoid conflicts
+CPPFLAGS +=	-I$(SRC)/uts/common
 
 FILES=	loader.efi
 FILEMODE=	0555
@@ -114,6 +116,7 @@ loader.efi: loader.sym
 	${OBJCOPY} --readonly-text -j .peheader -j .text -j .sdata -j .data \
 		-j .dynamic -j .dynsym -j .rel.dyn \
 		-j .rela.dyn -j .reloc -j .eh_frame -j set_Xcommand_set \
+		-j set_Xficl_compile_set \
 		--output-target=${EFI_TARGET} --subsystem efi-app loader.sym $@
 
 LIBEFI=		../libefi/libefi.a

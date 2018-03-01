@@ -11,7 +11,7 @@
 .\"
 .\" Copyright 2016 Joyent, Inc.
 .\"
-.Dd May 7, 2016
+.Dd Nov 26, 2017
 .Dt USBA_HCDI_CB_OPS 9F
 .Os
 .Sh NAME
@@ -52,9 +52,9 @@
 .Sy Volatile -
 illumos USB HCD private function
 .Pp
-This is a private function that is not part of the stable DDI. It may be
-removed or changed at any time.
-.Sh PARAMATERS
+This is a private function that is not part of the stable DDI.
+It may be removed or changed at any time.
+.Sh PARAMETERS
 .Bl -tag -width Fa
 .It Fa dip
 Pointer to the device's
@@ -74,14 +74,16 @@ The
 and
 .Fn usba_hubdi_close
 functions are functions provided for the implementation of USB HCD
-drivers. USB HCD drivers are required to implemnt the
+drivers.
+USB HCD drivers are required to implemnt the
 .Xr open 9E ,
 .Xr ioctl 9E ,
 and
 .Xr close 9E
 .Xr cb_ops 9S
-functions. In each of those functions, they should use the device number
-to determine number in
+functions.
+In each of those functions, they should use the device number to determine
+number in
 .Fa devp
 or
 .Fa dev
@@ -105,5 +107,5 @@ entry points.
 .Xr close 9E ,
 .Xr ioctl 9E ,
 .Xr open 9E ,
-.Xr usb_hcdi 9E ,
+.Xr usba_hcdi 9E ,
 .Xr cb_ops 9S

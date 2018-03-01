@@ -23,31 +23,33 @@
 # Copyright (c) 1999, 2010, Oracle and/or its affiliates. All rights reserved.
 # Copyright 2014 Garrett D'Amore <garrett@damore.org>
 # Copyright 2016 Toomas Soome <tsoome@me.com>
+# Copyright (c) 2016, Chris Fraire <cfraire@me.com>.
 #
 
 include ../Makefile.master
 
-# Bootstrap problem --
-# 'cw' must be built before anything else can be built.
-
+# Bootstrap problem: 'cw' must be built before anything else can be built.
+# 'install.bin' should be built next, being the 'install' target dependency
+# for everything else.
+#
+# Because of somewhat cyclic dependency between them, both cw and install.bin
+# override the way we install binaries in their Makefiles.
 BOOT_SUBDIRS= \
-	cw
+	cw \
+	.WAIT \
+	install.bin
 
 COMMON_SUBDIRS= \
 	codereview \
 	codesign \
 	cscope-fast \
 	ctf \
-	depcheck \
 	env \
 	findunref \
-	gk \
-	install.bin \
 	lintdump \
 	make \
 	ndrgen \
 	onbld \
-	pmodes \
 	protocmp \
 	protolist \
 	scripts
@@ -56,7 +58,11 @@ COMMON_SUBDIRS= \
 #  special versions of commands for use only in build
 #
 UNSHIPPED_SUBDIRS = \
-	mandoc
+	localedef \
+	mandoc \
+	tic \
+	vtfontcvt \
+	zic
 
 sparc_SUBDIRS= \
 	chk4ubin \
@@ -98,13 +104,11 @@ ROOTDIRS= \
 	$(ROOTONBLD)/lib/python$(PYTHON_VERSION) \
 	$(ROOTONBLD)/lib/python$(PYTHON_VERSION)/onbld \
 	$(ROOTONBLD)/lib/python$(PYTHON_VERSION)/onbld/Checks \
-	$(ROOTONBLD)/lib/python$(PYTHON_VERSION)/onbld/hgext \
 	$(ROOTONBLD)/lib/python$(PYTHON_VERSION)/onbld/Scm \
 	$(ROOTONBLD)/env \
 	$(ROOTONBLD)/etc \
 	$(ROOTONBLD)/etc/exception_lists \
 	$(ROOTONBLD)/share \
-	$(ROOTONBLD)/gk \
 	$(ROOTONBLD)/man \
 	$(ROOTONBLD)/man/man1onbld
 
@@ -125,6 +129,10 @@ DOROOTDIRS= $(ROOTDIRS)
 clobber:= DOROOTDIRS=
 clean:= DOROOTDIRS=
 
+DOROOTONBLDLIBPY= $(ROOTONBLDLIBPY)
+clobber:= DOROOTONBLDLIBPY=
+clean:= DOROOTONBLDLIBPY=
+
 all install: $(SUBDIRS)
 
 clean: $(SUBDIRS)
@@ -140,11 +148,12 @@ _msg: $(MSGSUBDIRS)
 
 $(SUBDIRS) $(CLOSED_SUBDIRS): $(BOOT_SUBDIRS)
 
-$(BOOT_SUBDIRS) $(SUBDIRS): $$(DOROOTDIRS) $(ROOTONBLDLIBPY) FRC
+$(BOOT_SUBDIRS) $(SUBDIRS): $$(DOROOTDIRS) $$(DOROOTONBLDLIBPY) FRC
 	@cd $@; pwd; $(MAKE) $(TARGET)
 
+# Assume we don't have the install.bin available yet
 $(ROOTDIRS):
-	$(INS.dir)
+	$(MKDIR) -p -m $(DIRMODE) $@
 
 $(ROOTONBLDLIBPY): $(ROOTDIRS)
 	$(RM) -r $@; $(SYMLINK) python$(PYTHON_VERSION) $@

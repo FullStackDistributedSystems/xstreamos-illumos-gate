@@ -25,6 +25,7 @@
  * Copyright (c) 2014 Spectra Logic Corporation, All rights reserved.
  * Copyright 2013 Saso Kiselkov. All rights reserved.
  * Copyright (c) 2014 Integros [integros.com]
+ * Copyright (c) 2017 Datto Inc.
  */
 
 #include <sys/zfs_context.h>
@@ -240,8 +241,11 @@ kmem_cache_t *spa_buffer_pool;
 int spa_mode_global;
 
 #ifdef ZFS_DEBUG
-/* Everything except dprintf and spa is on by default in debug builds */
-int zfs_flags = ~(ZFS_DEBUG_DPRINTF | ZFS_DEBUG_SPA);
+/*
+ * Everything except dprintf, spa, and indirect_remap is on by default
+ * in debug builds.
+ */
+int zfs_flags = ~(ZFS_DEBUG_DPRINTF | ZFS_DEBUG_SPA | ZFS_DEBUG_INDIRECT_REMAP);
 #else
 int zfs_flags = 0;
 #endif
@@ -350,6 +354,36 @@ int spa_asize_inflation = 24;
 int spa_slop_shift = 5;
 uint64_t spa_min_slop = 128 * 1024 * 1024;
 
+/*PRINTFLIKE2*/
+void
+spa_load_failed(spa_t *spa, const char *fmt, ...)
+{
+	va_list adx;
+	char buf[256];
+
+	va_start(adx, fmt);
+	(void) vsnprintf(buf, sizeof (buf), fmt, adx);
+	va_end(adx);
+
+	zfs_dbgmsg("spa_load(%s, config %s): FAILED: %s", spa->spa_name,
+	    spa->spa_trust_config ? "trusted" : "untrusted", buf);
+}
+
+/*PRINTFLIKE2*/
+void
+spa_load_note(spa_t *spa, const char *fmt, ...)
+{
+	va_list adx;
+	char buf[256];
+
+	va_start(adx, fmt);
+	(void) vsnprintf(buf, sizeof (buf), fmt, adx);
+	va_end(adx);
+
+	zfs_dbgmsg("spa_load(%s, config %s): %s", spa->spa_name,
+	    spa->spa_trust_config ? "trusted" : "untrusted", buf);
+}
+
 /*
  * ==========================================================================
  * SPA config locking
@@ -442,7 +476,7 @@ spa_config_enter(spa_t *spa, int locks, void *tag, krw_t rw)
 		(void) refcount_add(&scl->scl_count, tag);
 		mutex_exit(&scl->scl_lock);
 	}
-	ASSERT(wlocks_held <= locks);
+	ASSERT3U(wlocks_held, <=, locks);
 }
 
 void
@@ -588,6 +622,7 @@ spa_add(const char *name, nvlist_t *config, const char *altroot)
 	spa->spa_load_max_txg = UINT64_MAX;
 	spa->spa_proc = &p0;
 	spa->spa_proc_state = SPA_PROC_NONE;
+	spa->spa_trust_config = B_TRUE;
 
 	hdlr.cyh_func = spa_deadman;
 	hdlr.cyh_arg = spa;
@@ -1153,7 +1188,7 @@ spa_vdev_config_exit(spa_t *spa, vdev_t *vd, uint64_t txg, int error, char *tag)
 	 * If the config changed, update the config cache.
 	 */
 	if (config_changed)
-		spa_config_sync(spa, B_FALSE, B_TRUE);
+		spa_write_cachefile(spa, B_FALSE, B_TRUE);
 }
 
 /*
@@ -1237,7 +1272,7 @@ spa_vdev_state_exit(spa_t *spa, vdev_t *vd, int error)
 	 */
 	if (config_changed) {
 		mutex_enter(&spa_namespace_lock);
-		spa_config_sync(spa, B_FALSE, B_TRUE);
+		spa_write_cachefile(spa, B_FALSE, B_TRUE);
 		mutex_exit(&spa_namespace_lock);
 	}
 
@@ -1315,7 +1350,7 @@ spa_rename(const char *name, const char *newname)
 	/*
 	 * Sync the updated config cache.
 	 */
-	spa_config_sync(spa, B_FALSE, B_TRUE);
+	spa_write_cachefile(spa, B_FALSE, B_TRUE);
 
 	spa_close(spa, FTAG);
 
@@ -1481,7 +1516,7 @@ zfs_panic_recover(const char *fmt, ...)
  * lowercase hexadecimal numbers that don't overflow.
  */
 uint64_t
-strtonum(const char *str, char **nptr)
+zfs_strtonum(const char *str, char **nptr)
 {
 	uint64_t val = 0;
 	char c;
@@ -1529,6 +1564,12 @@ boolean_t
 spa_is_initializing(spa_t *spa)
 {
 	return (spa->spa_is_initializing);
+}
+
+boolean_t
+spa_indirect_vdevs_loaded(spa_t *spa)
+{
+	return (spa->spa_indirect_vdevs_loaded);
 }
 
 blkptr_t *
@@ -1681,6 +1722,24 @@ spa_update_dspace(spa_t *spa)
 {
 	spa->spa_dspace = metaslab_class_get_dspace(spa_normal_class(spa)) +
 	    ddt_get_dedup_dspace(spa);
+	if (spa->spa_vdev_removal != NULL) {
+		/*
+		 * We can't allocate from the removing device, so
+		 * subtract its size.  This prevents the DMU/DSL from
+		 * filling up the (now smaller) pool while we are in the
+		 * middle of removing the device.
+		 *
+		 * Note that the DMU/DSL doesn't actually know or care
+		 * how much space is allocated (it does its own tracking
+		 * of how much space has been logically used).  So it
+		 * doesn't matter that the data we are moving may be
+		 * allocated twice (on the old device and the new
+		 * device).
+		 */
+		vdev_t *vd = spa->spa_vdev_removal->svr_vdev;
+		spa->spa_dspace -= spa_deflate(spa) ?
+		    vd->vdev_stat.vs_dspace : vd->vdev_stat.vs_space;
+	}
 }
 
 /*
@@ -1957,7 +2016,7 @@ spa_is_root(spa_t *spa)
 boolean_t
 spa_writeable(spa_t *spa)
 {
-	return (!!(spa->spa_mode & FWRITE));
+	return (!!(spa->spa_mode & FWRITE) && spa->spa_trust_config);
 }
 
 /*
@@ -2008,6 +2067,11 @@ spa_scan_stat_init(spa_t *spa)
 {
 	/* data not stored on disk */
 	spa->spa_scan_pass_start = gethrestime_sec();
+	if (dsl_scan_is_paused_scrub(spa->spa_dsl_pool->dp_scan))
+		spa->spa_scan_pass_scrub_pause = spa->spa_scan_pass_start;
+	else
+		spa->spa_scan_pass_scrub_pause = 0;
+	spa->spa_scan_pass_scrub_spent_paused = 0;
 	spa->spa_scan_pass_exam = 0;
 	vdev_scan_stat_init(spa->spa_root_vdev);
 }
@@ -2038,6 +2102,8 @@ spa_scan_get_stats(spa_t *spa, pool_scan_stat_t *ps)
 	/* data not stored on disk */
 	ps->pss_pass_start = spa->spa_scan_pass_start;
 	ps->pss_pass_exam = spa->spa_scan_pass_exam;
+	ps->pss_pass_scrub_pause = spa->spa_scan_pass_scrub_pause;
+	ps->pss_pass_scrub_spent_paused = spa->spa_scan_pass_scrub_spent_paused;
 
 	return (0);
 }
@@ -2055,4 +2121,64 @@ spa_maxblocksize(spa_t *spa)
 		return (SPA_MAXBLOCKSIZE);
 	else
 		return (SPA_OLD_MAXBLOCKSIZE);
+}
+
+/*
+ * Returns the txg that the last device removal completed. No indirect mappings
+ * have been added since this txg.
+ */
+uint64_t
+spa_get_last_removal_txg(spa_t *spa)
+{
+	uint64_t vdevid;
+	uint64_t ret = -1ULL;
+
+	spa_config_enter(spa, SCL_VDEV, FTAG, RW_READER);
+	/*
+	 * sr_prev_indirect_vdev is only modified while holding all the
+	 * config locks, so it is sufficient to hold SCL_VDEV as reader when
+	 * examining it.
+	 */
+	vdevid = spa->spa_removing_phys.sr_prev_indirect_vdev;
+
+	while (vdevid != -1ULL) {
+		vdev_t *vd = vdev_lookup_top(spa, vdevid);
+		vdev_indirect_births_t *vib = vd->vdev_indirect_births;
+
+		ASSERT3P(vd->vdev_ops, ==, &vdev_indirect_ops);
+
+		/*
+		 * If the removal did not remap any data, we don't care.
+		 */
+		if (vdev_indirect_births_count(vib) != 0) {
+			ret = vdev_indirect_births_last_entry_txg(vib);
+			break;
+		}
+
+		vdevid = vd->vdev_indirect_config.vic_prev_indirect_vdev;
+	}
+	spa_config_exit(spa, SCL_VDEV, FTAG);
+
+	IMPLY(ret != -1ULL,
+	    spa_feature_is_active(spa, SPA_FEATURE_DEVICE_REMOVAL));
+
+	return (ret);
+}
+
+boolean_t
+spa_trust_config(spa_t *spa)
+{
+	return (spa->spa_trust_config);
+}
+
+uint64_t
+spa_missing_tvds_allowed(spa_t *spa)
+{
+	return (spa->spa_missing_tvds_allowed);
+}
+
+void
+spa_set_missing_tvds(spa_t *spa, uint64_t missing)
+{
+	spa->spa_missing_tvds = missing;
 }

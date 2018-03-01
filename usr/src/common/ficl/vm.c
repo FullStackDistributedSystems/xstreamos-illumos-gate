@@ -147,6 +147,7 @@ RUNTIME_FIXUP:
 		case ficlInstructionBranchParenWithCheck:
 			/* preoptimize where we're jumping to */
 			ficlVmOptimizeJumpToJump(vm, destination);
+			/* FALLTHROUGH */
 		case ficlInstructionBranchParen:
 			destination++;
 			destination += *(ficlInteger *)destination;
@@ -175,7 +176,7 @@ RUNTIME_FIXUP:
 #define	_CHECK_STACK(stack, top, pop, push)	\
 	ficlStackCheckNospill(stack, top, pop, push)
 
-FICL_PLATFORM_INLINE void
+static FICL_PLATFORM_INLINE void
 ficlStackCheckNospill(ficlStack *stack, ficlCell *top, int popCells,
     int pushCells)
 {
@@ -251,7 +252,7 @@ ficlVmInnerLoop(ficlVm *vm, ficlWord *fw)
 	jmp_buf exceptionHandler;
 	int except;
 	int once;
-	int count;
+	volatile int count;	/* volatile because of longjmp */
 	ficlInstruction instruction;
 	ficlInteger i;
 	ficlUnsigned u;

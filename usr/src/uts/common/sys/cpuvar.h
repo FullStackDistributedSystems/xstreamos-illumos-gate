@@ -23,6 +23,7 @@
  * Copyright (c) 1989, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2012 by Delphix. All rights reserved.
  * Copyright 2014 Igor Kozhukhov <ikozhukhov@gmail.com>.
+ * Copyright 2017 RackTop Systems.
  */
 
 #ifndef _SYS_CPUVAR_H
@@ -32,6 +33,7 @@
 #include <sys/sysinfo.h>	/* has cpu_stat_t definition */
 #include <sys/disp.h>
 #include <sys/processor.h>
+#include <sys/kcpc.h>		/* has kcpc_ctx_t definition */
 
 #include <sys/loadavg.h>
 #if (defined(_KERNEL) || defined(_KMEMUSER)) && defined(_MACHDEP)
@@ -295,7 +297,7 @@ extern cpu_core_t cpu_core[];
  */
 #define	CPU_PSEUDO_RANDOM() (CPU->cpu_rotor++)
 
-#if defined(_KERNEL) || defined(_KMEMUSER)
+#if defined(_KERNEL) || defined(_KMEMUSER) || defined(_BOOT)
 
 #define	INTR_STACK_SIZE	MAX(DEFAULTSTKSZ, PAGESIZE)
 
@@ -386,9 +388,8 @@ extern cpu_core_t cpu_core[];
 #define	CPU_DISP_DONTSTEAL	0x01	/* CPU undergoing context swtch */
 #define	CPU_DISP_HALTED		0x02	/* CPU halted waiting for interrupt */
 
-#endif /* _KERNEL || _KMEMUSER */
-
-#if (defined(_KERNEL) || defined(_KMEMUSER)) && defined(_MACHDEP)
+/* Note: inside ifdef: _KERNEL || _KMEMUSER || _BOOT */
+#if defined(_MACHDEP)
 
 /*
  * Macros for manipulating sets of CPUs as a bitmap.  Note that this
@@ -538,7 +539,8 @@ typedef	ulong_t	cpuset_t;	/* a set of CPUs */
 
 extern cpuset_t cpu_seqid_inuse;
 
-#endif	/* (_KERNEL || _KMEMUSER) && _MACHDEP */
+#endif	/* _MACHDEP */
+#endif /* _KERNEL || _KMEMUSER || _BOOT */
 
 #define	CPU_CPR_OFFLINE		0x0
 #define	CPU_CPR_ONLINE		0x1
@@ -614,9 +616,9 @@ extern struct cpu *curcpup(void);
 #endif /* _KERNEL || _KMEMUSER */
 
 /*
- * CPU support routines.
+ * CPU support routines (not for genassym.c)
  */
-#if	defined(_KERNEL) && defined(__STDC__)	/* not for genassym.c */
+#if	(defined(_KERNEL) || defined(_FAKE_KERNEL)) && defined(__STDC__)
 
 struct zone;
 
@@ -823,7 +825,7 @@ extern void populate_idstr(struct cpu *);
 extern void cpu_vm_data_init(struct cpu *);
 extern void cpu_vm_data_destroy(struct cpu *);
 
-#endif	/* _KERNEL */
+#endif	/* _KERNEL || _FAKE_KERNEL */
 
 #ifdef	__cplusplus
 }

@@ -11,7 +11,7 @@
 
 /*
  * Copyright 2015 OmniTI Computer Consulting, Inc. All rights reserved.
- * Copyright 2016 Joyent, Inc.
+ * Copyright (c) 2017, Joyent, Inc.
  * Copyright 2017 Tegile Systems, Inc.  All rights reserved.
  */
 
@@ -452,11 +452,10 @@ static int
 i40e_rx_ring_intr_enable(mac_intr_handle_t intrh)
 {
 	i40e_trqpair_t *itrq = (i40e_trqpair_t *)intrh;
-	i40e_t *i40e = itrq->itrq_i40e;
 
 	mutex_enter(&itrq->itrq_rx_lock);
 	ASSERT(itrq->itrq_intr_poll == B_TRUE);
-	i40e_intr_rx_queue_enable(i40e, itrq->itrq_index);
+	i40e_intr_rx_queue_enable(itrq);
 	itrq->itrq_intr_poll = B_FALSE;
 	mutex_exit(&itrq->itrq_rx_lock);
 
@@ -468,10 +467,9 @@ static int
 i40e_rx_ring_intr_disable(mac_intr_handle_t intrh)
 {
 	i40e_trqpair_t *itrq = (i40e_trqpair_t *)intrh;
-	i40e_t *i40e = itrq->itrq_i40e;
 
 	mutex_enter(&itrq->itrq_rx_lock);
-	i40e_intr_rx_queue_disable(i40e, itrq->itrq_index);
+	i40e_intr_rx_queue_disable(itrq);
 	itrq->itrq_intr_poll = B_TRUE;
 	mutex_exit(&itrq->itrq_rx_lock);
 
@@ -574,11 +572,83 @@ i40e_fill_rx_group(void *arg, mac_ring_type_t rtype, const int index,
 	infop->mgi_count = i40e->i40e_num_trqpairs;
 }
 
+static int
+i40e_transceiver_info(void *arg, uint_t id, mac_transceiver_info_t *infop)
+{
+	boolean_t present, usable;
+	i40e_t *i40e = arg;
+
+	if (id != 0 || infop == NULL)
+		return (EINVAL);
+
+	mutex_enter(&i40e->i40e_general_lock);
+	present = !!(i40e->i40e_hw_space.phy.link_info.link_info &
+	    I40E_AQ_MEDIA_AVAILABLE);
+	if (present) {
+		usable = !!(i40e->i40e_hw_space.phy.link_info.an_info &
+		    I40E_AQ_QUALIFIED_MODULE);
+	} else {
+		usable = B_FALSE;
+	}
+	mutex_exit(&i40e->i40e_general_lock);
+
+	mac_transceiver_info_set_usable(infop, usable);
+	mac_transceiver_info_set_present(infop, present);
+
+	return (0);
+}
+
+static int
+i40e_gld_led_set(void *arg, mac_led_mode_t mode, uint_t flags)
+{
+	i40e_t *i40e = arg;
+	struct i40e_hw *hw = &i40e->i40e_hw_space;
+
+	if (flags != 0)
+		return (EINVAL);
+
+	if (mode != MAC_LED_DEFAULT &&
+	    mode != MAC_LED_IDENT &&
+	    mode != MAC_LED_OFF &&
+	    mode != MAC_LED_ON)
+		return (ENOTSUP);
+
+	if (mode != MAC_LED_DEFAULT && !i40e->i40e_led_saved) {
+		i40e->i40e_led_status = i40e_led_get(hw);
+		i40e->i40e_led_saved = B_TRUE;
+	}
+
+	switch (mode) {
+	case MAC_LED_DEFAULT:
+		if (i40e->i40e_led_saved) {
+			i40e_led_set(hw, i40e->i40e_led_status, B_FALSE);
+			i40e->i40e_led_status = 0;
+			i40e->i40e_led_saved = B_FALSE;
+		}
+		break;
+	case MAC_LED_IDENT:
+		i40e_led_set(hw, 0xf, B_TRUE);
+		break;
+	case MAC_LED_OFF:
+		i40e_led_set(hw, 0x0, B_FALSE);
+		break;
+	case MAC_LED_ON:
+		i40e_led_set(hw, 0xf, B_FALSE);
+		break;
+	default:
+		return (ENOTSUP);
+	}
+
+	return (0);
+}
+
 static boolean_t
 i40e_m_getcapab(void *arg, mac_capab_t cap, void *cap_data)
 {
 	i40e_t *i40e = arg;
 	mac_capab_rings_t *cap_rings;
+	mac_capab_transceiver_t *mct;
+	mac_capab_led_t *mcl;
 
 	switch (cap) {
 	case MAC_CAPAB_HCKSUM: {
@@ -621,6 +691,29 @@ i40e_m_getcapab(void *arg, mac_capab_t cap, void *cap_data)
 			return (B_FALSE);
 		}
 		break;
+	case MAC_CAPAB_TRANSCEIVER:
+		mct = cap_data;
+
+		/*
+		 * Firmware doesn't have a great way of telling us in advance
+		 * whether we'd expect a SFF transceiver. As such, we always
+		 * advertise the support for this capability.
+		 */
+		mct->mct_flags = 0;
+		mct->mct_ntransceivers = 1;
+		mct->mct_info = i40e_transceiver_info;
+		mct->mct_read = NULL;
+
+		return (B_TRUE);
+	case MAC_CAPAB_LED:
+		mcl = cap_data;
+
+		mcl->mcl_flags = 0;
+		mcl->mcl_modes = MAC_LED_DEFAULT | MAC_LED_IDENT | MAC_LED_OFF |
+		    MAC_LED_ON;
+		mcl->mcl_set = i40e_gld_led_set;
+		break;
+
 	default:
 		return (B_FALSE);
 	}

@@ -21,7 +21,7 @@
 
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2012, 2015 by Delphix. All rights reserved.
+ * Copyright (c) 2012, 2017 by Delphix. All rights reserved.
  * Copyright (c) 2014 Integros [integros.com]
  * Copyright 2015 Joyent, Inc.
  * Copyright 2017 Nexenta Systems, Inc.
@@ -83,6 +83,7 @@
 #include <sys/kidmap.h>
 #include <sys/cred.h>
 #include <sys/attr.h>
+#include <sys/zil.h>
 
 /*
  * Programming rules.
@@ -134,7 +135,7 @@
  *
  *	If dmu_tx_assign() returns ERESTART and zfsvfs->z_assign is TXG_NOWAIT,
  *	then drop all locks, call dmu_tx_wait(), and try again.  On subsequent
- *	calls to dmu_tx_assign(), pass TXG_WAITED rather than TXG_NOWAIT,
+ *	calls to dmu_tx_assign(), pass TXG_NOTHROTTLE in addition to TXG_NOWAIT,
  *	to indicate that this operation has already called dmu_tx_wait().
  *	This will ensure that we don't retry forever, waiting a short bit
  *	each time.
@@ -159,7 +160,7 @@
  *	rw_enter(...);			// grab any other locks you need
  *	tx = dmu_tx_create(...);	// get DMU tx
  *	dmu_tx_hold_*();		// hold each object you might modify
- *	error = dmu_tx_assign(tx, waited ? TXG_WAITED : TXG_NOWAIT);
+ *	error = dmu_tx_assign(tx, (waited ? TXG_NOTHROTTLE : 0) | TXG_NOWAIT);
  *	if (error) {
  *		rw_exit(...);		// drop locks
  *		zfs_dirent_unlock(dl);	// unlock directory entry
@@ -707,9 +708,11 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 	}
 
 	/*
-	 * If immutable or not appending then return EPERM
+	 * If immutable or not appending then return EPERM.
+	 * Intentionally allow ZFS_READONLY through here.
+	 * See zfs_zaccess_common()
 	 */
-	if ((zp->z_pflags & (ZFS_IMMUTABLE | ZFS_READONLY)) ||
+	if ((zp->z_pflags & ZFS_IMMUTABLE) ||
 	    ((zp->z_pflags & ZFS_APPENDONLY) && !(ioflag & FAPPEND) &&
 	    (uio->uio_loffset < zp->z_size))) {
 		ZFS_EXIT(zfsvfs);
@@ -1030,7 +1033,7 @@ zfs_get_done(zgd_t *zgd, int error)
 	VN_RELE_ASYNC(ZTOV(zp), dsl_pool_vnrele_taskq(dmu_objset_pool(os)));
 
 	if (error == 0 && zgd->zgd_bp)
-		zil_add_block(zgd->zgd_zilog, zgd->zgd_bp);
+		zil_lwb_add_block(zgd->zgd_lwb, zgd->zgd_bp);
 
 	kmem_free(zgd, sizeof (zgd_t));
 }
@@ -1043,7 +1046,7 @@ static int zil_fault_io = 0;
  * Get data to generate a TX_WRITE intent log record.
  */
 int
-zfs_get_data(void *arg, lr_write_t *lr, char *buf, zio_t *zio)
+zfs_get_data(void *arg, lr_write_t *lr, char *buf, struct lwb *lwb, zio_t *zio)
 {
 	zfsvfs_t *zfsvfs = arg;
 	objset_t *os = zfsvfs->z_os;
@@ -1051,13 +1054,13 @@ zfs_get_data(void *arg, lr_write_t *lr, char *buf, zio_t *zio)
 	uint64_t object = lr->lr_foid;
 	uint64_t offset = lr->lr_offset;
 	uint64_t size = lr->lr_length;
-	blkptr_t *bp = &lr->lr_blkptr;
 	dmu_buf_t *db;
 	zgd_t *zgd;
 	int error = 0;
 
-	ASSERT(zio != NULL);
-	ASSERT(size != 0);
+	ASSERT3P(lwb, !=, NULL);
+	ASSERT3P(zio, !=, NULL);
+	ASSERT3U(size, !=, 0);
 
 	/*
 	 * Nothing to do if the file has been removed
@@ -1075,7 +1078,7 @@ zfs_get_data(void *arg, lr_write_t *lr, char *buf, zio_t *zio)
 	}
 
 	zgd = (zgd_t *)kmem_zalloc(sizeof (zgd_t), KM_SLEEP);
-	zgd->zgd_zilog = zfsvfs->z_log;
+	zgd->zgd_lwb = lwb;
 	zgd->zgd_private = zp;
 
 	/*
@@ -1098,7 +1101,7 @@ zfs_get_data(void *arg, lr_write_t *lr, char *buf, zio_t *zio)
 	} else { /* indirect write */
 		/*
 		 * Have to lock the whole block to ensure when it's
-		 * written out and it's checksum is being calculated
+		 * written out and its checksum is being calculated
 		 * that no one can change the data. We need to re-check
 		 * blocksize after we get the lock in case it's changed!
 		 */
@@ -1128,11 +1131,7 @@ zfs_get_data(void *arg, lr_write_t *lr, char *buf, zio_t *zio)
 			    DMU_READ_NO_PREFETCH);
 
 		if (error == 0) {
-			blkptr_t *obp = dmu_buf_get_blkptr(db);
-			if (obp) {
-				ASSERT(BP_IS_HOLE(bp));
-				*bp = *obp;
-			}
+			blkptr_t *bp = &lr->lr_blkptr;
 
 			zgd->zgd_db = db;
 			zgd->zgd_bp = bp;
@@ -1155,6 +1154,18 @@ zfs_get_data(void *arg, lr_write_t *lr, char *buf, zio_t *zio)
 
 			if (error == EALREADY) {
 				lr->lr_common.lrc_txtype = TX_WRITE2;
+				/*
+				 * TX_WRITE2 relies on the data previously
+				 * written by the TX_WRITE that caused
+				 * EALREADY.  We zero out the BP because
+				 * it is the old, currently-on-disk BP,
+				 * so there's no need to zio_flush() its
+				 * vdevs (flushing would needlesly hurt
+				 * performance, and doesn't work on
+				 * indirect vdevs).
+				 */
+				zgd->zgd_bp = NULL;
+				BP_ZERO(bp);
 				error = 0;
 			}
 		}
@@ -1521,7 +1532,8 @@ top:
 			dmu_tx_hold_write(tx, DMU_NEW_OBJECT,
 			    0, acl_ids.z_aclp->z_acl_bytes);
 		}
-		error = dmu_tx_assign(tx, waited ? TXG_WAITED : TXG_NOWAIT);
+		error = dmu_tx_assign(tx,
+		    (waited ? TXG_NOTHROTTLE : 0) | TXG_NOWAIT);
 		if (error) {
 			zfs_dirent_unlock(dl);
 			if (error == ERESTART) {
@@ -1751,7 +1763,7 @@ top:
 	 */
 	dmu_tx_mark_netfree(tx);
 
-	error = dmu_tx_assign(tx, waited ? TXG_WAITED : TXG_NOWAIT);
+	error = dmu_tx_assign(tx, (waited ? TXG_NOTHROTTLE : 0) | TXG_NOWAIT);
 	if (error) {
 		zfs_dirent_unlock(dl);
 		VN_RELE(vp);
@@ -1819,7 +1831,7 @@ top:
 			ASSERT0(error);
 		}
 		mutex_enter(&vp->v_lock);
-		vp->v_count--;
+		VN_RELE_LOCKED(vp);
 		ASSERT0(vp->v_count);
 		mutex_exit(&vp->v_lock);
 		mutex_exit(&zp->z_lock);
@@ -1988,7 +2000,7 @@ top:
 	dmu_tx_hold_sa_create(tx, acl_ids.z_aclp->z_acl_bytes +
 	    ZFS_SA_BASE_ATTR_SIZE);
 
-	error = dmu_tx_assign(tx, waited ? TXG_WAITED : TXG_NOWAIT);
+	error = dmu_tx_assign(tx, (waited ? TXG_NOTHROTTLE : 0) | TXG_NOWAIT);
 	if (error) {
 		zfs_dirent_unlock(dl);
 		if (error == ERESTART) {
@@ -2125,7 +2137,7 @@ top:
 	zfs_sa_upgrade_txholds(tx, zp);
 	zfs_sa_upgrade_txholds(tx, dzp);
 	dmu_tx_mark_netfree(tx);
-	error = dmu_tx_assign(tx, waited ? TXG_WAITED : TXG_NOWAIT);
+	error = dmu_tx_assign(tx, (waited ? TXG_NOTHROTTLE : 0) | TXG_NOWAIT);
 	if (error) {
 		rw_exit(&zp->z_parent_lock);
 		rw_exit(&zp->z_name_lock);
@@ -2791,10 +2803,9 @@ zfs_setattr(vnode_t *vp, vattr_t *vap, int flags, cred_t *cr,
 		return (SET_ERROR(EPERM));
 	}
 
-	if ((mask & AT_SIZE) && (zp->z_pflags & ZFS_READONLY)) {
-		ZFS_EXIT(zfsvfs);
-		return (SET_ERROR(EPERM));
-	}
+	/*
+	 * Note: ZFS_READONLY is handled in zfs_zaccess_common.
+	 */
 
 	/*
 	 * Verify timestamps doesn't overflow 32 bits.
@@ -3699,7 +3710,7 @@ top:
 
 	zfs_sa_upgrade_txholds(tx, szp);
 	dmu_tx_hold_zap(tx, zfsvfs->z_unlinkedobj, FALSE, NULL);
-	error = dmu_tx_assign(tx, waited ? TXG_WAITED : TXG_NOWAIT);
+	error = dmu_tx_assign(tx, (waited ? TXG_NOTHROTTLE : 0) | TXG_NOWAIT);
 	if (error) {
 		if (zl != NULL)
 			zfs_rename_unlock(&zl);
@@ -3892,7 +3903,7 @@ top:
 	}
 	if (fuid_dirtied)
 		zfs_fuid_txhold(zfsvfs, tx);
-	error = dmu_tx_assign(tx, waited ? TXG_WAITED : TXG_NOWAIT);
+	error = dmu_tx_assign(tx, (waited ? TXG_NOTHROTTLE : 0) | TXG_NOWAIT);
 	if (error) {
 		zfs_dirent_unlock(dl);
 		if (error == ERESTART) {
@@ -4113,7 +4124,7 @@ top:
 	dmu_tx_hold_zap(tx, dzp->z_id, TRUE, name);
 	zfs_sa_upgrade_txholds(tx, szp);
 	zfs_sa_upgrade_txholds(tx, dzp);
-	error = dmu_tx_assign(tx, waited ? TXG_WAITED : TXG_NOWAIT);
+	error = dmu_tx_assign(tx, (waited ? TXG_NOTHROTTLE : 0) | TXG_NOWAIT);
 	if (error) {
 		zfs_dirent_unlock(dl);
 		if (error == ERESTART) {
@@ -4411,7 +4422,7 @@ zfs_inactive(vnode_t *vp, cred_t *cr, caller_context_t *ct)
 		mutex_enter(&zp->z_lock);
 		mutex_enter(&vp->v_lock);
 		ASSERT(vp->v_count == 1);
-		vp->v_count = 0;
+		VN_RELE_LOCKED(vp);
 		mutex_exit(&vp->v_lock);
 		mutex_exit(&zp->z_lock);
 		rw_exit(&zfsvfs->z_teardown_inactive_lock);
@@ -4698,8 +4709,12 @@ zfs_map(vnode_t *vp, offset_t off, struct as *as, caddr_t *addrp,
 	ZFS_ENTER(zfsvfs);
 	ZFS_VERIFY_ZP(zp);
 
+	/*
+	 * Note: ZFS_READONLY is handled in zfs_zaccess_common.
+	 */
+
 	if ((prot & PROT_WRITE) && (zp->z_pflags &
-	    (ZFS_IMMUTABLE | ZFS_READONLY | ZFS_APPENDONLY))) {
+	    (ZFS_IMMUTABLE | ZFS_APPENDONLY))) {
 		ZFS_EXIT(zfsvfs);
 		return (SET_ERROR(EPERM));
 	}

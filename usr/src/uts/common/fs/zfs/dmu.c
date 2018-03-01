@@ -20,7 +20,7 @@
  */
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2011, 2016 by Delphix. All rights reserved.
+ * Copyright (c) 2011, 2017 by Delphix. All rights reserved.
  */
 /* Copyright (c) 2013 by Saso Kiselkov. All rights reserved. */
 /* Copyright (c) 2013, Joyent, Inc. All rights reserved. */
@@ -64,6 +64,13 @@ int zfs_nopwrite_enabled = 1;
  * A value of zero will disable this throttle.
  */
 uint32_t zfs_per_txg_dirty_frees_percent = 30;
+
+/*
+ * This can be used for testing, to ensure that certain actions happen
+ * while in the middle of a remap (which might otherwise complete too
+ * quickly).
+ */
+int zfs_object_remap_one_indirect_delay_ticks = 0;
 
 const dmu_object_type_info_t dmu_ot[DMU_OT_NUMTYPES] = {
 	{	DMU_BSWAP_UINT8,	TRUE,	"unallocated"		},
@@ -1014,6 +1021,123 @@ dmu_write_by_dnode(dnode_t *dn, uint64_t offset, uint64_t size,
 	dmu_buf_rele_array(dbp, numbufs, FTAG);
 }
 
+static int
+dmu_object_remap_one_indirect(objset_t *os, dnode_t *dn,
+    uint64_t last_removal_txg, uint64_t offset)
+{
+	uint64_t l1blkid = dbuf_whichblock(dn, 1, offset);
+	int err = 0;
+
+	rw_enter(&dn->dn_struct_rwlock, RW_READER);
+	dmu_buf_impl_t *dbuf = dbuf_hold_level(dn, 1, l1blkid, FTAG);
+	ASSERT3P(dbuf, !=, NULL);
+
+	/*
+	 * If the block hasn't been written yet, this default will ensure
+	 * we don't try to remap it.
+	 */
+	uint64_t birth = UINT64_MAX;
+	ASSERT3U(last_removal_txg, !=, UINT64_MAX);
+	if (dbuf->db_blkptr != NULL)
+		birth = dbuf->db_blkptr->blk_birth;
+	rw_exit(&dn->dn_struct_rwlock);
+
+	/*
+	 * If this L1 was already written after the last removal, then we've
+	 * already tried to remap it.
+	 */
+	if (birth <= last_removal_txg &&
+	    dbuf_read(dbuf, NULL, DB_RF_MUST_SUCCEED) == 0 &&
+	    dbuf_can_remap(dbuf)) {
+		dmu_tx_t *tx = dmu_tx_create(os);
+		dmu_tx_hold_remap_l1indirect(tx, dn->dn_object);
+		err = dmu_tx_assign(tx, TXG_WAIT);
+		if (err == 0) {
+			(void) dbuf_dirty(dbuf, tx);
+			dmu_tx_commit(tx);
+		} else {
+			dmu_tx_abort(tx);
+		}
+	}
+
+	dbuf_rele(dbuf, FTAG);
+
+	delay(zfs_object_remap_one_indirect_delay_ticks);
+
+	return (err);
+}
+
+/*
+ * Remap all blockpointers in the object, if possible, so that they reference
+ * only concrete vdevs.
+ *
+ * To do this, iterate over the L0 blockpointers and remap any that reference
+ * an indirect vdev. Note that we only examine L0 blockpointers; since we
+ * cannot guarantee that we can remap all blockpointer anyways (due to split
+ * blocks), we do not want to make the code unnecessarily complicated to
+ * catch the unlikely case that there is an L1 block on an indirect vdev that
+ * contains no indirect blockpointers.
+ */
+int
+dmu_object_remap_indirects(objset_t *os, uint64_t object,
+    uint64_t last_removal_txg)
+{
+	uint64_t offset, l1span;
+	int err;
+	dnode_t *dn;
+
+	err = dnode_hold(os, object, FTAG, &dn);
+	if (err != 0) {
+		return (err);
+	}
+
+	if (dn->dn_nlevels <= 1) {
+		if (issig(JUSTLOOKING) && issig(FORREAL)) {
+			err = SET_ERROR(EINTR);
+		}
+
+		/*
+		 * If the dnode has no indirect blocks, we cannot dirty them.
+		 * We still want to remap the blkptr(s) in the dnode if
+		 * appropriate, so mark it as dirty.
+		 */
+		if (err == 0 && dnode_needs_remap(dn)) {
+			dmu_tx_t *tx = dmu_tx_create(os);
+			dmu_tx_hold_bonus(tx, dn->dn_object);
+			if ((err = dmu_tx_assign(tx, TXG_WAIT)) == 0) {
+				dnode_setdirty(dn, tx);
+				dmu_tx_commit(tx);
+			} else {
+				dmu_tx_abort(tx);
+			}
+		}
+
+		dnode_rele(dn, FTAG);
+		return (err);
+	}
+
+	offset = 0;
+	l1span = 1ULL << (dn->dn_indblkshift - SPA_BLKPTRSHIFT +
+	    dn->dn_datablkshift);
+	/*
+	 * Find the next L1 indirect that is not a hole.
+	 */
+	while (dnode_next_offset(dn, 0, &offset, 2, 1, 0) == 0) {
+		if (issig(JUSTLOOKING) && issig(FORREAL)) {
+			err = SET_ERROR(EINTR);
+			break;
+		}
+		if ((err = dmu_object_remap_one_indirect(os, dn,
+		    last_removal_txg, offset)) != 0) {
+			break;
+		}
+		offset += l1span;
+	}
+
+	dnode_rele(dn, FTAG);
+	return (err);
+}
+
 void
 dmu_prealloc(objset_t *os, uint64_t object, uint64_t offset, uint64_t size,
     dmu_tx_t *tx)
@@ -1574,6 +1698,7 @@ dmu_sync_done(zio_t *zio, arc_buf_t *buf, void *varg)
 			uint8_t chksum = BP_GET_CHECKSUM(bp_orig);
 
 			ASSERT(BP_EQUAL(bp, bp_orig));
+			VERIFY(BP_EQUAL(bp, db->db_blkptr));
 			ASSERT(zio->io_prop.zp_compress != ZIO_COMPRESS_OFF);
 			ASSERT(zio_checksum_table[chksum].ci_flags &
 			    ZCHECKSUM_FLAG_NOPWRITE);
@@ -1614,19 +1739,11 @@ dmu_sync_late_arrival_done(zio_t *zio)
 	blkptr_t *bp_orig = &zio->io_bp_orig;
 
 	if (zio->io_error == 0 && !BP_IS_HOLE(bp)) {
-		/*
-		 * If we didn't allocate a new block (i.e. ZIO_FLAG_NOPWRITE)
-		 * then there is nothing to do here. Otherwise, free the
-		 * newly allocated block in this txg.
-		 */
-		if (zio->io_flags & ZIO_FLAG_NOPWRITE) {
-			ASSERT(BP_EQUAL(bp, bp_orig));
-		} else {
-			ASSERT(BP_IS_HOLE(bp_orig) || !BP_EQUAL(bp, bp_orig));
-			ASSERT(zio->io_bp->blk_birth == zio->io_txg);
-			ASSERT(zio->io_txg > spa_syncing_txg(zio->io_spa));
-			zio_free(zio->io_spa, zio->io_txg, zio->io_bp);
-		}
+		ASSERT(!(zio->io_flags & ZIO_FLAG_NOPWRITE));
+		ASSERT(BP_IS_HOLE(bp_orig) || !BP_EQUAL(bp, bp_orig));
+		ASSERT(zio->io_bp->blk_birth == zio->io_txg);
+		ASSERT(zio->io_txg > spa_syncing_txg(zio->io_spa));
+		zio_free(zio->io_spa, zio->io_txg, zio->io_bp);
 	}
 
 	dmu_tx_commit(dsa->dsa_tx);
@@ -1652,11 +1769,41 @@ dmu_sync_late_arrival(zio_t *pio, objset_t *os, dmu_sync_cb_t *done, zgd_t *zgd,
 		return (SET_ERROR(EIO));
 	}
 
+	/*
+	 * In order to prevent the zgd's lwb from being free'd prior to
+	 * dmu_sync_late_arrival_done() being called, we have to ensure
+	 * the lwb's "max txg" takes this tx's txg into account.
+	 */
+	zil_lwb_add_txg(zgd->zgd_lwb, dmu_tx_get_txg(tx));
+
 	dsa = kmem_alloc(sizeof (dmu_sync_arg_t), KM_SLEEP);
 	dsa->dsa_dr = NULL;
 	dsa->dsa_done = done;
 	dsa->dsa_zgd = zgd;
 	dsa->dsa_tx = tx;
+
+	/*
+	 * Since we are currently syncing this txg, it's nontrivial to
+	 * determine what BP to nopwrite against, so we disable nopwrite.
+	 *
+	 * When syncing, the db_blkptr is initially the BP of the previous
+	 * txg.  We can not nopwrite against it because it will be changed
+	 * (this is similar to the non-late-arrival case where the dbuf is
+	 * dirty in a future txg).
+	 *
+	 * Then dbuf_write_ready() sets bp_blkptr to the location we will write.
+	 * We can not nopwrite against it because although the BP will not
+	 * (typically) be changed, the data has not yet been persisted to this
+	 * location.
+	 *
+	 * Finally, when dbuf_write_done() is called, it is theoretically
+	 * possible to always nopwrite, because the data that was written in
+	 * this txg is the same data that we are trying to write.  However we
+	 * would need to check that this dbuf is not dirty in any future
+	 * txg's (as we do in the normal dmu_sync() path). For simplicity, we
+	 * don't nopwrite in this case.
+	 */
+	zp->zp_nopwrite = B_FALSE;
 
 	zio_nowait(zio_write(pio, os->os_spa, dmu_tx_get_txg(tx), zgd->zgd_bp,
 	    abd_get_from_buf(zgd->zgd_db->db_data, zgd->zgd_db->db_size),
@@ -1695,7 +1842,6 @@ dmu_sync_late_arrival(zio_t *pio, objset_t *os, dmu_sync_cb_t *done, zgd_t *zgd,
 int
 dmu_sync(zio_t *pio, uint64_t txg, dmu_sync_cb_t *done, zgd_t *zgd)
 {
-	blkptr_t *bp = zgd->zgd_bp;
 	dmu_buf_impl_t *db = (dmu_buf_impl_t *)zgd->zgd_db;
 	objset_t *os = db->db_objset;
 	dsl_dataset_t *ds = os->os_dsl_dataset;
@@ -1713,8 +1859,7 @@ dmu_sync(zio_t *pio, uint64_t txg, dmu_sync_cb_t *done, zgd_t *zgd)
 
 	DB_DNODE_ENTER(db);
 	dn = DB_DNODE(db);
-	dmu_write_policy(os, dn, db->db_level, WP_DMU_SYNC,
-	    ZIO_COMPRESS_INHERIT, &zp);
+	dmu_write_policy(os, dn, db->db_level, WP_DMU_SYNC, &zp);
 	DB_DNODE_EXIT(db);
 
 	/*
@@ -1762,6 +1907,21 @@ dmu_sync(zio_t *pio, uint64_t txg, dmu_sync_cb_t *done, zgd_t *zgd)
 	}
 
 	ASSERT(dr->dr_next == NULL || dr->dr_next->dr_txg < txg);
+
+	if (db->db_blkptr != NULL) {
+		/*
+		 * We need to fill in zgd_bp with the current blkptr so that
+		 * the nopwrite code can check if we're writing the same
+		 * data that's already on disk.  We can only nopwrite if we
+		 * are sure that after making the copy, db_blkptr will not
+		 * change until our i/o completes.  We ensure this by
+		 * holding the db_mtx, and only allowing nopwrite if the
+		 * block is not already dirty (see below).  This is verified
+		 * by dmu_sync_done(), which VERIFYs that the db_blkptr has
+		 * not changed.
+		 */
+		*zgd->zgd_bp = *db->db_blkptr;
+	}
 
 	/*
 	 * Assume the on-disk data is X, the current syncing data (in
@@ -1814,7 +1974,7 @@ dmu_sync(zio_t *pio, uint64_t txg, dmu_sync_cb_t *done, zgd_t *zgd)
 	dsa->dsa_tx = NULL;
 
 	zio_nowait(arc_write(pio, os->os_spa, txg,
-	    bp, dr->dt.dl.dr_data, DBUF_IS_L2CACHEABLE(db),
+	    zgd->zgd_bp, dr->dt.dl.dr_data, DBUF_IS_L2CACHEABLE(db),
 	    &zp, dmu_sync_ready, NULL, NULL, dmu_sync_done, dsa,
 	    ZIO_PRIORITY_SYNC_WRITE, ZIO_FLAG_CANFAIL, &zb));
 
@@ -1884,8 +2044,7 @@ int zfs_mdcomp_disable = 0;
 int zfs_redundant_metadata_most_ditto_level = 2;
 
 void
-dmu_write_policy(objset_t *os, dnode_t *dn, int level, int wp,
-    enum zio_compress override_compress, zio_prop_t *zp)
+dmu_write_policy(objset_t *os, dnode_t *dn, int level, int wp, zio_prop_t *zp)
 {
 	dmu_object_type_t type = dn ? dn->dn_type : DMU_OT_OBJSET;
 	boolean_t ismd = (level > 0 || DMU_OT_IS_METADATA(type) ||
@@ -1897,10 +2056,6 @@ dmu_write_policy(objset_t *os, dnode_t *dn, int level, int wp,
 	boolean_t nopwrite = B_FALSE;
 	boolean_t dedup_verify = os->os_dedup_verify;
 	int copies = os->os_copies;
-	boolean_t lz4_ac = spa_feature_is_active(os->os_spa,
-	    SPA_FEATURE_LZ4_COMPRESS);
-
-	IMPLY(override_compress == ZIO_COMPRESS_LZ4, lz4_ac);
 
 	/*
 	 * We maintain different write policies for each of the following
@@ -1988,14 +2143,7 @@ dmu_write_policy(objset_t *os, dnode_t *dn, int level, int wp,
 	}
 
 	zp->zp_checksum = checksum;
-
-	/*
-	 * If we're writing a pre-compressed buffer, the compression type we use
-	 * must match the data. If it hasn't been compressed yet, then we should
-	 * use the value dictated by the policies above.
-	 */
-	zp->zp_compress = override_compress != ZIO_COMPRESS_INHERIT
-	    ? override_compress : compress;
+	zp->zp_compress = compress;
 	ASSERT3U(zp->zp_compress, !=, ZIO_COMPRESS_INHERIT);
 
 	zp->zp_type = (wp & WP_SPILL) ? dn->dn_bonustype : type;

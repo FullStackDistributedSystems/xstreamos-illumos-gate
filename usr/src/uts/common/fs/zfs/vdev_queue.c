@@ -24,7 +24,7 @@
  */
 
 /*
- * Copyright (c) 2012, 2014 by Delphix. All rights reserved.
+ * Copyright (c) 2012, 2017 by Delphix. All rights reserved.
  * Copyright (c) 2014 Integros [integros.com]
  */
 
@@ -148,6 +148,8 @@ uint32_t zfs_vdev_async_write_min_active = 1;
 uint32_t zfs_vdev_async_write_max_active = 10;
 uint32_t zfs_vdev_scrub_min_active = 1;
 uint32_t zfs_vdev_scrub_max_active = 2;
+uint32_t zfs_vdev_removal_min_active = 1;
+uint32_t zfs_vdev_removal_max_active = 2;
 
 /*
  * When the pool has less than zfs_vdev_async_write_active_min_dirty_percent
@@ -394,6 +396,8 @@ vdev_queue_class_min_active(zio_priority_t p)
 		return (zfs_vdev_async_write_min_active);
 	case ZIO_PRIORITY_SCRUB:
 		return (zfs_vdev_scrub_min_active);
+	case ZIO_PRIORITY_REMOVAL:
+		return (zfs_vdev_removal_min_active);
 	default:
 		panic("invalid priority %u", p);
 		return (0);
@@ -453,6 +457,8 @@ vdev_queue_class_max_active(spa_t *spa, zio_priority_t p)
 		return (vdev_queue_max_async_writes(spa));
 	case ZIO_PRIORITY_SCRUB:
 		return (zfs_vdev_scrub_max_active);
+	case ZIO_PRIORITY_REMOVAL:
+		return (zfs_vdev_removal_max_active);
 	default:
 		panic("invalid priority %u", p);
 		return (0);
@@ -539,12 +545,13 @@ vdev_queue_aggregate(vdev_queue_t *vq, zio_t *zio)
 
 	/*
 	 * Walk backwards through sufficiently contiguous I/Os
-	 * recording the last non-option I/O.
+	 * recording the last non-optional I/O.
 	 */
 	while ((dio = AVL_PREV(t, first)) != NULL &&
 	    (dio->io_flags & ZIO_FLAG_AGG_INHERIT) == flags &&
 	    IO_SPAN(dio, last) <= zfs_vdev_aggregation_limit &&
-	    IO_GAP(dio, first) <= maxgap) {
+	    IO_GAP(dio, first) <= maxgap &&
+	    dio->io_type == zio->io_type) {
 		first = dio;
 		if (mandatory == NULL && !(first->io_flags & ZIO_FLAG_OPTIONAL))
 			mandatory = first;
@@ -560,11 +567,16 @@ vdev_queue_aggregate(vdev_queue_t *vq, zio_t *zio)
 
 	/*
 	 * Walk forward through sufficiently contiguous I/Os.
+	 * The aggregation limit does not apply to optional i/os, so that
+	 * we can issue contiguous writes even if they are larger than the
+	 * aggregation limit.
 	 */
 	while ((dio = AVL_NEXT(t, last)) != NULL &&
 	    (dio->io_flags & ZIO_FLAG_AGG_INHERIT) == flags &&
-	    IO_SPAN(first, dio) <= zfs_vdev_aggregation_limit &&
-	    IO_GAP(last, dio) <= maxgap) {
+	    (IO_SPAN(first, dio) <= zfs_vdev_aggregation_limit ||
+	    (dio->io_flags & ZIO_FLAG_OPTIONAL)) &&
+	    IO_GAP(last, dio) <= maxgap &&
+	    dio->io_type == zio->io_type) {
 		last = dio;
 		if (!(last->io_flags & ZIO_FLAG_OPTIONAL))
 			mandatory = last;
@@ -594,10 +606,16 @@ vdev_queue_aggregate(vdev_queue_t *vq, zio_t *zio)
 	}
 
 	if (stretch) {
-		/* This may be a no-op. */
+		/*
+		 * We are going to include an optional io in our aggregated
+		 * span, thus closing the write gap.  Only mandatory i/os can
+		 * start aggregated spans, so make sure that the next i/o
+		 * after our span is mandatory.
+		 */
 		dio = AVL_NEXT(t, last);
 		dio->io_flags &= ~ZIO_FLAG_OPTIONAL;
 	} else {
+		/* do not include the optional i/o */
 		while (last != mandatory && last != first) {
 			ASSERT(last->io_flags & ZIO_FLAG_OPTIONAL);
 			last = AVL_PREV(t, last);
@@ -609,7 +627,7 @@ vdev_queue_aggregate(vdev_queue_t *vq, zio_t *zio)
 		return (NULL);
 
 	size = IO_SPAN(first, last);
-	ASSERT3U(size, <=, zfs_vdev_aggregation_limit);
+	ASSERT3U(size, <=, SPA_MAXBLOCKSIZE);
 
 	aio = zio_vdev_delegated_io(first->io_vd, first->io_offset,
 	    abd_alloc_for_io(size, B_TRUE), size, first->io_type,
@@ -717,12 +735,14 @@ vdev_queue_io(zio_t *zio)
 	if (zio->io_type == ZIO_TYPE_READ) {
 		if (zio->io_priority != ZIO_PRIORITY_SYNC_READ &&
 		    zio->io_priority != ZIO_PRIORITY_ASYNC_READ &&
-		    zio->io_priority != ZIO_PRIORITY_SCRUB)
+		    zio->io_priority != ZIO_PRIORITY_SCRUB &&
+		    zio->io_priority != ZIO_PRIORITY_REMOVAL)
 			zio->io_priority = ZIO_PRIORITY_ASYNC_READ;
 	} else {
 		ASSERT(zio->io_type == ZIO_TYPE_WRITE);
 		if (zio->io_priority != ZIO_PRIORITY_SYNC_WRITE &&
-		    zio->io_priority != ZIO_PRIORITY_ASYNC_WRITE)
+		    zio->io_priority != ZIO_PRIORITY_ASYNC_WRITE &&
+		    zio->io_priority != ZIO_PRIORITY_REMOVAL)
 			zio->io_priority = ZIO_PRIORITY_ASYNC_WRITE;
 	}
 

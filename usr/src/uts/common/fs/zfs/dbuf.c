@@ -47,6 +47,8 @@
 #include <sys/range_tree.h>
 #include <sys/callb.h>
 #include <sys/abd.h>
+#include <sys/vdev.h>
+#include <sys/cityhash.h>
 
 uint_t zfs_dbuf_evict_key;
 
@@ -166,23 +168,14 @@ static dbuf_hash_table_t dbuf_hash_table;
 
 static uint64_t dbuf_hash_count;
 
+/*
+ * We use Cityhash for this. It's fast, and has good hash properties without
+ * requiring any large static buffers.
+ */
 static uint64_t
 dbuf_hash(void *os, uint64_t obj, uint8_t lvl, uint64_t blkid)
 {
-	uintptr_t osv = (uintptr_t)os;
-	uint64_t crc = -1ULL;
-
-	ASSERT(zfs_crc64_table[128] == ZFS_CRC64_POLY);
-	crc = (crc >> 8) ^ zfs_crc64_table[(crc ^ (lvl)) & 0xFF];
-	crc = (crc >> 8) ^ zfs_crc64_table[(crc ^ (osv >> 6)) & 0xFF];
-	crc = (crc >> 8) ^ zfs_crc64_table[(crc ^ (obj >> 0)) & 0xFF];
-	crc = (crc >> 8) ^ zfs_crc64_table[(crc ^ (obj >> 8)) & 0xFF];
-	crc = (crc >> 8) ^ zfs_crc64_table[(crc ^ (blkid >> 0)) & 0xFF];
-	crc = (crc >> 8) ^ zfs_crc64_table[(crc ^ (blkid >> 8)) & 0xFF];
-
-	crc ^= (osv>>14) ^ (obj>>16) ^ (blkid>>16);
-
-	return (crc);
+	return (cityhash4((uintptr_t)os, obj, (uint64_t)lvl, blkid));
 }
 
 #define	DBUF_EQUAL(dbuf, os, obj, level, blkid)		\
@@ -495,8 +488,9 @@ dbuf_evict_one(void)
  * of the dbuf cache is at or below the maximum size. Once the dbuf is aged
  * out of the cache it is destroyed and becomes eligible for arc eviction.
  */
+/* ARGSUSED */
 static void
-dbuf_evict_thread(void)
+dbuf_evict_thread(void *unused)
 {
 	callb_cpr_t cpr;
 
@@ -561,19 +555,15 @@ dbuf_evict_notify(void)
 	if (tsd_get(zfs_dbuf_evict_key) != NULL)
 		return;
 
+	/*
+	 * We check if we should evict without holding the dbuf_evict_lock,
+	 * because it's OK to occasionally make the wrong decision here,
+	 * and grabbing the lock results in massive lock contention.
+	 */
 	if (refcount_count(&dbuf_cache_size) > dbuf_cache_max_bytes) {
-		boolean_t evict_now = B_FALSE;
-
-		mutex_enter(&dbuf_evict_lock);
-		if (refcount_count(&dbuf_cache_size) > dbuf_cache_max_bytes) {
-			evict_now = dbuf_cache_above_hiwater();
-			cv_signal(&dbuf_evict_cv);
-		}
-		mutex_exit(&dbuf_evict_lock);
-
-		if (evict_now) {
+		if (dbuf_cache_above_hiwater())
 			dbuf_evict_one();
-		}
+		cv_signal(&dbuf_evict_cv);
 	}
 }
 
@@ -1220,6 +1210,11 @@ dbuf_unoverride(dbuf_dirty_record_t *dr)
 	uint64_t txg = dr->dr_txg;
 
 	ASSERT(MUTEX_HELD(&db->db_mtx));
+	/*
+	 * This assert is valid because dmu_sync() expects to be called by
+	 * a zilog's get_data while holding a range lock.  This call only
+	 * comes from dbuf_dirty() callers who must also hold a range lock.
+	 */
 	ASSERT(dr->dt.dl.dr_override_state != DR_IN_DMU_SYNC);
 	ASSERT(db->db_level == 0);
 
@@ -1541,11 +1536,6 @@ dbuf_dirty(dmu_buf_impl_t *db, dmu_tx_t *tx)
 	    (dmu_tx_is_syncing(tx) ? DN_DIRTY_SYNC : DN_DIRTY_OPEN));
 
 	ASSERT3U(dn->dn_nlevels, >, db->db_level);
-	ASSERT((dn->dn_phys->dn_nlevels == 0 && db->db_level == 0) ||
-	    dn->dn_phys->dn_nlevels > db->db_level ||
-	    dn->dn_next_nlevels[txgoff] > db->db_level ||
-	    dn->dn_next_nlevels[(tx->tx_txg-1) & TXG_MASK] > db->db_level ||
-	    dn->dn_next_nlevels[(tx->tx_txg-2) & TXG_MASK] > db->db_level);
 
 	/*
 	 * We should only be dirtying in syncing context if it's the
@@ -1661,6 +1651,16 @@ dbuf_dirty(dmu_buf_impl_t *db, dmu_tx_t *tx)
 		rw_enter(&dn->dn_struct_rwlock, RW_READER);
 		drop_struct_lock = TRUE;
 	}
+
+	/*
+	 * We need to hold the dn_struct_rwlock to make this assertion,
+	 * because it protects dn_phys / dn_next_nlevels from changing.
+	 */
+	ASSERT((dn->dn_phys->dn_nlevels == 0 && db->db_level == 0) ||
+	    dn->dn_phys->dn_nlevels > db->db_level ||
+	    dn->dn_next_nlevels[txgoff] > db->db_level ||
+	    dn->dn_next_nlevels[(tx->tx_txg-1) & TXG_MASK] > db->db_level ||
+	    dn->dn_next_nlevels[(tx->tx_txg-2) & TXG_MASK] > db->db_level);
 
 	/*
 	 * If we are overwriting a dedup BP, then unless it is snapshotted,
@@ -2367,6 +2367,10 @@ dbuf_prefetch_indirect_done(zio_t *zio, arc_buf_t *abuf, void *private)
 		arc_flags_t iter_aflags = ARC_FLAG_NOWAIT;
 		zbookmark_phys_t zb;
 
+		/* flag if L2ARC eligible, l2arc_noprefetch then decides */
+		if (dpa->dpa_aflags & ARC_FLAG_L2CACHE)
+			iter_aflags |= ARC_FLAG_L2CACHE;
+
 		ASSERT3U(dpa->dpa_curlevel, ==, BP_GET_LEVEL(bp));
 
 		SET_BOOKMARK(&zb, dpa->dpa_zb.zb_objset,
@@ -2476,6 +2480,10 @@ dbuf_prefetch(dnode_t *dn, int64_t level, uint64_t blkid, zio_priority_t prio,
 	dpa->dpa_epbs = epbs;
 	dpa->dpa_zio = pio;
 
+	/* flag if L2ARC eligible, l2arc_noprefetch then decides */
+	if (DNODE_LEVEL_IS_L2CACHEABLE(dn, level))
+		dpa->dpa_aflags |= ARC_FLAG_L2CACHE;
+
 	/*
 	 * If we have the indirect just above us, no need to do the asynchronous
 	 * prefetch chain; we'll just run the last step ourselves.  If we're at
@@ -2490,6 +2498,10 @@ dbuf_prefetch(dnode_t *dn, int64_t level, uint64_t blkid, zio_priority_t prio,
 	} else {
 		arc_flags_t iter_aflags = ARC_FLAG_NOWAIT;
 		zbookmark_phys_t zb;
+
+		/* flag if L2ARC eligible, l2arc_noprefetch then decides */
+		if (DNODE_LEVEL_IS_L2CACHEABLE(dn, level))
+			iter_aflags |= ARC_FLAG_L2CACHE;
 
 		SET_BOOKMARK(&zb, ds != NULL ? ds->ds_object : DMU_META_OBJSET,
 		    dn->dn_object, curlevel, curblkid);
@@ -2988,6 +3000,7 @@ dbuf_sync_indirect(dbuf_dirty_record_t *dr, dmu_tx_t *tx)
 	db->db_data_pending = dr;
 
 	mutex_exit(&db->db_mtx);
+
 	dbuf_write(dr, db->db_buf, tx);
 
 	zio = dr->dr_zio;
@@ -3459,6 +3472,141 @@ dbuf_write_override_done(zio_t *zio)
 		abd_put(zio->io_abd);
 }
 
+typedef struct dbuf_remap_impl_callback_arg {
+	objset_t	*drica_os;
+	uint64_t	drica_blk_birth;
+	dmu_tx_t	*drica_tx;
+} dbuf_remap_impl_callback_arg_t;
+
+static void
+dbuf_remap_impl_callback(uint64_t vdev, uint64_t offset, uint64_t size,
+    void *arg)
+{
+	dbuf_remap_impl_callback_arg_t *drica = arg;
+	objset_t *os = drica->drica_os;
+	spa_t *spa = dmu_objset_spa(os);
+	dmu_tx_t *tx = drica->drica_tx;
+
+	ASSERT(dsl_pool_sync_context(spa_get_dsl(spa)));
+
+	if (os == spa_meta_objset(spa)) {
+		spa_vdev_indirect_mark_obsolete(spa, vdev, offset, size, tx);
+	} else {
+		dsl_dataset_block_remapped(dmu_objset_ds(os), vdev, offset,
+		    size, drica->drica_blk_birth, tx);
+	}
+}
+
+static void
+dbuf_remap_impl(dnode_t *dn, blkptr_t *bp, dmu_tx_t *tx)
+{
+	blkptr_t bp_copy = *bp;
+	spa_t *spa = dmu_objset_spa(dn->dn_objset);
+	dbuf_remap_impl_callback_arg_t drica;
+
+	ASSERT(dsl_pool_sync_context(spa_get_dsl(spa)));
+
+	drica.drica_os = dn->dn_objset;
+	drica.drica_blk_birth = bp->blk_birth;
+	drica.drica_tx = tx;
+	if (spa_remap_blkptr(spa, &bp_copy, dbuf_remap_impl_callback,
+	    &drica)) {
+		/*
+		 * The struct_rwlock prevents dbuf_read_impl() from
+		 * dereferencing the BP while we are changing it.  To
+		 * avoid lock contention, only grab it when we are actually
+		 * changing the BP.
+		 */
+		rw_enter(&dn->dn_struct_rwlock, RW_WRITER);
+		*bp = bp_copy;
+		rw_exit(&dn->dn_struct_rwlock);
+	}
+}
+
+/*
+ * Returns true if a dbuf_remap would modify the dbuf. We do this by attempting
+ * to remap a copy of every bp in the dbuf.
+ */
+boolean_t
+dbuf_can_remap(const dmu_buf_impl_t *db)
+{
+	spa_t *spa = dmu_objset_spa(db->db_objset);
+	blkptr_t *bp = db->db.db_data;
+	boolean_t ret = B_FALSE;
+
+	ASSERT3U(db->db_level, >, 0);
+	ASSERT3S(db->db_state, ==, DB_CACHED);
+
+	ASSERT(spa_feature_is_active(spa, SPA_FEATURE_DEVICE_REMOVAL));
+
+	spa_config_enter(spa, SCL_VDEV, FTAG, RW_READER);
+	for (int i = 0; i < db->db.db_size >> SPA_BLKPTRSHIFT; i++) {
+		blkptr_t bp_copy = bp[i];
+		if (spa_remap_blkptr(spa, &bp_copy, NULL, NULL)) {
+			ret = B_TRUE;
+			break;
+		}
+	}
+	spa_config_exit(spa, SCL_VDEV, FTAG);
+
+	return (ret);
+}
+
+boolean_t
+dnode_needs_remap(const dnode_t *dn)
+{
+	spa_t *spa = dmu_objset_spa(dn->dn_objset);
+	boolean_t ret = B_FALSE;
+
+	if (dn->dn_phys->dn_nlevels == 0) {
+		return (B_FALSE);
+	}
+
+	ASSERT(spa_feature_is_active(spa, SPA_FEATURE_DEVICE_REMOVAL));
+
+	spa_config_enter(spa, SCL_VDEV, FTAG, RW_READER);
+	for (int j = 0; j < dn->dn_phys->dn_nblkptr; j++) {
+		blkptr_t bp_copy = dn->dn_phys->dn_blkptr[j];
+		if (spa_remap_blkptr(spa, &bp_copy, NULL, NULL)) {
+			ret = B_TRUE;
+			break;
+		}
+	}
+	spa_config_exit(spa, SCL_VDEV, FTAG);
+
+	return (ret);
+}
+
+/*
+ * Remap any existing BP's to concrete vdevs, if possible.
+ */
+static void
+dbuf_remap(dnode_t *dn, dmu_buf_impl_t *db, dmu_tx_t *tx)
+{
+	spa_t *spa = dmu_objset_spa(db->db_objset);
+	ASSERT(dsl_pool_sync_context(spa_get_dsl(spa)));
+
+	if (!spa_feature_is_active(spa, SPA_FEATURE_DEVICE_REMOVAL))
+		return;
+
+	if (db->db_level > 0) {
+		blkptr_t *bp = db->db.db_data;
+		for (int i = 0; i < db->db.db_size >> SPA_BLKPTRSHIFT; i++) {
+			dbuf_remap_impl(dn, &bp[i], tx);
+		}
+	} else if (db->db.db_object == DMU_META_DNODE_OBJECT) {
+		dnode_phys_t *dnp = db->db.db_data;
+		ASSERT3U(db->db_dnode_handle->dnh_dnode->dn_type, ==,
+		    DMU_OT_DNODE);
+		for (int i = 0; i < db->db.db_size >> DNODE_SHIFT; i++) {
+			for (int j = 0; j < dnp[i].dn_nblkptr; j++) {
+				dbuf_remap_impl(dn, &dnp[i].dn_blkptr[j], tx);
+			}
+		}
+	}
+}
+
+
 /* Issue I/O to commit a dirty buffer to disk. */
 static void
 dbuf_write(dbuf_dirty_record_t *dr, arc_buf_t *data, dmu_tx_t *tx)
@@ -3492,6 +3640,7 @@ dbuf_write(dbuf_dirty_record_t *dr, arc_buf_t *data, dmu_tx_t *tx)
 			} else {
 				dbuf_release_bp(db);
 			}
+			dbuf_remap(dn, db, tx);
 		}
 	}
 
@@ -3530,9 +3679,7 @@ dbuf_write(dbuf_dirty_record_t *dr, arc_buf_t *data, dmu_tx_t *tx)
 		wp_flag = WP_SPILL;
 	wp_flag |= (db->db_state == DB_NOFILL) ? WP_NOFILL : 0;
 
-	dmu_write_policy(os, dn, db->db_level, wp_flag,
-	    (data != NULL && arc_get_compression(data) != ZIO_COMPRESS_OFF) ?
-	    arc_get_compression(data) : ZIO_COMPRESS_INHERIT, &zp);
+	dmu_write_policy(os, dn, db->db_level, wp_flag, &zp);
 	DB_DNODE_EXIT(db);
 
 	/*

@@ -88,14 +88,14 @@ set mainmenu_keycode[6]=101
 set mainansi_caption[6]="Select Boot ^[1mE^[mnvironment..."
 
   s" chain_disk" getenv? [if]
-	set mainmenu_caption[7]="Chain[L]load ${chain_disk}"
+	set mainmenu_caption[7]="Chain[L]oad ${chain_disk}"
 	set mainmenu_command[7]="chain ${chain_disk}"
 	set mainmenu_keycode[7]=108
 	set mainansi_caption[7]="Chain^[1mL^[moad ${chain_disk}"
   [then]
 [else]
   s" chain_disk" getenv? [if]
-	set mainmenu_caption[6]="Chain[L]load ${chain_disk}"
+	set mainmenu_caption[6]="Chain[L]oad ${chain_disk}"
 	set mainmenu_command[6]="chain ${chain_disk}"
 	set mainmenu_keycode[6]=108
 	set mainansi_caption[6]="Chain^[1mL^[moad ${chain_disk}"
@@ -173,12 +173,12 @@ set optionstoggled_ansi[8]="^[1mD^[mebug....... ^[32;7mOn^[m"
 \ BOOT ENVIRONMENT MENU
 \
 
-\ the BE list is read from pool/boot/menu.lst, the list in file
+\ the BE list is read from [pool]/boot/menu.lst, the list in file
 \ is ordered from oldest to most recent.
 \ the BE menu will list entries from most recent to oldest,
 \ so the first page in menu is last page in menu.lst
 
-s" currdev" getenv drop 4 s" zfs:" compare 0= be-pages and [if]
+be-pages [if]
   set zfs_be_currpage=1
   be-set-page			\ set page data
   set menuset_name3="bootenv"

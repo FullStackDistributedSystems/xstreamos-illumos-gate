@@ -22,12 +22,12 @@
 /*
  * Copyright (c) 1988, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2016 Toomas Soome <tsoome@me.com>
- * Copyright (c) 2016 by Delphix. All rights reserved.
+ * Copyright (c) 2016, 2017 by Delphix. All rights reserved.
  * Copyright 2016 Nexenta Systems, Inc.
  */
 
 /*	Copyright (c) 1983, 1984, 1985, 1986, 1987, 1988, 1989 AT&T	*/
-/*	  All Rights Reserved  	*/
+/*	  All Rights Reserved	*/
 
 /*
  * Portions of this source code were derived from Berkeley 4.3 BSD
@@ -416,6 +416,7 @@ enum {
 #define	VSW_XID		0x40	/* file system supports extended ids */
 #define	VSW_CANLOFI	0x80	/* file system supports lofi mounts */
 #define	VSW_ZMOUNT	0x100	/* file system always allowed in a zone */
+#define	VSW_MOUNTDEV	0x200	/* file system is mounted via device path */
 
 #define	VSW_INSTALLED	0x8000	/* this vsw is associated with a file system */
 
