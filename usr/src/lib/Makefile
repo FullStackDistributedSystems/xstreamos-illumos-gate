@@ -30,6 +30,7 @@
 # Copyright 2018 Nexenta Systems, Inc.
 # Copyright (c) 2016, Chris Fraire <cfraire@me.com>.
 # Copyright 2017 RackTop Systems.
+# Copyirght 2018 Jason King
 #
 
 include ../Makefile.master
@@ -105,6 +106,8 @@ SUBDIRS +=				\
 	libcryptoutil	\
 	libctf		\
 	libcurses	\
+	libcustr	\
+	libdemangle	\
 	libdevice	\
 	libdevid	\
 	libdevinfo	\
@@ -117,7 +120,6 @@ SUBDIRS +=				\
 	libdlpi		\
 	libdns_sd	\
 	libdoor		\
-	libdscfg	\
 	libdtrace	\
 	libdtrace_jni	\
 	libefi		\
@@ -163,12 +165,12 @@ SUBDIRS +=				\
 	libmapid	\
 	libmapmalloc	\
 	libmd5		\
+	libmlrpc	\
 	libmtmalloc	\
 	libmvec		\
 	libndmp		\
 	libnisdb	\
 	libnls		\
-	libnsctl	\
 	libnwam		\
 	libofmt		\
 	libpam		\
@@ -184,7 +186,6 @@ SUBDIRS +=				\
 	libpthread	\
 	libraidcfg	\
 	librcm		\
-	librdc		\
 	libreparse	\
 	libresolv	\
 	libresolv2	\
@@ -226,7 +227,6 @@ SUBDIRS +=				\
 	libtsnet	\
 	libtsol		\
 	libumem		\
-	libunistat	\
 	libuuid		\
 	libuutil	\
 	libvolmgt	\
@@ -380,6 +380,8 @@ HDRSUBDIRS=				\
 	libcryptoutil	\
 	libctf		\
 	libcurses	\
+	libcustr	\
+	libdemangle	\
 	libdevice	\
 	libdevid	\
 	libdevinfo	\
@@ -391,7 +393,6 @@ HDRSUBDIRS=				\
 	libdll		\
 	libdlpi		\
 	libdns_sd	\
-	libdscfg	\
 	libdtrace	\
 	libdtrace_jni	\
 	libelfsign	\
@@ -421,9 +422,9 @@ HDRSUBDIRS=				\
 	libmail		\
 	libmapid	\
 	libmd		\
+	libmlrpc	\
 	libmtmalloc	\
 	libndmp		\
-	libnsctl	\
 	libnsl		\
 	libnvpair	\
 	libnwam		\
@@ -438,7 +439,6 @@ HDRSUBDIRS=				\
 	libproc		\
 	libraidcfg	\
 	librcm		\
-	librdc		\
 	libreparse	\
 	librestart	\
 	librpcsvc	\
@@ -471,7 +471,6 @@ HDRSUBDIRS=				\
 	libtsnet	\
 	libtsol		\
 	libumem		\
-	libunistat	\
 	libuutil	\
 	libvolmgt	\
 	libvrrpadm	\
@@ -572,7 +571,8 @@ auditd_plugins: libbsm libsecdb libgss libmtmalloc
 brand:		libzonecfg libmapmalloc
 cfgadm_plugins:	libdevice libdevinfo libhotplug librcm hbaapi libkstat libscf
 fm:		libexacct libipmi libzfs scsi libdevinfo libdevid libcfgadm \
-		libcontract libsysevent ../cmd/sgs/libelf libdladm libsff
+		libcontract libsysevent ../cmd/sgs/libelf libdladm libsff \
+		libpcidb
 $(SPARC_BLD)fm:	libpri
 gss_mechs/mech_dh: libgss
 gss_mechs/mech_dummy: libgss
@@ -597,13 +597,12 @@ libdiskmgt:	libdevid libdevinfo libadm libefi libkstat libsysevent
 $(INTEL_BLD)libdiskmgt: libfdisk
 libdladm:	libdevinfo libinetutil libscf librcm libexacct libkstat \
 		libpool
-libdll: 	libast
+libdll:		libast
 libdlpi:	libinetutil libdladm
 libds:		libsysevent
-libdscfg:	libnsctl libunistat libadm
 libdtrace:	libproc libgen libctf libmapmalloc
 libdtrace_jni:	libuutil libdtrace
-libefi:		libuuid
+libefi:		libuuid libsmbios
 libelfsign:	libcryptoutil libkmf ../cmd/sgs/libelf
 libeti:		libcurses
 libexacct/demo:	libexacct libproject
@@ -619,12 +618,13 @@ libinetsvc:	libscf
 libinstzones:	libzonecfg libcontract
 libipadm:	libinetutil libdlpi libdhcpagent libdladm libsecdb libdhcputil
 libipmp:	libinetutil
-libipsecutil:	libtecla libtsol
+libipsecutil:	libtecla libtsol libkmf
 libiscsit:	libstmf libuuid
-libkmf:		libcryptoutil pkcs11
+libkmf:		libcryptoutil pkcs11 libcustr
 libkvm:		../cmd/sgs/libelf
 libldap5:	libsasl
 libmapid:	libresolv2 libscf
+libmlrpc:	libsmbfs libuuid
 libndmp:	libscf
 libnisdb:	libldap5
 libnwam:	libscf libbsm libdladm libipadm
@@ -639,7 +639,6 @@ libproject:	libpool libproc libsecdb
 libprtdiag:	libkstat
 libprtdiag_psr:	libprtdiag
 libraidcfg:	libdevinfo
-librdc:		libnsctl libunistat libdscfg
 librestart:	libuutil libscf libpool libproject libsecdb libsysevent
 libsasl:	libgss pkcs11
 libsaveargs:	libdisasm
@@ -654,8 +653,8 @@ libsmbfs:	libkrb5 libsec libidmap pkcs11
 libsmbios:	libdevinfo
 libsrpt:	libstmf
 libstmf:	libscf
-libstmfproxy: 	libstmf libpthread
-libsum: 	libast
+libstmfproxy:	libstmf libpthread
+libsum:		libast
 libsun_ima:	libdevinfo libsysevent
 libsysevent:	libsecdb
 libtecla:	libcurses
@@ -670,7 +669,7 @@ libvolmgt:	libadm
 libvrrpadm:	libdladm libscf
 libvscan:	libscf libsecdb
 libzfs:		libdevid libgen libuutil libadm libavl libefi libidmap \
-		libumem libtsol libzfs_core libcmdutils
+		libumem libtsol libzfs_core
 libzfs_jni:	libdiskmgt libzfs
 libzonecfg:	libuuid libsysevent libsec libbrand libpool libscf libproc \
 		libuutil libbsm libsecdb
@@ -685,7 +684,7 @@ passwdutil:	libsldap
 pkcs11:		libcryptoutil libgen libuuid
 policykit:	dbusdeps
 print:		libldap5 libmd5 libsendfile
-pylibbe: 	libbe libzfs
+pylibbe:	libbe libzfs
 pysolaris:	libsec libidmap
 pyzfs:		libzfs
 raidcfg_plugins: libraidcfg librcm libcfgadm libpicl libpicltree
@@ -694,7 +693,7 @@ sasl_plugins:	pkcs11 libgss libsasl
 scsi:		libfru libumem libdevid libdevinfo
 smbsrv:		libxnet libpthread librt libshare libidmap pkcs11 libsqlite \
 		libcryptoutil libreparse libcmdutils libresolv2 libsmbfs \
-		libuuid libfakekernel libads libgss libldap5 krb5
+		libuuid libfakekernel libads libgss libldap5 krb5 libmlrpc
 storage:	libdevice libdevinfo libdevid
 sun_fc:		libdevinfo libsysevent
 sun_sas:	libdevinfo libsysevent libkstat libdevid

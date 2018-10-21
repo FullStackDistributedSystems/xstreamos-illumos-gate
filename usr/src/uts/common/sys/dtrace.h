@@ -25,7 +25,7 @@
  */
 
 /*
- * Copyright 2016 Joyent, Inc.
+ * Copyright 2018 Joyent, Inc.
  * Copyright (c) 2013 by Delphix. All rights reserved.
  */
 
@@ -189,6 +189,7 @@ typedef enum dtrace_probespec {
 #define	DIF_OP_RLDX	77		/* rldx  [r1], rd */
 #define	DIF_OP_XLATE	78		/* xlate xlrindex, rd */
 #define	DIF_OP_XLARG	79		/* xlarg xlrindex, rd */
+#define	DIF_OP_STGA	80		/* stga var, ri, rd */
 
 #define	DIF_INTOFF_MAX		0xffff	/* highest integer table offset */
 #define	DIF_STROFF_MAX		0xffff	/* highest string table offset */
@@ -241,6 +242,7 @@ typedef enum dtrace_probespec {
 #define	DIF_VAR_UID		0x011e	/* process user ID */
 #define	DIF_VAR_GID		0x011f	/* process group ID */
 #define	DIF_VAR_ERRNO		0x0120	/* thread errno */
+#define	DIF_VAR_THREADNAME	0x0121	/* thread name */
 
 #define	DIF_SUBR_RAND			0
 #define	DIF_SUBR_MUTEX_OWNED		1
@@ -2211,8 +2213,8 @@ extern void dtrace_probe(dtrace_id_t, uintptr_t arg0, uintptr_t arg1,
  */
 typedef struct dtrace_helper_probedesc {
 	char *dthpb_mod;			/* probe module */
-	char *dthpb_func; 			/* probe function */
-	char *dthpb_name; 			/* probe name */
+	char *dthpb_func;			/* probe function */
+	char *dthpb_name;			/* probe name */
 	uint64_t dthpb_base;			/* base address */
 	uint32_t *dthpb_offs;			/* offsets array */
 	uint32_t *dthpb_enoffs;			/* is-enabled offsets array */

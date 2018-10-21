@@ -17,23 +17,22 @@
 include $(SRC)/Makefile.master
 include $(SRC)/boot/Makefile.version
 
-CFLAGS=		-O2
+CFLAGS=		-O2 -fno-reorder-functions
 CPPFLAGS=	-D_STANDALONE -nostdinc -I../../../../include -I../../..
 CPPFLAGS +=	-I$(SRC)/uts/intel/sys/acpi
-LOADER=		zfsloader
+LOADER=		loader
 NEWVERSWHAT=	"ZFS enabled bootstrap loader" x86
-MAN=
 
-# Set by zfsloader Makefile
+# Set by loader Makefile
 CPPFLAGS +=	-DLOADER_ZFS_SUPPORT -I../../zfs
 CPPFLAGS +=	-I../libi386
-LIBZFSBOOT=	../../zfs/i386/libzfsboot.a
+LIBZFSBOOT=	../../zfs/$(MACH)/libzfsboot.a
 LIBI386=        ../libi386/libi386.a
 
 # loader.help build needs better awk
 AWK=		/usr/xpg4/bin/awk
 LD=		$(GNU_ROOT)/bin/gld
-CC=		$(GCC_ROOT)/bin/gcc
+CC=		$(GNUC_ROOT)/bin/gcc
 OBJCOPY=	$(GNU_ROOT)/bin/gobjcopy
 GSTRIP=		$(GNU_ROOT)/bin/gstrip
 ROOT_BOOT=	$(ROOT)/boot
@@ -58,8 +57,8 @@ SRCS=		main.c conf.c vers.c chain.c
 CPPFLAGS +=	-DLOADER_GZIP_SUPPORT
 
 # Enable BootForth
-CPPFLAGS +=	-DBOOT_FORTH -I$(SRC)/common/ficl -I../../ficl
-LIBFICL=	../../ficl/i386/libficl.a
+CPPFLAGS +=	-DBOOT_FORTH -I$(SRC)/common/ficl -I../../libficl
+LIBFICL=	../../libficl/$(MACH)/libficl.a
 
 # Always add MI sources
 SRCS +=	boot.c commands.c console.c devopen.c interp.c
@@ -85,8 +84,6 @@ SRCS +=	pnp.c
 # Forth interpreter
 SRCS +=	interp_forth.c
 
-MAN +=	loader.8
-MAN +=	zfsloader.8
 CPPFLAGS +=	-I../../common
 CPPFLAGS +=	-I.
 
@@ -97,7 +94,7 @@ LDFLAGS=	-static -Ttext 0x0
 
 # i386 standalone support library
 CPPFLAGS +=	-I.. -I../../../../lib/libstand
-LIBSTAND=	../../libstand/i386/libstand.a
+LIBSTAND=	../../libstand/$(MACH)/libstand.a
 
 # BTX components
 CPPFLAGS +=	-I../btx/lib

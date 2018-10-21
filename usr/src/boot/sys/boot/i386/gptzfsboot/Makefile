@@ -21,7 +21,7 @@ include $(SRC)/boot/Makefile.version
 
 AS=	$(GNU_ROOT)/bin/gas
 LD=	$(GNU_ROOT)/bin/gld
-CC=	$(GCC_ROOT)/bin/gcc
+CC=	$(GNUC_ROOT)/bin/gcc
 OBJCOPY=	$(GNU_ROOT)/bin/gobjcopy
 
 PROG=		gptzfsboot
@@ -52,7 +52,6 @@ CFLAGS=	-nostdinc -DBOOTPROG=\"gptzfsboot\" \
 	-I../../../cddl/boot/zfs \
 	-I../btx/lib -I. \
 	-I../../.. \
-	-I../../../sys \
 	-I../libi386 \
 	-Wall -Waggregate-return -Wbad-function-cast -Wcast-align \
 	-Wmissing-declarations -Wmissing-prototypes -Wnested-externs \
@@ -64,8 +63,8 @@ CFLAGS +=	-fno-reorder-functions
 
 LD_FLAGS=-static -N --gc-sections
 CCASFLAGS=-Wa,--divide
-LIBSTAND=	../../libstand/i386/libstand.a
-LIBZFSBOOT=	../../zfs/i386/libzfsboot.a
+LIBSTAND=	../../libstand/$(MACH)/libstand.a
+LIBZFSBOOT=	../../zfs/$(MACH)/libzfsboot.a
 
 include ../Makefile.inc
 
@@ -134,6 +133,9 @@ devicename.o: ../libi386/devicename.c
 
 time.o: ../libi386/time.c
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ ../libi386/$*.c
+
+multiboot.o: ../../common/multiboot.S
+	$(CC) $(CFLAGS) $(CCASFLAGS) -c -o $@ ../../common/$*.S
 
 .S.o:
 	$(CC) $(CFLAGS) $(CCASFLAGS) -c -o $@ $<

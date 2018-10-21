@@ -21,7 +21,7 @@
 
 /*
  * Copyright (c) 2006, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2017, Joyent, Inc.
+ * Copyright (c) 2018, Joyent, Inc.
  */
 
 #ifndef _TOPO_HC_H
@@ -87,6 +87,7 @@ extern "C" {
 #define	SHELF		"shelf"
 #define	SCSI_DEVICE	"scsi-device"
 #define	SES_ENCLOSURE	"ses-enclosure"
+#define	SLOT		"slot"
 #define	SMP_DEVICE	"smp-device"
 #define	SP		"sp"
 #define	SUBCHASSIS	"subchassis"
@@ -101,6 +102,7 @@ extern "C" {
 #define	TOPO_PGROUP_IO		"io"
 #define	TOPO_IO_DEVTYPE		"devtype"
 #define	TOPO_IO_DRIVER		"driver"
+#define	TOPO_IO_INSTANCE	"instance"
 #define	TOPO_IO_MODULE		"module"
 #define	TOPO_IO_DEV		"dev"
 #define	TOPO_IO_DEVID		"devid"
@@ -192,6 +194,35 @@ extern "C" {
  * fac_prov_ipmi module.
  */
 #define	TOPO_PROP_IPMI_ENTITY_LIST	"entity-list"
+
+#define	TOPO_PGROUP_SLOT		"slot"
+#define	TOPO_PROP_SLOT_TYPE		"slot-type"
+
+#define	TOPO_PGROUP_DIMM_SLOT		"dimm-slot"
+#define	TOPO_PROP_DIMM_SLOT_FORM	"form-factor"
+#define	TOPO_DIMM_SLOT_FORM_DIMM	"DIMM"
+#define	TOPO_DIMM_SLOT_FORM_SODIMM	"SODIMM"
+#define	TOPO_DIMM_SLOT_FORM_FBDIMM	"FBDIMM"
+
+#define	TOPO_PGROUP_DIMM_PROPS		"dimm-properties"
+#define	TOPO_PROP_DIMM_TYPE
+#define	TOPO_DIMM_TYPE_UNKNOWN		"UNKNOWN"
+#define	TOPO_DIMM_TYPE_DDR		"DDR"
+#define	TOPO_DIMM_TYPE_DDR2		"DDR2"
+#define	TOPO_DIMM_TYPE_DDR3		"DDR3"
+#define	TOPO_DIMM_TYPE_DDR4		"DDR4"
+#define	TOPO_DIMM_TYPE_LPDDR		"LPDDR"
+#define	TOPO_DIMM_TYPE_LPDDR2		"LPDDR2"
+#define	TOPO_DIMM_TYPE_LPDDR3		"LPDDR3"
+#define	TOPO_DIMM_TYPE_LPDDR4		"LPDDR4"
+
+#define	TOPO_PGROUP_MOTHERBOARD		"motherboard-properties"
+#define	TOPO_PROP_MB_MANUFACTURER	"manufacturer"
+#define	TOPO_PROP_MB_PRODUCT		"product-id"
+#define	TOPO_PROP_MB_ASSET		"asset-tag"
+#define	TOPO_PROP_MB_FIRMWARE_VENDOR	"firmware-vendor"
+#define	TOPO_PROP_MB_FIRMWARE_REV	"firmware-revision"
+#define	TOPO_PROP_MB_FIRMWARE_RELDATE	"firmware-release-date"
 
 #ifdef	__cplusplus
 }

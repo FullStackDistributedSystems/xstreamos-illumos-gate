@@ -22,6 +22,9 @@
 /*
  * Copyright (c) 2006, 2010, Oracle and/or its affiliates. All rights reserved.
  */
+/*
+ * Copyright (c) 2018, Joyent, Inc. All rights reserved.
+ */
 
 #ifndef _LIBTOPO_H
 #define	_LIBTOPO_H
@@ -362,6 +365,7 @@ extern int topo_fmri_getpgrp(topo_hdl_t *, nvlist_t *, const char *,
     nvlist_t **, int *);
 extern int topo_fmri_setprop(topo_hdl_t *, nvlist_t *, const char *,
     nvlist_t *, int, nvlist_t *, int *);
+extern void topo_pgroup_hcset(tnode_t *, nvlist_t *);
 
 /* Property node NVL names used in topo_prop_getprops */
 #define	TOPO_PROP_GROUP		"property-group"
@@ -412,6 +416,14 @@ void topo_sensor_state_name(uint32_t sensor_type, uint8_t state, char *buf,
 #define	TOPO_FACILITY_TYPE	"type"
 #define	TOPO_SENSOR_UNITS	"units"
 #define	TOPO_LED_MODE		"mode"
+
+#define	TOPO_PROP_THRESHOLD_LNC		"threshold-lower-non-critical"
+#define	TOPO_PROP_THRESHOLD_LCR		"threshold-lower-critical"
+#define	TOPO_PROP_THRESHOLD_LNR		"threshold-lower-non-recoverable"
+
+#define	TOPO_PROP_THRESHOLD_UNC		"threshold-upper-non-critical"
+#define	TOPO_PROP_THRESHOLD_UCR		"threshold-upper-critical"
+#define	TOPO_PROP_THRESHOLD_UNR		"threshold-upper-non-recoverable"
 
 /*
  * Sensor Classes
@@ -995,6 +1007,10 @@ typedef enum topo_led_type {
 	TOPO_LED_TYPE_OK2RM,
 	TOPO_LED_TYPE_PRESENT
 } topo_led_type_t;
+
+typedef enum topo_slot_type {
+	TOPO_SLOT_TYPE_DIMM = 1
+} topo_slot_type_t;
 
 
 #ifdef __cplusplus

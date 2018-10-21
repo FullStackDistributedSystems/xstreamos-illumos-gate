@@ -25,9 +25,7 @@
 /*
  * Copyright (c) 2010, Intel Corporation.
  * All rights reserved.
- */
-/*
- * Copyright (c) 2017, Joyent, Inc.  All rights reserved.
+ * Copyright 2018 Joyent, Inc.
  */
 
 /*
@@ -167,6 +165,9 @@ static struct	psm_ops apix_ops = {
 	apix_intr_ops,		/* Advanced DDI Interrupt framework */
 	apic_state,		/* save, restore apic state for S3 */
 	apic_cpu_ops,		/* CPU control interface. */
+
+	apic_get_pir_ipivect,
+	apic_send_pir_ipi,
 };
 
 struct psm_ops *psmops = &apix_ops;
@@ -267,7 +268,7 @@ apix_probe()
 	 *
 	 * Please remove when/if the issue is resolved.
 	 */
-	if (get_hwenv() == HW_XEN_HVM)
+	if (get_hwenv() & HW_XEN_HVM)
 		return (PSM_FAILURE);
 
 	/* check for hw features if specified  */
@@ -354,7 +355,7 @@ apix_get_intr_handler(int cpu, short vec)
 	apix_vector_t *apix_vector;
 
 	ASSERT(cpu < apic_nproc && vec < APIX_NVECTOR);
-	if (cpu >= apic_nproc)
+	if (cpu >= apic_nproc || vec >= APIX_NVECTOR)
 		return (NULL);
 
 	apix_vector = apixs[cpu]->x_vectbl[vec];
@@ -383,6 +384,8 @@ apix_init()
 	if (cpuid_have_cr8access(CPU))
 		apic_have_32bit_cr8 = 1;
 #endif
+
+	apic_pir_vect = apix_get_ipivect(XC_CPUPOKE_PIL, -1);
 
 	/*
 	 * Initialize IRM pool parameters
@@ -651,7 +654,7 @@ apix_send_eoi(void)
  *	Called at the beginning of the interrupt service routine, but unlike
  *	pcplusmp, does not mask interrupts. An EOI is given to the interrupt
  *	controller to enable other HW interrupts but interrupts are still
- * 	masked by the IF flag.
+ *	masked by the IF flag.
  *
  *	Return -1 for spurious interrupts
  *
@@ -1127,8 +1130,10 @@ x2apic_update_psm()
 	 * being apix_foo as opposed to apic_foo and x2apic_foo.
 	 */
 	pops->psm_send_ipi = x2apic_send_ipi;
-
 	send_dirintf = pops->psm_send_ipi;
+
+	pops->psm_send_pir_ipi = x2apic_send_pir_ipi;
+	psm_send_pir_ipi = pops->psm_send_pir_ipi;
 
 	apic_mode = LOCAL_X2APIC;
 	apic_change_ops();
@@ -2170,10 +2175,10 @@ apix_level_intr_pre_eoi(int irq)
 	if (apix_mul_ioapic_method == APIC_MUL_IOAPIC_IOXAPIC) {
 		/*
 		 * This is a IOxAPIC and there is EOI register:
-		 * 	Change the vector to reserved unused vector, so that
-		 * 	the EOI	from Local APIC won't clear the Remote IRR for
-		 * 	this level trigger interrupt. Instead, we'll manually
-		 * 	clear it in apix_post_hardint() after ISR handling.
+		 *	Change the vector to reserved unused vector, so that
+		 *	the EOI	from Local APIC won't clear the Remote IRR for
+		 *	this level trigger interrupt. Instead, we'll manually
+		 *	clear it in apix_post_hardint() after ISR handling.
 		 */
 		WRITE_IOAPIC_RDT_ENTRY_LOW_DWORD(apic_ix, intin_ix,
 		    (irqp->airq_rdt_entry & (~0xff)) | APIX_RESV_VECTOR);
@@ -2588,6 +2593,8 @@ apic_switch_ipi_callback(boolean_t enter)
 		if (apic_poweron_cnt == 0) {
 			pops->psm_send_ipi = apic_common_send_ipi;
 			send_dirintf = pops->psm_send_ipi;
+			pops->psm_send_pir_ipi = apic_common_send_pir_ipi;
+			psm_send_pir_ipi = pops->psm_send_pir_ipi;
 		}
 		apic_poweron_cnt++;
 	} else {
@@ -2596,6 +2603,8 @@ apic_switch_ipi_callback(boolean_t enter)
 		if (apic_poweron_cnt == 0) {
 			pops->psm_send_ipi = x2apic_send_ipi;
 			send_dirintf = pops->psm_send_ipi;
+			pops->psm_send_pir_ipi = x2apic_send_pir_ipi;
+			psm_send_pir_ipi = pops->psm_send_pir_ipi;
 		}
 	}
 	lock_clear(&apic_mode_switch_lock);

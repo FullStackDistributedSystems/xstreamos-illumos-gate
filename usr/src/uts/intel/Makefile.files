@@ -22,7 +22,7 @@
 #
 # Copyright (c) 1999, 2010, Oracle and/or its affiliates. All rights reserved.
 # Copyright (c) 2013, Joyent, Inc. All rights reserved.
-# Copyright 2017 Nexenta Systems, Inc.
+# Copyright 2018 Nexenta Systems, Inc.
 #
 
 #
@@ -164,6 +164,7 @@ VGATEXT_OBJS += vgatext.o vgasubr.o
 KRTLD_OBJS +=		\
 	bootfsops.o	\
 	bootrd.o	\
+	bootrd_cpio.o	\
 	ufsops.o	\
 	hsfs.o		\
 	doreloc.o	\
@@ -236,11 +237,6 @@ SDT_OBJS += sdt.o
 AMD8111S_OBJS += amd8111s_main.o amd8111s_hw.o
 
 #
-#	Pentium Performance Counter BackEnd module
-#
-P123_PCBE_OBJS = p123_pcbe.o
-
-#
 #	Pentium 4 Performance Counter BackEnd module
 #
 P4_PCBE_OBJS = p4_pcbe.o
@@ -278,7 +274,7 @@ S10_BRAND_OBJS	=	s10_brand.o s10_brand_asm.o
 #
 #	special files
 #
-MODSTUB_OBJ +=	 	\
+MODSTUB_OBJ +=		\
 	modstubs.o
 
 BOOTDEV_OBJS +=		\

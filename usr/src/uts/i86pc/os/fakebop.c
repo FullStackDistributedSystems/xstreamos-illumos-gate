@@ -26,7 +26,7 @@
  * Copyright (c) 2010, Intel Corporation.
  * All rights reserved.
  *
- * Copyright 2013 Joyent, Inc.  All rights reserved.
+ * Copyright 2018 Joyent, Inc.  All rights reserved.
  */
 
 /*
@@ -620,6 +620,7 @@ boot_prop_finish(void)
 	char *consoledev;
 	uint64_t lvalue;
 	int use_xencons = 0;
+	extern int bootrd_debug;
 
 #ifdef __xpv
 	if (!DOMAIN_IS_INITDOMAIN(xen_info))
@@ -737,6 +738,12 @@ done:
 	early_allocation = 0;
 
 	/*
+	 * Check for bootrd_debug.
+	 */
+	if (find_boot_prop("bootrd_debug"))
+		bootrd_debug = 1;
+
+	/*
 	 * check to see if we have to override the default value of the console
 	 */
 	if (!use_xencons) {
@@ -845,6 +852,12 @@ do_bsys_doint(bootops_t *bop, int intnum, struct bop_regs *rp)
 	static int firsttime = 1;
 	bios_func_t bios_func = (bios_func_t)(void *)(uintptr_t)0x5000;
 	bios_regs_t br;
+
+	/*
+	 * We're about to disable paging; we shouldn't be PCID enabled.
+	 */
+	if (getcr4() & CR4_PCIDE)
+		prom_panic("do_bsys_doint() with PCID enabled\n");
 
 	/*
 	 * The first time we do this, we have to copy the pre-packaged
@@ -1300,6 +1313,42 @@ process_boot_environment(struct boot_modules *benv)
 		/* Is this property already set? */
 		if (do_bsys_getproplen(NULL, name) >= 0)
 			continue;
+
+		/* Translate netboot variables */
+		if (strcmp(name, "boot.netif.gateway") == 0) {
+			bsetprops(BP_ROUTER_IP, value);
+			continue;
+		}
+		if (strcmp(name, "boot.netif.hwaddr") == 0) {
+			bsetprops(BP_BOOT_MAC, value);
+			continue;
+		}
+		if (strcmp(name, "boot.netif.ip") == 0) {
+			bsetprops(BP_HOST_IP, value);
+			continue;
+		}
+		if (strcmp(name, "boot.netif.netmask") == 0) {
+			bsetprops(BP_SUBNET_MASK, value);
+			continue;
+		}
+		if (strcmp(name, "boot.netif.server") == 0) {
+			bsetprops(BP_SERVER_IP, value);
+			continue;
+		}
+		if (strcmp(name, "boot.netif.server") == 0) {
+			if (do_bsys_getproplen(NULL, BP_SERVER_IP) < 0)
+				bsetprops(BP_SERVER_IP, value);
+			continue;
+		}
+		if (strcmp(name, "boot.nfsroot.server") == 0) {
+			if (do_bsys_getproplen(NULL, BP_SERVER_IP) < 0)
+				bsetprops(BP_SERVER_IP, value);
+			continue;
+		}
+		if (strcmp(name, "boot.nfsroot.path") == 0) {
+			bsetprops(BP_SERVER_PATH, value);
+			continue;
+		}
 
 		if (name_is_blacklisted(name) == B_TRUE)
 			continue;
@@ -2588,7 +2637,7 @@ process_msct(ACPI_TABLE_MSCT *tp)
 	    item = (void *)(item->Length + (uintptr_t)item)) {
 		/*
 		 * Sanity check according to section 5.2.19.1 of ACPI 4.0.
-		 * Revision 	1
+		 * Revision	1
 		 * Length	22
 		 */
 		if (item->Revision != 1 || item->Length != 22) {

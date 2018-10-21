@@ -1,4 +1,4 @@
-/*-
+/*
  * Copyright (c) 2000 Doug Rabson
  * Copyright (c) 2006 Marcel Moolenaar
  * All rights reserved.
@@ -106,10 +106,24 @@ int wcscmp(CHAR16 *, CHAR16 *);
 void cpy8to16(const char *, CHAR16 *, size_t);
 void cpy16to8(const CHAR16 *, char *, size_t);
 
+/*
+ * Routines for interacting with EFI's env vars in a more unix-like
+ * way than the standard APIs. In addition, convenience routines for
+ * the loader setting / getting illumos specific variables.
+ */
+
+EFI_STATUS efi_illumos_getenv(const char *v, void *data, size_t *len);
+EFI_STATUS efi_getenv(EFI_GUID *g, const char *v, void *data, size_t *len);
+EFI_STATUS efi_global_getenv(const char *v, void *data, size_t *len);
+EFI_STATUS efi_setenv_illumos_wcs(const char *varname, CHAR16 *valstr);
+
 /* guids and names */
 bool efi_guid_to_str(const EFI_GUID *, char **);
 bool efi_str_to_guid(const char *, EFI_GUID *);
 bool efi_name_to_guid(const char *, EFI_GUID *);
 bool efi_guid_to_name(EFI_GUID *, char **);
+
+/* efipart.c */
+int	efipart_inithandles(void);
 
 #endif /* _LOADER_EFILIB_H */

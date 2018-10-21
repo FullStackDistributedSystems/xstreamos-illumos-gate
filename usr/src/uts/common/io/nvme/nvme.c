@@ -10,10 +10,10 @@
  */
 
 /*
- * Copyright 2016 Nexenta Systems, Inc. All rights reserved.
+ * Copyright 2018 Nexenta Systems, Inc.
  * Copyright 2016 Tegile Systems, Inc. All rights reserved.
  * Copyright (c) 2016 The MathWorks, Inc.  All rights reserved.
- * Copyright 2017 Joyent, Inc.
+ * Copyright 2018 Joyent, Inc.
  */
 
 /*
@@ -83,8 +83,8 @@
  * NVMe devices can have multiple namespaces, each being a independent data
  * store. The driver supports multiple namespaces and creates a blkdev interface
  * for each namespace found. Namespaces can have various attributes to support
- * thin provisioning and protection information. This driver does not support
- * any of this and ignores namespaces that have these attributes.
+ * protection information. This driver does not support any of this and ignores
+ * namespaces that have these attributes.
  *
  * As of NVMe 1.1 namespaces can have an 64bit Extended Unique Identifier
  * (EUI64). This driver uses the EUI64 if present to generate the devid and
@@ -196,7 +196,7 @@
  * The following driver properties can be changed to control some aspects of the
  * drivers operation:
  * - strict-version: can be set to 0 to allow devices conforming to newer
- *   versions or namespaces with EUI64 to be used
+ *   major versions to be used
  * - ignore-unknown-vendor-status: can be set to 1 to not handle any vendor
  *   specific command status as a fatal error leading device faulting
  * - admin-queue-len: the maximum length of the admin queue (16-4096)
@@ -258,10 +258,31 @@
 #include "nvme_reg.h"
 #include "nvme_var.h"
 
+/*
+ * Assertions to make sure that we've properly captured various aspects of the
+ * packed structures and haven't broken them during updates.
+ */
+CTASSERT(sizeof (nvme_identify_ctrl_t) == 0x1000);
+CTASSERT(offsetof(nvme_identify_ctrl_t, id_oacs) == 256);
+CTASSERT(offsetof(nvme_identify_ctrl_t, id_sqes) == 512);
+CTASSERT(offsetof(nvme_identify_ctrl_t, id_subnqn) == 768);
+CTASSERT(offsetof(nvme_identify_ctrl_t, id_nvmof) == 1792);
+CTASSERT(offsetof(nvme_identify_ctrl_t, id_psd) == 2048);
+CTASSERT(offsetof(nvme_identify_ctrl_t, id_vs) == 3072);
+
+CTASSERT(sizeof (nvme_identify_nsid_t) == 0x1000);
+CTASSERT(offsetof(nvme_identify_nsid_t, id_fpi) == 32);
+CTASSERT(offsetof(nvme_identify_nsid_t, id_nguid) == 104);
+CTASSERT(offsetof(nvme_identify_nsid_t, id_lbaf) == 128);
+CTASSERT(offsetof(nvme_identify_nsid_t, id_vs) == 384);
+
+CTASSERT(sizeof (nvme_identify_primary_caps_t) == 0x1000);
+CTASSERT(offsetof(nvme_identify_primary_caps_t, nipc_vqfrt) == 32);
+CTASSERT(offsetof(nvme_identify_primary_caps_t, nipc_vifrt) == 64);
+
 
 /* NVMe spec version supported */
 static const int nvme_version_major = 1;
-static const int nvme_version_minor = 2;
 
 /* tunable for admin command timeout in seconds, default is 1s */
 int nvme_admin_cmd_timeout = 1;
@@ -1084,7 +1105,7 @@ nvme_check_generic_cmd_status(nvme_cmd_t *cmd)
 		/* Invalid Namespace or Format */
 		if (!cmd->nc_dontpanic)
 			dev_err(cmd->nc_nvme->n_dip, CE_PANIC,
-			    "programming error: " "invalid NS/format in cmd %p",
+			    "programming error: invalid NS/format in cmd %p",
 			    (void *)cmd);
 		return (EINVAL);
 
@@ -1855,6 +1876,13 @@ nvme_get_features(nvme_t *nvme, uint32_t nsid, uint8_t feature, uint32_t *res,
 	cmd->nc_sqe.sqe_cdw10 = feature;
 	cmd->nc_sqe.sqe_cdw11 = *res;
 
+	/*
+	 * For some of the optional features there doesn't seem to be a method
+	 * of detecting whether it is supported other than using it.  This will
+	 * cause "Invalid Field in Command" error, which is normally considered
+	 * a programming error.  Set the nc_dontpanic flag to override the panic
+	 * in nvme_check_generic_cmd_status().
+	 */
 	switch (feature) {
 	case NVME_FEAT_ARBITRATION:
 	case NVME_FEAT_POWER_MGMT:
@@ -1865,7 +1893,6 @@ nvme_get_features(nvme_t *nvme, uint32_t nsid, uint8_t feature, uint32_t *res,
 	case NVME_FEAT_INTR_VECT:
 	case NVME_FEAT_WRITE_ATOM:
 	case NVME_FEAT_ASYNC_EVENT:
-	case NVME_FEAT_PROGRESS:
 		break;
 
 	case NVME_FEAT_WRITE_CACHE:
@@ -1877,18 +1904,10 @@ nvme_get_features(nvme_t *nvme, uint32_t nsid, uint8_t feature, uint32_t *res,
 		if (!nvme->n_lba_range_supported)
 			goto fail;
 
-		/*
-		 * The LBA Range Type feature is optional. There doesn't seem
-		 * be a method of detecting whether it is supported other than
-		 * using it. This will cause a "invalid field in command" error,
-		 * which is normally considered a programming error and causes
-		 * panic in nvme_check_generic_cmd_status().
-		 */
 		cmd->nc_dontpanic = B_TRUE;
 		cmd->nc_sqe.sqe_nsid = nsid;
 		ASSERT(bufsize != NULL);
 		*bufsize = NVME_LBA_RANGE_BUFSIZE;
-
 		break;
 
 	case NVME_FEAT_AUTO_PST:
@@ -1897,6 +1916,13 @@ nvme_get_features(nvme_t *nvme, uint32_t nsid, uint8_t feature, uint32_t *res,
 
 		ASSERT(bufsize != NULL);
 		*bufsize = NVME_AUTO_PST_BUFSIZE;
+		break;
+
+	case NVME_FEAT_PROGRESS:
+		if (!nvme->n_progress_supported)
+			goto fail;
+
+		cmd->nc_dontpanic = B_TRUE;
 		break;
 
 	default:
@@ -1933,15 +1959,34 @@ nvme_get_features(nvme_t *nvme, uint32_t nsid, uint8_t feature, uint32_t *res,
 	nvme_admin_cmd(cmd, nvme_admin_cmd_timeout);
 
 	if ((ret = nvme_check_cmd_status(cmd)) != 0) {
-		if (feature == NVME_FEAT_LBA_RANGE &&
-		    cmd->nc_cqe.cqe_sf.sf_sct == NVME_CQE_SCT_GENERIC &&
-		    cmd->nc_cqe.cqe_sf.sf_sc == NVME_CQE_SC_GEN_INV_FLD)
-			nvme->n_lba_range_supported = B_FALSE;
-		else
+		boolean_t known = B_TRUE;
+
+		/* Check if this is unsupported optional feature */
+		if (cmd->nc_cqe.cqe_sf.sf_sct == NVME_CQE_SCT_GENERIC &&
+		    cmd->nc_cqe.cqe_sf.sf_sc == NVME_CQE_SC_GEN_INV_FLD) {
+			switch (feature) {
+			case NVME_FEAT_LBA_RANGE:
+				nvme->n_lba_range_supported = B_FALSE;
+				break;
+			case NVME_FEAT_PROGRESS:
+				nvme->n_progress_supported = B_FALSE;
+				break;
+			default:
+				known = B_FALSE;
+				break;
+			}
+		} else {
+			known = B_FALSE;
+		}
+
+		/* Report the error otherwise */
+		if (!known) {
 			dev_err(nvme->n_dip, CE_WARN,
 			    "!GET FEATURES %d failed with sct = %x, sc = %x",
 			    feature, cmd->nc_cqe.cqe_sf.sf_sct,
 			    cmd->nc_cqe.cqe_sf.sf_sc);
+		}
+
 		goto fail;
 	}
 
@@ -2199,16 +2244,13 @@ nvme_init_ns(nvme_t *nvme, int nsid)
 
 	/*
 	 * We currently don't support namespaces that use either:
-	 * - thin provisioning
 	 * - protection information
 	 * - illegal block size (< 512)
 	 */
-	if (idns->id_nsfeat.f_thin ||
-	    idns->id_dps.dp_pinfo) {
+	if (idns->id_dps.dp_pinfo) {
 		dev_err(nvme->n_dip, CE_WARN,
-		    "!ignoring namespace %d, unsupported features: "
-		    "thin = %d, pinfo = %d", nsid,
-		    idns->id_nsfeat.f_thin, idns->id_dps.dp_pinfo);
+		    "!ignoring namespace %d, unsupported feature: "
+		    "pinfo = %d", nsid, idns->id_dps.dp_pinfo);
 		ns->ns_ignore = B_TRUE;
 	} else if (ns->ns_block_size < 512) {
 		dev_err(nvme->n_dip, CE_WARN,
@@ -2244,10 +2286,9 @@ nvme_init(nvme_t *nvme)
 	dev_err(nvme->n_dip, CE_CONT, "?NVMe spec version %d.%d",
 	    nvme->n_version.v_major, nvme->n_version.v_minor);
 
-	if (NVME_VERSION_HIGHER(&nvme->n_version,
-	    nvme_version_major, nvme_version_minor)) {
-		dev_err(nvme->n_dip, CE_WARN, "!no support for version > %d.%d",
-		    nvme_version_major, nvme_version_minor);
+	if (nvme->n_version.v_major > nvme_version_major) {
+		dev_err(nvme->n_dip, CE_WARN, "!no support for version > %d.x",
+		    nvme_version_major);
 		if (nvme->n_strict_version)
 			goto fail;
 	}
@@ -2521,9 +2562,22 @@ nvme_init(nvme_t *nvme)
 		    nvme->n_idctl->id_apsta.ap_sup == 0 ? B_FALSE : B_TRUE;
 
 	/*
+	 * Assume Software Progress Marker feature is supported.  If it isn't
+	 * this will be set to B_FALSE by nvme_get_features().
+	 */
+	nvme->n_progress_supported = B_TRUE;
+
+	/*
 	 * Identify Namespaces
 	 */
 	nvme->n_namespace_count = nvme->n_idctl->id_nn;
+
+	if (nvme->n_namespace_count == 0) {
+		dev_err(nvme->n_dip, CE_WARN,
+		    "!controllers without namespaces are not supported");
+		goto fail;
+	}
+
 	if (nvme->n_namespace_count > NVME_MINOR_MAX) {
 		dev_err(nvme->n_dip, CE_WARN,
 		    "!too many namespaces: %d, limiting to %d\n",

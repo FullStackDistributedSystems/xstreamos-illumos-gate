@@ -19,14 +19,14 @@ include $(SRC)/Makefile.master
 CFLAGS= -O2 -I../../../../include -I../../..
 CPPFLAGS= -D_STANDALONE -DLOADER_ZFS_SUPPORT
 
-all: libi386.a
+all install: libi386.a
 
 clean: clobber
 clobber:
 	$(RM) machine x86 $(OBJS) libi386.a
 
 AS=	$(GNU_ROOT)/bin/gas
-CC=	$(GCC_ROOT)/bin/gcc
+CC=	$(GNUC_ROOT)/bin/gcc
 OBJCOPY= $(GNU_ROOT)/bin/gobjcopy
 AS_FLAGS=--32
 ASFLAGS=-m32
@@ -74,7 +74,7 @@ CFLAGS += -DTERM_EMU
 # XXX: make alloca() useable
 CFLAGS += -Dalloca=__builtin_alloca
 
-CFLAGS +=	-I$(SRC)/common/ficl -I../../ficl \
+CFLAGS +=	-I$(SRC)/common/ficl -I../../libficl \
 		-I../../common -I../common \
 		-I../btx/lib \
 		-I$(SRC)/uts/intel/sys/acpi \

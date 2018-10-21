@@ -51,8 +51,6 @@
 
 #include "loader_efi.h"
 
-extern char bootprog_info[];
-
 struct arch_switch archsw;	/* MI/MD interface boundary */
 
 EFI_GUID devid = DEVICE_PATH_PROTOCOL;
@@ -72,14 +70,14 @@ efi_zfs_is_preferred(EFI_HANDLE *h)
 	return (h == img->DeviceHandle);
 }
 
-static int
+static bool
 has_keyboard(void)
 {
 	EFI_STATUS status;
 	EFI_DEVICE_PATH *path;
 	EFI_HANDLE *hin, *hin_end, *walker;
 	UINTN sz;
-	int retval = 0;
+	bool retval = false;
 
 	/*
 	 * Find all the handles that support the SIMPLE_TEXT_INPUT_PROTOCOL and
@@ -96,7 +94,7 @@ has_keyboard(void)
 			free(hin);
 	}
 	if (EFI_ERROR(status))
-		return retval;
+		return (retval);
 
 	/*
 	 * Look at each of the handles. If it supports the device path protocol,
@@ -126,7 +124,7 @@ has_keyboard(void)
 				acpi = (ACPI_HID_DEVICE_PATH *)(void *)path;
 				if ((EISA_ID_TO_NUM(acpi->HID) & 0xff00) == 0x300 &&
 				    (acpi->HID & 0xffff) == PNP_EISA_ID_CONST) {
-					retval = 1;
+					retval = true;
 					goto out;
 				}
 			/*
@@ -137,12 +135,12 @@ has_keyboard(void)
 			} else if (DevicePathType(path) == MESSAGING_DEVICE_PATH &&
 			    DevicePathSubType(path) == MSG_USB_CLASS_DP) {
 				USB_CLASS_DEVICE_PATH *usb;
-       
+
 				usb = (USB_CLASS_DEVICE_PATH *)(void *)path;
 				if (usb->DeviceClass == 3 && /* HID */
 				    usb->DeviceSubClass == 1 && /* Boot devices */
 				    usb->DeviceProtocol == 1) { /* Boot keyboards */
-					retval = 1;
+					retval = true;
 					goto out;
 				}
 			}
@@ -151,7 +149,7 @@ has_keyboard(void)
 	}
 out:
 	free(hin);
-	return retval;
+	return (retval);
 }
 
 static void
@@ -161,9 +159,7 @@ set_devdesc_currdev(struct devsw *dev, int unit)
 	char *devname;
 
 	currdev.d_dev = dev;
-	currdev.d_type = currdev.d_dev->dv_type;
 	currdev.d_unit = unit;
-	currdev.d_opendata = NULL;
 	devname = efi_fmtdev(&currdev);
 
 	env_setenv("currdev", EV_VOLATILE, devname, efi_setcurrdev,
@@ -187,10 +183,8 @@ find_currdev(EFI_LOADED_IMAGE *img)
 	if (pool_guid != 0) {
 		struct zfs_devdesc currdev;
 
-		currdev.d_dev = &zfs_dev;
-		currdev.d_unit = 0;
-		currdev.d_type = currdev.d_dev->dv_type;
-		currdev.d_opendata = NULL;
+		currdev.dd.d_dev = &zfs_dev;
+		currdev.dd.d_unit = 0;
 		currdev.pool_guid = pool_guid;
 		currdev.root_guid = 0;
 		devname = efi_fmtdev(&currdev);
@@ -207,10 +201,8 @@ find_currdev(EFI_LOADED_IMAGE *img)
 	STAILQ_FOREACH(dp, pdi_list, pd_link) {
 		struct disk_devdesc currdev;
 
-		currdev.d_dev = &efipart_hddev;
-		currdev.d_type = currdev.d_dev->dv_type;
-		currdev.d_unit = dp->pd_unit;
-		currdev.d_opendata = NULL;
+		currdev.dd.d_dev = &efipart_hddev;
+		currdev.dd.d_unit = dp->pd_unit;
 		currdev.d_slice = -1;
 		currdev.d_partition = -1;
 
@@ -298,10 +290,11 @@ main(int argc, CHAR16 *argv[])
 {
 	char var[128];
 	EFI_GUID *guid;
-	int i, j, vargood, howto;
+	int i, j, howto;
+	bool vargood;
 	void *ptr;
 	UINTN k;
-	int has_kbd;
+	bool has_kbd;
 
 	archsw.arch_autoload = efi_autoload;
 	archsw.arch_getdev = efi_getdev;
@@ -406,14 +399,14 @@ main(int argc, CHAR16 *argv[])
 				}
 			}
 		} else {
-			vargood = 0;
+			vargood = false;
 			for (j = 0; argv[i][j] != 0; j++) {
 				if (j == sizeof(var)) {
-					vargood = 0;
+					vargood = false;
 					break;
 				}
 				if (j > 0 && argv[i][j] == '=')
-					vargood = 1;
+					vargood = true;
 				var[j] = (char)argv[i][j];
 			}
 			if (vargood) {
@@ -435,11 +428,15 @@ main(int argc, CHAR16 *argv[])
 	}
 
 	/*
-	 * March through the device switch probing for things.
+	 * Scan the BLOCK IO MEDIA handles then
+	 * march through the device switch probing for things.
 	 */
-	for (i = 0; devsw[i] != NULL; i++)
-		if (devsw[i]->dv_init != NULL)
-			(devsw[i]->dv_init)();
+	if ((i = efipart_inithandles()) == 0) {
+		for (i = 0; devsw[i] != NULL; i++)
+			if (devsw[i]->dv_init != NULL)
+				(devsw[i]->dv_init)();
+	} else
+		printf("efipart_inithandles failed %d, expect failures", i);
 
 	printf("Command line arguments:");
 	for (i = 0; i < argc; i++) {
@@ -538,11 +535,9 @@ command_memmap(int argc __unused, char *argv[] __unused)
 
 	for (i = 0, p = map; i < ndesc;
 	     i++, p = NextMemoryDescriptor(p, dsz)) {
-		snprintf(line, 80, "%23s %012lx %012lx %08lx ",
-		    efi_memory_type(p->Type),
-		    p->PhysicalStart,
-		    p->VirtualStart,
-		    p->NumberOfPages);
+		snprintf(line, 80, "%23s %012jx %012jx %08jx ",
+		    efi_memory_type(p->Type), p->PhysicalStart,
+		    p->VirtualStart, p->NumberOfPages);
 		rv = pager_output(line);
 		if (rv)
 			break;
@@ -889,7 +884,7 @@ command_chain(int argc, char *argv[])
 		struct disk_devdesc *d_dev;
 		pdinfo_t *hd, *pd;
 
-		switch (dev->d_type) {
+		switch (dev->d_dev->dv_type) {
 		case DEVT_ZFS:
 			z_dev = (struct zfs_devdesc *)dev;
 			loaded_image->DeviceHandle =
