@@ -97,6 +97,8 @@ static int zpool_do_history(int, char **);
 static int zpool_do_get(int, char **);
 static int zpool_do_set(int, char **);
 
+static int zpool_do_sync(int, char **);
+
 /*
  * These libumem hooks provide a reasonable set of defaults for the allocator's
  * debugging facilities.
@@ -141,6 +143,7 @@ typedef enum {
 	HELP_GET,
 	HELP_SET,
 	HELP_SPLIT,
+	HELP_SYNC,
 	HELP_REGUID,
 	HELP_REOPEN
 } zpool_help_t;
@@ -197,6 +200,7 @@ static zpool_command_t command_table[] = {
 	{ "history",	zpool_do_history,	HELP_HISTORY		},
 	{ "get",	zpool_do_get,		HELP_GET		},
 	{ "set",	zpool_do_set,		HELP_SET		},
+	{ "sync",	zpool_do_sync,		HELP_SYNC		},
 };
 
 #define	NCOMMAND	(sizeof (command_table) / sizeof (command_table[0]))
@@ -220,8 +224,9 @@ get_usage(zpool_help_t idx)
 	case HELP_CREATE:
 		return (gettext("\tcreate [-fnd] [-B] "
 		    "[-o property=value] ... \n"
-		    "\t    [-O file-system-property=value] ... \n"
-		    "\t    [-m mountpoint] [-R root] <pool> <vdev> ...\n"));
+		    "\t    [-O file-system-property=value] ...\n"
+		    "\t    [-m mountpoint] [-R root] [-t tempname] "
+		    "<pool> <vdev> ...\n"));
 	case HELP_CHECKPOINT:
 		return (gettext("\tcheckpoint [--discard] <pool> ...\n"));
 	case HELP_DESTROY:
@@ -239,7 +244,7 @@ get_usage(zpool_help_t idx)
 		    "[-R root] [-F [-n]] -a\n"
 		    "\timport [-o mntopts] [-o property=value] ... \n"
 		    "\t    [-d dir | -c cachefile] [-D] [-f] [-m] [-N] "
-		    "[-R root] [-F [-n]]\n"
+		    "[-R root] [-F [-n]] [-t]\n"
 		    "\t    [--rewind-to-checkpoint] <pool | id> [newpool]\n"));
 	case HELP_IOSTAT:
 		return (gettext("\tiostat [-v] [-T d|u] [pool] ... [interval "
@@ -282,6 +287,8 @@ get_usage(zpool_help_t idx)
 		    "[<device> ...]\n"));
 	case HELP_REGUID:
 		return (gettext("\treguid <pool>\n"));
+	case HELP_SYNC:
+		return (gettext("\tsync [pool] ...\n"));
 	}
 
 	abort();
@@ -489,6 +496,21 @@ add_prop_list(const char *propname, char *propval, nvlist_t **props,
 	}
 
 	return (0);
+}
+
+/*
+ * Set a default property pair (name, string-value) in a property nvlist
+ */
+static int
+add_prop_list_default(const char *propname, char *propval, nvlist_t **props,
+    boolean_t poolprop)
+{
+	char *pval;
+
+	if (nvlist_lookup_string(*props, propname, &pval) == 0)
+		return (0);
+
+	return (add_prop_list(propname, propval, props, poolprop));
 }
 
 /*
@@ -849,15 +871,16 @@ errout:
 /*
  * zpool create [-fnd] [-B] [-o property=value] ...
  *		[-O file-system-property=value] ...
- *		[-R root] [-m mountpoint] <pool> <dev> ...
+ *		[-R root] [-m mountpoint] [-t tempname] <pool> <dev> ...
  *
  *	-B	Create boot partition.
  *	-f	Force creation, even if devices appear in use
  *	-n	Do not create the pool, but display the resulting layout if it
  *		were to be created.
- *      -R	Create a pool under an alternate root
- *      -m	Set default mountpoint for the root dataset.  By default it's
+ *	-R	Create a pool under an alternate root
+ *	-m	Set default mountpoint for the root dataset.  By default it's
  *		'/<pool>'
+ *	-t	Use the temporary name until the pool is exported.
  *	-o	Set property=value.
  *	-d	Don't automatically enable all supported pool features
  *		(individual features can be enabled with -o).
@@ -881,6 +904,7 @@ zpool_do_create(int argc, char **argv)
 	int c;
 	nvlist_t *nvroot = NULL;
 	char *poolname;
+	char *tname = NULL;
 	int ret = 1;
 	char *altroot = NULL;
 	char *mountpoint = NULL;
@@ -889,7 +913,7 @@ zpool_do_create(int argc, char **argv)
 	char *propval;
 
 	/* check options */
-	while ((c = getopt(argc, argv, ":fndBR:m:o:O:")) != -1) {
+	while ((c = getopt(argc, argv, ":fndBR:m:o:O:t:")) != -1) {
 		switch (c) {
 		case 'f':
 			force = B_TRUE;
@@ -914,11 +938,7 @@ zpool_do_create(int argc, char **argv)
 			if (add_prop_list(zpool_prop_to_name(
 			    ZPOOL_PROP_ALTROOT), optarg, &props, B_TRUE))
 				goto errout;
-			if (nvlist_lookup_string(props,
-			    zpool_prop_to_name(ZPOOL_PROP_CACHEFILE),
-			    &propval) == 0)
-				break;
-			if (add_prop_list(zpool_prop_to_name(
+			if (add_prop_list_default(zpool_prop_to_name(
 			    ZPOOL_PROP_CACHEFILE), "none", &props, B_TRUE))
 				goto errout;
 			break;
@@ -990,6 +1010,27 @@ zpool_do_create(int argc, char **argv)
 			    B_FALSE)) {
 				goto errout;
 			}
+			break;
+		case 't':
+			/*
+			 * Sanity check temporary pool name.
+			 */
+			if (strchr(optarg, '/') != NULL) {
+				(void) fprintf(stderr, gettext("cannot create "
+				    "'%s': invalid character '/' in temporary "
+				    "name\n"), optarg);
+				(void) fprintf(stderr, gettext("use 'zfs "
+				    "create' to create a dataset\n"));
+				goto errout;
+			}
+
+			if (add_prop_list(zpool_prop_to_name(
+			    ZPOOL_PROP_TNAME), optarg, &props, B_TRUE))
+				goto errout;
+			if (add_prop_list_default(zpool_prop_to_name(
+			    ZPOOL_PROP_CACHEFILE), "none", &props, B_TRUE))
+				goto errout;
+			tname = optarg;
 			break;
 		case ':':
 			(void) fprintf(stderr, gettext("missing argument for "
@@ -1196,8 +1237,8 @@ zpool_do_create(int argc, char **argv)
 		ret = 1;
 		if (zpool_create(g_zfs, poolname,
 		    nvroot, props, fsprops) == 0) {
-			zfs_handle_t *pool = zfs_open(g_zfs, poolname,
-			    ZFS_TYPE_FILESYSTEM);
+			zfs_handle_t *pool = zfs_open(g_zfs,
+			    tname ? tname : poolname, ZFS_TYPE_FILESYSTEM);
 			if (pool != NULL) {
 				if (zfs_mount(pool, NULL, 0) == 0)
 					ret = zfs_shareall(pool);
@@ -1224,7 +1265,7 @@ badusage:
 /*
  * zpool destroy <pool>
  *
- * 	-f	Forcefully unmount any datasets
+ *	-f	Forcefully unmount any datasets
  *
  * Destroy the given pool.  Automatically unmounts any datasets in the pool.
  */
@@ -2098,8 +2139,8 @@ do_import(nvlist_t *config, const char *newname, const char *mntopts,
  * zpool checkpoint <pool>
  *       checkpoint --discard <pool>
  *
- *       -d         Discard the checkpoint from a checkpointed
- *       --discard  pool.
+ *	-d	Discard the checkpoint from a checkpointed
+ *	--discard  pool.
  *
  * Checkpoints the specified pool, by taking a "snapshot" of its
  * current state. A pool can only have one checkpoint at a time.
@@ -2172,44 +2213,48 @@ zpool_do_checkpoint(int argc, char **argv)
  *       import [-o mntopts] [-o prop=value] ... [-R root] [-D]
  *              [-d dir | -c cachefile] [-f] -a
  *       import [-o mntopts] [-o prop=value] ... [-R root] [-D]
- *              [-d dir | -c cachefile] [-f] [-n] [-F] <pool | id> [newpool]
+ *              [-d dir | -c cachefile] [-f] [-n] [-F] [-t]
+ *              <pool | id> [newpool]
  *
- *	 -c	Read pool information from a cachefile instead of searching
+ *	-c	Read pool information from a cachefile instead of searching
  *		devices.
  *
- *       -d	Scan in a specific directory, other than /dev/dsk.  More than
+ *	-d	Scan in a specific directory, other than /dev/dsk.  More than
  *		one directory can be specified using multiple '-d' options.
  *
- *       -D     Scan for previously destroyed pools or import all or only
- *              specified destroyed pools.
+ *	-D	Scan for previously destroyed pools or import all or only
+ *		specified destroyed pools.
  *
- *       -R	Temporarily import the pool, with all mountpoints relative to
+ *	-R	Temporarily import the pool, with all mountpoints relative to
  *		the given root.  The pool will remain exported when the machine
  *		is rebooted.
  *
- *       -V	Import even in the presence of faulted vdevs.  This is an
- *       	intentionally undocumented option for testing purposes, and
- *       	treats the pool configuration as complete, leaving any bad
+ *	-V	Import even in the presence of faulted vdevs.  This is an
+ *		intentionally undocumented option for testing purposes, and
+ *		treats the pool configuration as complete, leaving any bad
  *		vdevs in the FAULTED state. In other words, it does verbatim
  *		import.
  *
- *       -f	Force import, even if it appears that the pool is active.
+ *	-f	Force import, even if it appears that the pool is active.
  *
- *       -F     Attempt rewind if necessary.
+ *	-F	Attempt rewind if necessary.
  *
- *       -n     See if rewind would work, but don't actually rewind.
+ *	-n	See if rewind would work, but don't actually rewind.
  *
- *       -N     Import the pool but don't mount datasets.
+ *	-N	Import the pool but don't mount datasets.
  *
- *       -T     Specify a starting txg to use for import. This option is
- *       	intentionally undocumented option for testing purposes.
+ *	-t	Use newpool as a temporary pool name instead of renaming
+ *		the pool.
  *
- *       -a	Import all pools found.
+ *	-T	Specify a starting txg to use for import. This option is
+ *		intentionally undocumented option for testing purposes.
  *
- *       -o	Set property=value and/or temporary mount options (without '=').
+ *	-a	Import all pools found.
  *
- *       --rewind-to-checkpoint
- *       	Import the pool and revert back to the checkpoint.
+ *	-o	Set property=value and/or temporary mount options (without '=').
+ *
+ *	--rewind-to-checkpoint
+ *		Import the pool and revert back to the checkpoint.
  *
  * The import command scans for pools to import, and import pools based on pool
  * name and GUID.  The pool can also be renamed as part of the import process.
@@ -2251,7 +2296,7 @@ zpool_do_import(int argc, char **argv)
 	};
 
 	/* check options */
-	while ((c = getopt_long(argc, argv, ":aCc:d:DEfFmnNo:rR:T:VX",
+	while ((c = getopt_long(argc, argv, ":aCc:d:DEfFmnNo:rR:tT:VX",
 	    long_options, NULL)) != -1) {
 		switch (c) {
 		case 'a':
@@ -2306,11 +2351,13 @@ zpool_do_import(int argc, char **argv)
 			if (add_prop_list(zpool_prop_to_name(
 			    ZPOOL_PROP_ALTROOT), optarg, &props, B_TRUE))
 				goto error;
-			if (nvlist_lookup_string(props,
-			    zpool_prop_to_name(ZPOOL_PROP_CACHEFILE),
-			    &propval) == 0)
-				break;
-			if (add_prop_list(zpool_prop_to_name(
+			if (add_prop_list_default(zpool_prop_to_name(
+			    ZPOOL_PROP_CACHEFILE), "none", &props, B_TRUE))
+				goto error;
+			break;
+		case 't':
+			flags |= ZFS_IMPORT_TEMP_NAME;
+			if (add_prop_list_default(zpool_prop_to_name(
 			    ZPOOL_PROP_CACHEFILE), "none", &props, B_TRUE))
 				goto error;
 			break;
@@ -2449,9 +2496,9 @@ zpool_do_import(int argc, char **argv)
 		(void) fprintf(stderr, gettext("cannot import '%s': "
 		    "a pool with that name already exists\n"),
 		    argv[0]);
-		(void) fprintf(stderr, gettext("use the form '%s "
-		    "<pool | id> <newpool>' to give it a new name\n"),
-		    "zpool import");
+		(void) fprintf(stderr, gettext("use the form 'zpool import "
+		    "[-t] <pool | id> <newpool>' to give it a new temporary "
+		    "or permanent name\n"));
 		err = 1;
 	} else if (pools == NULL && idata.exists) {
 		(void) fprintf(stderr, gettext("cannot import '%s': "
@@ -2573,6 +2620,45 @@ error:
 	free(searchdirs);
 
 	return (err ? 1 : 0);
+}
+
+/*
+ * zpool sync [-f] [pool] ...
+ *
+ * -f (undocumented) force uberblock (and config including zpool cache file)
+ *    update.
+ *
+ * Sync the specified pool(s).
+ * Without arguments "zpool sync" will sync all pools.
+ * This command initiates TXG sync(s) and will return after the TXG(s) commit.
+ *
+ */
+static int
+zpool_do_sync(int argc, char **argv)
+{
+	int ret;
+	boolean_t force = B_FALSE;
+
+	/* check options */
+	while ((ret  = getopt(argc, argv, "f")) != -1) {
+		switch (ret) {
+		case 'f':
+			force = B_TRUE;
+			break;
+		case '?':
+			(void) fprintf(stderr, gettext("invalid option '%c'\n"),
+			    optopt);
+			usage(B_FALSE);
+		}
+	}
+
+	argc -= optind;
+	argv += optind;
+
+	/* if argc == 0 we will execute zpool_sync_one on all pools */
+	ret = for_each_pool(argc, argv, B_FALSE, NULL, zpool_sync_one, &force);
+
+	return (ret);
 }
 
 typedef struct iostat_cbdata {
@@ -3367,7 +3453,7 @@ list_callback(zpool_handle_t *zhp, void *data)
  *	-o	List of properties to display.  Defaults to
  *		"name,size,allocated,free,expandsize,fragmentation,capacity,"
  *		"dedupratio,health,altroot"
- * 	-p	Diplay values in parsable (exact) format.
+ *	-p	Diplay values in parsable (exact) format.
  *	-T	Display a timestamp in date(1) or Unix format
  *
  * List all pools in the system, whether or not they're healthy.  Output space
@@ -5839,7 +5925,7 @@ get_callback(zpool_handle_t *zhp, void *data)
  *		by a single tab.
  *	-o	List of columns to display.  Defaults to
  *		"name,property,value,source".
- * 	-p	Diplay values in parsable (exact) format.
+ *	-p	Diplay values in parsable (exact) format.
  *
  * Get properties of pools in the system. Output space statistics
  * for each one as well as other attributes.

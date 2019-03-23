@@ -21,6 +21,7 @@
 /*
  * Copyright (c) 2000, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2014 Nexenta Systems Inc. All rights reserved.
+ * Copyright (c) 2018, Joyent, Inc.
  */
 
 /*
@@ -1478,11 +1479,10 @@ i_mdi_client_free(mdi_vhci_t *vh, mdi_client_t *ct)
 	mutex_destroy(&ct->ct_mutex);
 	kmem_free(ct, sizeof (*ct));
 
-	if (cdip != NULL) {
-		MDI_VHCI_CLIENT_UNLOCK(vh);
-		(void) i_mdi_devinfo_remove(vdip, cdip, flags);
-		MDI_VHCI_CLIENT_LOCK(vh);
-	}
+	MDI_VHCI_CLIENT_UNLOCK(vh);
+	(void) i_mdi_devinfo_remove(vdip, cdip, flags);
+	MDI_VHCI_CLIENT_LOCK(vh);
+
 	return (rv);
 }
 
@@ -1742,6 +1742,12 @@ mdi_set_lb_policy(dev_info_t *cdip, client_lb_t lb)
 	return (rv);
 }
 
+static void
+mdi_failover_cb(void *arg)
+{
+	(void)i_mdi_failover(arg);
+}
+
 /*
  * mdi_failover():
  *		failover function called by the vHCI drivers to initiate
@@ -1849,8 +1855,7 @@ mdi_failover(dev_info_t *vdip, dev_info_t *cdip, int flags)
 		 * Submit the initiate failover request via CPR safe
 		 * taskq threads.
 		 */
-		(void) taskq_dispatch(mdi_taskq, (task_func_t *)i_mdi_failover,
-		    ct, KM_SLEEP);
+		(void) taskq_dispatch(mdi_taskq, mdi_failover_cb, ct, KM_SLEEP);
 		return (MDI_ACCEPT);
 	} else {
 		/*

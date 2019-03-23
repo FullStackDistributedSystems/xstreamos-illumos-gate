@@ -25,7 +25,7 @@
 # Copyright (c) 2013 by Saso Kiselkov. All rights reserved.
 # Copyright 2018 Nexenta Systems, Inc.
 # Copyright 2016 Garrett D'Amore <garrett@damore.org>
-# Copyright (c) 2017, Joyent, Inc.
+# Copyright 2019 Joyent, Inc.
 # Copyright 2016 OmniTI Computer Consulting, Inc.  All rights reserved.
 # Copyright 2016 Hans Rosenfeld <rosenfeld@grumpf.hope-2000.org>
 #
@@ -51,6 +51,7 @@ COMMON_CORE_OBJS +=		\
 		cmt.o		\
 		cmt_policy.o	\
 		cpu.o		\
+		cpu_uarray.o	\
 		cpu_event.o	\
 		cpu_intr.o	\
 		cpu_pm.o	\
@@ -1271,11 +1272,13 @@ VSCAN_OBJS +=	vscan_drv.o	vscan_svc.o vscan_door.o
 NSMB_OBJS +=	smb_conn.o	smb_dev.o	smb_iod.o	smb_pass.o \
 		smb_rq.o	smb_sign.o	smb_smb.o	smb_subrs.o \
 		smb_time.o	smb_tran.o	smb_trantcp.o	smb_usr.o \
-		subr_mchain.o
+		smb2_rq.o	smb2_sign.o	smb2_smb.o	subr_mchain.o \
+		nsmb_sign_kcf.o
 
 SMBFS_COMMON_OBJS += smbfs_ntacl.o
 SMBFS_OBJS +=	smbfs_vfsops.o	smbfs_vnops.o	smbfs_node.o	\
 		smbfs_acl.o	smbfs_client.o	smbfs_smb.o	\
+		smbfs_smb1.o	smbfs_smb2.o	\
 		smbfs_subr.o	smbfs_subr2.o	\
 		smbfs_rwlock.o	smbfs_xattr.o	\
 		$(SMBFS_COMMON_OBJS)
@@ -1326,6 +1329,7 @@ ZFS_COMMON_OBJS +=		\
 	ddt_zap.o		\
 	dmu.o			\
 	dmu_diff.o		\
+	dmu_recv.o		\
 	dmu_send.o		\
 	dmu_object.o		\
 	dmu_objset.o		\
@@ -1617,10 +1621,10 @@ TEM_OBJS += tem.o tem_safe.o
 #
 #	Font data for generated 8x16 font
 #
-VGATEXT_FONT	= 8x16
-VGATEXT_FONT_SRC= 8859-1
-VGATEXT_FONT_DIR= $(UTSBASE)/common/font
-FONT_OBJS += font.o 6x10.o 7x14.o 8x16.o 12x22.o
+FONT	= 8x16
+FONT_SRC= ter-u16n
+FONT_DIR= $(SRC)/data/consfonts
+FONT_OBJS += font.o $(FONT).o
 
 KBTRANS_OBJS +=				\
 		kbtrans.o		\
@@ -2220,3 +2224,24 @@ QEDE_GEN_OBJS += ecore_hw.o ecore_cxt.o ecore_selftest.o ecore_init_ops.o \
 		  ecore_init_fw_funcs.o ecore_sp_commands.o ecore_dcbx.o \
 		  ecore_dbg_fw_funcs.o ecore_mcp.o ecore_spq.o ecore_phy.o \
 		  ecore_dev.o ecore_l2.o ecore_int.o
+
+BNX_OBJS += \
+	bnxmod.o \
+	bnxcfg.o \
+	bnxdbg.o \
+	bnxgldv3.o \
+	bnxhwi.o \
+	bnxint.o \
+	bnxrcv.o \
+	bnxsnd.o \
+	bnxtmr.o \
+	bnx_kstat.o \
+	bnx_mm.o \
+	bnx_hw_cpu.o \
+	bnx_hw_misc.o \
+	bnx_hw_nvram.o \
+	bnx_hw_phy.o \
+	bnx_hw_reset.o \
+	bnx_lm_main.o \
+	bnx_lm_recv.o \
+	bnx_lm_send.o

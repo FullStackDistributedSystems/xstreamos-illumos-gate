@@ -23,7 +23,9 @@
 # Use is subject to license terms.
 #
 # Copyright (c) 2013 by Delphix. All rights reserved.
-# Copyright 2015, Joyent, Inc.
+# Copyright (c) 2018, Joyent, Inc.
+# Copyright (c) 2019 Carlos Neira <cneirabustos@gmail.com>
+# Copyright 2019 OmniOS Community Edition (OmniOSce) Association.
 #
 
 .KEEP_STATE:
@@ -123,6 +125,8 @@ LDFLAGS64		+= $(ZTEXT)
 ASFLAGS			+= -P
 AS_CPPFLAGS		+= -D_ASM
 
+SMOFF += all_func_returns,index_overflow
+
 # Module type-specific compiler flags
 $(MODOBJS) :=			CFLAGS += $(C_BIGPICFLAGS) $(XREGSFLAG)
 $(MODOBJS) :=			CFLAGS64 += $(C_BIGPICFLAGS) $(XREGSFLAG)
@@ -169,7 +173,7 @@ lint: $$(LINTFILES)
 
 $(MODFILE): dmod .WAIT $(MODOBJS) $$(MAPFILE-EXT)
 	$(LINK.c) $(ZDEFS) $(ZIGNORE) $(MAPFILE-EXT:%=-M%) $(GSHARED) \
-	    $(MODOBJS) -o $@ $(LDLIBS) -lc
+	    $(MODOBJS) -o $@ $(LDLIBS) -lc -lproc
 	$(CTFMERGE) -L VERSION -o $@ $(MODOBJS)
 	$(POST_PROCESS_SO)
 

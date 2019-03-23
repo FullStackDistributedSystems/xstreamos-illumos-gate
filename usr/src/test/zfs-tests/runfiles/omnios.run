@@ -13,6 +13,7 @@
 # Copyright (c) 2013, 2017 by Delphix. All rights reserved.
 # Copyright 2016, OmniTI Computer Consulting, Inc. All rights reserved.
 # Copyright 2018 Joyent, Inc.
+# Copyright 2019 RackTop Systems.
 #
 
 [DEFAULT]
@@ -243,7 +244,8 @@ tests = ['zpool_create_001_pos', 'zpool_create_002_pos',
     'zpool_create_018_pos', 'zpool_create_019_pos', 'zpool_create_020_pos',
     'zpool_create_021_pos', 'zpool_create_022_pos', 'zpool_create_023_neg',
     'zpool_create_features_001_pos', 'zpool_create_features_002_pos',
-    'zpool_create_features_003_pos', 'zpool_create_features_004_neg']
+    'zpool_create_features_003_pos', 'zpool_create_features_004_neg',
+    'zpool_create_tempname']
 
 [/opt/zfs-tests/tests/functional/cli_root/zpool_destroy]
 tests = ['zpool_destroy_001_pos', 'zpool_destroy_002_pos',
@@ -274,7 +276,8 @@ tests = ['zpool_import_001_pos', 'zpool_import_002_pos',
     'zpool_import_003_pos', 'zpool_import_004_pos', 'zpool_import_005_pos',
     'zpool_import_006_pos', 'zpool_import_007_pos', 'zpool_import_008_pos',
     'zpool_import_009_neg', 'zpool_import_010_pos', 'zpool_import_011_neg',
-    'zpool_import_012_pos', 'zpool_import_013_neg', 'zpool_import_all_001_pos',
+    'zpool_import_012_pos', 'zpool_import_013_neg', 'zpool_import_014_pos',
+    'zpool_import_all_001_pos',
     'zpool_import_features_001_pos', 'zpool_import_features_002_neg',
     'zpool_import_features_003_pos', 'zpool_import_missing_001_pos',
     'zpool_import_missing_002_pos', 'zpool_import_missing_003_pos',
@@ -315,6 +318,9 @@ tests = ['zpool_upgrade_001_pos', 'zpool_upgrade_002_pos',
     'zpool_upgrade_003_pos', 'zpool_upgrade_004_pos', 'zpool_upgrade_005_neg',
     'zpool_upgrade_006_neg', 'zpool_upgrade_007_pos', 'zpool_upgrade_008_pos',
     'zpool_upgrade_009_neg']
+
+[/opt/zfs-tests/tests/functional/cli_root/zpool_sync]
+tests = ['zpool_sync_001_pos', 'zpool_sync_002_neg']
 
 [/opt/zfs-tests/tests/functional/cli_user/misc]
 tests = ['zdb_001_neg', 'zfs_001_neg', 'zfs_allow_001_neg',
@@ -398,6 +404,10 @@ tests = ['inuse_001_pos', 'inuse_003_pos', 'inuse_004_pos',
     'inuse_009_pos']
 post =
 
+[/opt/zfs-tests/tests/functional/large_dnode]
+tests = ['large_dnode_001_pos', 'large_dnode_003_pos',
+    'large_dnode_004_neg', 'large_dnode_005_pos', 'large_dnode_007_neg']
+
 [/opt/zfs-tests/tests/functional/large_files]
 tests = ['large_files_001_pos']
 
@@ -450,8 +460,6 @@ tests = ['checkpoint_after_rewind', 'checkpoint_big_rewind',
     'checkpoint_open', 'checkpoint_removal', 'checkpoint_rewind',
     'checkpoint_ro_rewind', 'checkpoint_sm_scale', 'checkpoint_twice',
     'checkpoint_vdev_add', 'checkpoint_zdb', 'checkpoint_zhack_feat']
-pre =
-post =
 
 [/opt/zfs-tests/tests/functional/pool_names]
 tests = ['pool_names_001_pos', 'pool_names_002_neg']

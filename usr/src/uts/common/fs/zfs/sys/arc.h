@@ -149,6 +149,7 @@ typedef enum arc_space_type {
 	ARC_SPACE_HDRS,
 	ARC_SPACE_L2HDRS,
 	ARC_SPACE_OTHER,
+	ARC_SPACE_BONUS,
 	ARC_SPACE_NUMTYPES
 } arc_space_type_t;
 
@@ -169,6 +170,7 @@ void arc_loan_inuse_buf(arc_buf_t *buf, void *tag);
 void arc_buf_destroy(arc_buf_t *buf, void *tag);
 int arc_buf_size(arc_buf_t *buf);
 int arc_buf_lsize(arc_buf_t *buf);
+void arc_buf_access(arc_buf_t *buf);
 void arc_release(arc_buf_t *buf, void *tag);
 int arc_released(arc_buf_t *buf);
 void arc_buf_freeze(arc_buf_t *buf);

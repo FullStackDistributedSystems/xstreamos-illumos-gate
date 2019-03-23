@@ -724,7 +724,7 @@ vsnprintf (
         case 'X':
 
             Type |= ACPI_FORMAT_UPPER;
-	    /* FALLTHROUGH */
+            /* FALLTHROUGH */
 
         case 'x':
 
