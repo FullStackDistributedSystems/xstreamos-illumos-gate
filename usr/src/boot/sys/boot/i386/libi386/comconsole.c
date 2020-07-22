@@ -23,6 +23,11 @@
  * SUCH DAMAGE.
  */
 
+/*
+ * This code is shared on BIOS and UEFI systems on x86 because
+ * we can access io ports on both platforms and the UEFI Serial IO protocol
+ * is not giving us reliable port order and we see issues with input.
+ */
 #include <sys/cdefs.h>
 
 #include <stand.h>
@@ -84,6 +89,7 @@ static int	comc_parse_mode(struct serial *, const char *);
 static int	comc_mode_set(struct env_var *, int, const void *);
 static int	comc_cd_set(struct env_var *, int, const void *);
 static int	comc_rtsdtr_set(struct env_var *, int, const void *);
+static void	comc_devinfo(struct console *);
 
 struct console ttya = {
 	.c_name = "ttya",
@@ -95,6 +101,7 @@ struct console ttya = {
 	.c_in = comc_getchar,
 	.c_ready = comc_ischar,
 	.c_ioctl = comc_ioctl,
+	.c_devinfo = comc_devinfo,
 	.c_private = NULL
 };
 
@@ -108,6 +115,7 @@ struct console ttyb = {
 	.c_in = comc_getchar,
 	.c_ready = comc_ischar,
 	.c_ioctl = comc_ioctl,
+	.c_devinfo = comc_devinfo,
 	.c_private = NULL
 };
 
@@ -121,6 +129,7 @@ struct console ttyc = {
 	.c_in = comc_getchar,
 	.c_ready = comc_ischar,
 	.c_ioctl = comc_ioctl,
+	.c_devinfo = comc_devinfo,
 	.c_private = NULL
 };
 
@@ -134,8 +143,20 @@ struct console ttyd = {
 	.c_in = comc_getchar,
 	.c_ready = comc_ischar,
 	.c_ioctl = comc_ioctl,
+	.c_devinfo = comc_devinfo,
 	.c_private = NULL
 };
+
+static void
+comc_devinfo(struct console *cp)
+{
+	struct serial *port = cp->c_private;
+
+	if (cp->c_flags != 0)
+		printf("\tport %#x", port->ioaddr);
+	else
+		printf("\tdevice is not present");
+}
 
 static void
 comc_probe(struct console *cp)
@@ -479,7 +500,7 @@ comc_rtsdtr_set(struct env_var *ev, int flags, const void *value)
 static uint32_t
 comc_parse_pcidev(const char *string)
 {
-#ifdef NO_PCI
+#ifdef EFI
 	(void) string;
 	return (0);
 #else
@@ -523,7 +544,7 @@ comc_parse_pcidev(const char *string)
 static int
 comc_pcidev_handle(struct console *cp, uint32_t locator)
 {
-#ifdef NO_PCI
+#ifdef EFI
 	(void) cp;
 	(void) locator;
 	return (CMD_ERROR);

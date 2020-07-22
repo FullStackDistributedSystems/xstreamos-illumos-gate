@@ -24,7 +24,7 @@
  * Use is subject to license terms.
  */
 /*
- * Copyright 2018 Joyent, Inc.
+ * Copyright 2020 Joyent, Inc.
  */
 
 /*
@@ -116,7 +116,7 @@ enum {
 	ECTF_ZLIB,		/* zlib library failure */
 	ECTF_CONVBKERR,		/* CTF conversion backend error */
 	ECTF_CONVNOCSRC,	/* No C source to convert from */
-	ECTF_NOCONVBKEND	/* No applicable conversion backend */
+	ECTF_CONVNODEBUG	/* No debug info to convert into CTF */
 };
 
 /*
@@ -284,7 +284,7 @@ extern int ctf_string_iter(ctf_file_t *, ctf_string_f *, void *);
 
 extern ctf_id_t ctf_add_array(ctf_file_t *, uint_t, const ctf_arinfo_t *);
 extern ctf_id_t ctf_add_const(ctf_file_t *, uint_t, const char *, ctf_id_t);
-extern ctf_id_t ctf_add_enum(ctf_file_t *, uint_t, const char *);
+extern ctf_id_t ctf_add_enum(ctf_file_t *, uint_t, const char *, size_t);
 extern ctf_id_t ctf_add_float(ctf_file_t *, uint_t,
     const char *, const ctf_encoding_t *);
 extern ctf_id_t ctf_add_forward(ctf_file_t *, uint_t, const char *, uint_t);

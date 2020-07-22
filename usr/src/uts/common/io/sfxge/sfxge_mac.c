@@ -871,7 +871,7 @@ int
 sfxge_mac_promisc_set(sfxge_t *sp, sfxge_promisc_type_t promisc)
 {
 	sfxge_mac_t *smp = &(sp->s_mac);
-	efx_nic_t *enp = sp->s_enp;
+	/*efx_nic_t *enp = sp->s_enp;*/
 	int rc;
 
 	mutex_enter(&(smp->sm_lock));

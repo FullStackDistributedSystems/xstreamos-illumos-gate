@@ -21,7 +21,7 @@
 #
 # Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
 # Copyright (c) 2013, 2016 by Delphix. All rights reserved.
-# Copyright (c) 2018, Joyent, Inc.
+# Copyright 2020 Joyent, Inc.
 #
 
 LIBRARY= libzpool.a
@@ -54,7 +54,10 @@ INCS += -I../common
 INCS += -I../../../uts/common/fs/zfs
 INCS += -I../../../uts/common/fs/zfs/lua
 INCS += -I../../../common/zfs
+INCS += -I../../../common/lz4
 INCS += -I../../../common
+INCS += -I../../libzutil/common
+
 
 CLEANFILES += ../common/zfs.h
 CLEANFILES += $(EXTPICS)
@@ -69,7 +72,8 @@ C99LMODE=	-Xc99=%all
 CFLAGS +=	$(CCGDEBUG) $(CCVERBOSE) $(CNOGLOBAL)
 CFLAGS64 +=	$(CCGDEBUG) $(CCVERBOSE) $(CNOGLOBAL)
 LDLIBS +=	-lcmdutils -lumem -lavl -lnvpair -lz -lc -lsysevent -lmd \
-		-lfakekernel
+		-lfakekernel -lzutil
+NATIVE_LIBS +=	libz.so
 CPPFLAGS.first =	-I$(SRC)/lib/libfakekernel/common
 CPPFLAGS +=	$(INCS)	-DDEBUG -D_FAKE_KERNEL
 
@@ -106,6 +110,10 @@ pics/%.o: ../../../uts/common/fs/zfs/lua/%.c
 	$(POST_PROCESS_O)
 
 pics/%.o: ../../../common/zfs/%.c ../common/zfs.h
+	$(COMPILE.c) -o $@ $<
+	$(POST_PROCESS_O)
+
+pics/%.o: ../../../common/lz4/%.c ../common/zfs.h
 	$(COMPILE.c) -o $@ $<
 	$(POST_PROCESS_O)
 

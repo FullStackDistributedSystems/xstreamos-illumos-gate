@@ -161,8 +161,9 @@ papiAttributeValueDup(papi_attribute_value_type_t type,
 			if (v->string == NULL) {
 				free(result);
 				result = NULL;
-			} else
+			} else {
 				result->string = strdup(v->string);
+			}
 			break;
 		case PAPI_INTEGER:
 			result->integer = v->integer;
@@ -452,8 +453,9 @@ papiAttributeListGetValue(papi_attribute_t **list, void **iter,
 			return (PAPI_NOT_POSSIBLE);
 
 		tmp = attr->values;
-	} else
+	} else {
 		tmp = *iter;
+	}
 
 	if (tmp == NULL)
 		return (PAPI_NOT_FOUND);
@@ -649,7 +651,7 @@ _process_value(char *string, char ***parts)
 		{ PAPI_RANGE,	   3, "^([[:digit:]]*)-([[:digit:]]*)$", 0 },
 		{ PAPI_RESOLUTION, 4, "^([[:digit:]]+)x([[:digit:]]+)dp(i|c)$",
 			0 },
-		NULL
+		0
 	};
 	regmatch_t matches[4];
 
@@ -868,7 +870,7 @@ papiAttributeListFromString(papi_attribute_t ***attrs, int flags, char *string)
 	papi_status_t result = PAPI_OK;
 
 	if ((attrs != NULL) && (string != NULL) &&
-	    ((flags & ~(PAPI_ATTR_APPEND+PAPI_ATTR_REPLACE+PAPI_ATTR_EXCL))
+	    ((flags & ~(PAPI_ATTR_APPEND + PAPI_ATTR_REPLACE + PAPI_ATTR_EXCL))
 	    == 0)) {
 		result = _parse_attribute_list(attrs, flags, string);
 	} else {

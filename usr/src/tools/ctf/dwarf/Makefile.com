@@ -68,7 +68,7 @@ OBJECTS=dwarf_abbrev.o		\
 	pro_weaks.o
 
 include $(SRC)/lib/Makefile.lib
-
+include $(SRC)/tools/Makefile.tools
 
 FILEMODE =	0755
 SRCDIR =	$(SRC)/lib/libdwarf/common/
@@ -81,7 +81,9 @@ CERRWARN +=	-_gcc=-Wno-implicit-function-declaration
 # libdwarf not clean
 SMATCH=off
 
+DYNFLAGS += '-R$$ORIGIN/../../lib/$(MACH)'
 LDLIBS = -lelf -lc
+NATIVE_LIBS += libelf.so libc.so
 
 .KEEP_STATE:
 .PARALLEL:

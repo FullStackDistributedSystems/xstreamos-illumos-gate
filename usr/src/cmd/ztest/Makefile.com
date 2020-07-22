@@ -22,7 +22,7 @@
 # Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
 # Copyright (c) 2012, 2016 by Delphix. All rights reserved.
 # Copyright 2017 RackTop Systems.
-# Copyright (c) 2018, Joyent, Inc.
+# Copyright 2020 Joyent, Inc.
 
 PROG= ztest
 OBJS= $(PROG).o
@@ -35,8 +35,9 @@ INCS += -I../../../lib/libzpool/common
 INCS += -I../../../uts/common/fs/zfs
 INCS += -I../../../uts/common/fs/zfs/lua
 INCS += -I../../../common/zfs
+INCS += -I../../../lib/libzutil/common
 
-LDLIBS += -lumem -lzpool -lcmdutils -lm -lnvpair -lfakekernel
+LDLIBS += -lumem -lzpool -lcmdutils -lm -lnvpair -lfakekernel -lzutil
 
 CSTD= $(CSTD_GNU99)
 C99LMODE= -Xc99=%all
@@ -59,6 +60,9 @@ CERRWARN += -_gcc=-Wno-switch
 
 # false positive
 SMOFF += signed
+
+# needs work
+SMOFF += all_func_returns
 
 .KEEP_STATE:
 

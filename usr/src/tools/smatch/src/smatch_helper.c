@@ -39,6 +39,19 @@ char *alloc_string(const char *str)
 	return tmp;
 }
 
+char *alloc_string_newline(const char *str)
+{
+	char *tmp;
+	int len;
+
+	if (!str)
+		return NULL;
+	len = strlen(str);
+	tmp = malloc(len + 2);
+	snprintf(tmp, len + 2, "%s\n", str);
+	return tmp;
+}
+
 void free_string(char *str)
 {
 	free(str);
@@ -81,14 +94,26 @@ struct smatch_state *alloc_state_str(const char *name)
 	return state;
 }
 
+struct smatch_state *merge_str_state(struct smatch_state *s1, struct smatch_state *s2)
+{
+	if (!s1->name || !s2->name)
+		return &merged;
+	if (strcmp(s1->name, s2->name) == 0)
+		return s1;
+	return &merged;
+}
+
 struct smatch_state *alloc_state_expr(struct expression *expr)
 {
 	struct smatch_state *state;
 	char *name;
 
-	state = __alloc_smatch_state(0);
 	expr = strip_expr(expr);
 	name = expr_to_str(expr);
+	if (!name)
+		return NULL;
+
+	state = __alloc_smatch_state(0);
 	state->name = alloc_sname(name);
 	free_string(name);
 	state->data = expr;
@@ -166,16 +191,16 @@ static void __get_variable_from_expr(struct symbol **sym_ptr, char *buf,
 
 		deref = expr->deref;
 		op = deref->op;
-		if (op == '*') {
+		if (deref->type == EXPR_PREOP && op == '*') {
 			struct expression *unop = strip_expr(deref->unop);
 
 			if (unop->type == EXPR_PREOP && unop->op == '&') {
 				deref = unop->unop;
 				op = '.';
 			} else {
-				deref = deref->unop;
-				if (!is_pointer(deref))
+				if (!is_pointer(deref) && !is_pointer(deref->unop))
 					op = '.';
+				deref = deref->unop;
 			}
 		}
 
@@ -264,10 +289,24 @@ static void __get_variable_from_expr(struct symbol **sym_ptr, char *buf,
 		return;
 	}
 	case EXPR_VALUE: {
+		sval_t sval = {};
 		char tmp[25];
 
 		*complicated = 1;
-		snprintf(tmp, 25, "%lld", expr->value);
+		if (!get_value(expr, &sval))
+			return;
+		snprintf(tmp, 25, "%s", sval_to_numstr(sval));
+		append(buf, tmp, len);
+		return;
+	}
+	case EXPR_FVALUE: {
+		sval_t sval = {};
+		char tmp[25];
+
+		*complicated = 1;
+		if (!get_value(expr, &sval))
+			return;
+		snprintf(tmp, 25, "%s", sval_to_numstr(sval));
 		append(buf, tmp, len);
 		return;
 	}
@@ -527,7 +566,7 @@ char *expr_to_chunk_helper(struct expression *expr, struct symbol **sym, struct 
 		if (sym)
 			*sym = tmp;
 		if (vsl)
-			*vsl = expr_to_vsl(expr);
+			add_var_sym(vsl, name, tmp);
 		return name;
 	}
 	free_string(name);
@@ -577,7 +616,7 @@ int sym_name_is(const char *name, struct expression *expr)
 	return 0;
 }
 
-int is_zero(struct expression *expr)
+int expr_is_zero(struct expression *expr)
 {
 	sval_t sval;
 
@@ -806,24 +845,21 @@ int is_error_return(struct expression *expr)
 	return 0;
 }
 
-int getting_address(void)
+int getting_address(struct expression *expr)
 {
-	struct expression *tmp;
-	int i = 0;
-	int dot_ops = 0;
+	int deref_count = 0;
 
-	FOR_EACH_PTR_REVERSE(big_expression_stack, tmp) {
-		if (!i++)
-			continue;
-		if (tmp->type == EXPR_PREOP && tmp->op == '(')
-			continue;
-		if (tmp->op == '.' && !dot_ops++)
-			continue;
-		if (tmp->op == '&')
-			return 1;
-		return 0;
-	} END_FOR_EACH_PTR_REVERSE(tmp);
-	return 0;
+	while ((expr = expr_get_parent_expr(expr))) {
+		if (expr->type == EXPR_PREOP && expr->op == '*') {
+			/* &foo->bar->baz dereferences "foo->bar" */
+			if (deref_count == 0)
+				deref_count++;
+			return false;
+		}
+		if (expr->type == EXPR_PREOP && expr->op == '&')
+			return true;
+	}
+	return false;
 }
 
 int get_struct_and_member(struct expression *expr, const char **type, const char **member)
@@ -869,8 +905,52 @@ char *get_member_name(struct expression *expr)
 			 expr->member->name);
 		return alloc_string(buf);
 	}
-	if (!sym->ident)
-		return NULL;
+	if (!sym->ident) {
+		struct expression *deref;
+		char *full, *outer;
+		int len;
+
+		/*
+		 * If we're in an anonymous struct then maybe we can find an
+		 * outer struct name to use as a name.  This code should be
+		 * recursive and cleaner.  I am not very proud of it.
+		 *
+		 */
+
+		deref = expr->deref;
+		if (deref->type != EXPR_DEREF || !deref->member)
+			return NULL;
+		sym = get_type(deref->deref);
+		if (!sym || sym->type != SYM_STRUCT || !sym->ident)
+			return NULL;
+
+		full = expr_to_str(expr);
+		if (!full)
+			return NULL;
+		deref = deref->deref;
+		if (deref->type == EXPR_PREOP && deref->op == '*')
+			deref = deref->unop;
+		outer = expr_to_str(deref);
+		if (!outer) {
+			free_string(full);
+			return NULL;
+		}
+		len = strlen(outer);
+		if (strncmp(outer, full, len) != 0) {
+			free_string(full);
+			free_string(outer);
+			return NULL;
+		}
+		if (full[len] == '-' && full[len + 1] == '>')
+			len += 2;
+		if (full[len] == '.')
+			len++;
+		snprintf(buf, sizeof(buf), "(struct %s)->%s", sym->ident->name, full + len);
+		free_string(outer);
+		free_string(full);
+
+		return alloc_string(buf);
+	}
 	snprintf(buf, sizeof(buf), "(struct %s)->%s", sym->ident->name, expr->member->name);
 	return alloc_string(buf);
 }
@@ -997,6 +1077,22 @@ int get_param_num(struct expression *expr)
 	return get_param_num_from_sym(sym);
 }
 
+struct symbol *get_param_sym_from_num(int num)
+{
+	struct symbol *sym;
+	int i;
+
+	if (!cur_func_sym)
+		return NULL;
+
+	i = 0;
+	FOR_EACH_PTR(cur_func_sym->ctype.base_type->arguments, sym) {
+		if (i++ == num)
+			return sym;
+	} END_FOR_EACH_PTR(sym);
+	return NULL;
+}
+
 int ms_since(struct timeval *start)
 {
 	struct timeval end;
@@ -1052,6 +1148,34 @@ int invert_op(int op)
 		return SPECIAL_LEFTSHIFT;
 	}
 	return 0;
+}
+
+int op_remove_assign(int op)
+{
+	switch (op) {
+	case SPECIAL_ADD_ASSIGN:
+		return '+';
+	case SPECIAL_SUB_ASSIGN:
+		return '-';
+	case SPECIAL_MUL_ASSIGN:
+		return '*';
+	case SPECIAL_DIV_ASSIGN:
+		return '/';
+	case SPECIAL_MOD_ASSIGN:
+		return '%';
+	case SPECIAL_AND_ASSIGN:
+		return '&';
+	case SPECIAL_OR_ASSIGN:
+		return '|';
+	case SPECIAL_XOR_ASSIGN:
+		return '^';
+	case SPECIAL_SHL_ASSIGN:
+		return SPECIAL_LEFTSHIFT;
+	case SPECIAL_SHR_ASSIGN:
+		return SPECIAL_RIGHTSHIFT;
+	default:
+		return op;
+	}
 }
 
 int expr_equiv(struct expression *one, struct expression *two)

@@ -56,7 +56,7 @@ POFILES = generic.po
 INS.liblink=	-$(RM) $@; $(SYMLINK) $(LIBLINKS)$(VERS) $@
 
 
-CPPFLAGS += 	-I$(SRC)/lib/krb5 \
+CPPFLAGS +=	-I$(SRC)/lib/krb5 \
 		-I$(SRC)/lib/krb5/kdb \
 		-I$(SRC)/lib/gss_mechs/mech_krb5/include \
 		-I$(SRC)/lib/gss_mechs/mech_krb5/krb5/os \
@@ -65,7 +65,7 @@ CPPFLAGS += 	-I$(SRC)/lib/krb5 \
 		-I$(SRC)/uts/common/gssapi/mechs/krb5/include \
 		-I$(SRC)
 
-CERRWARN	+= -_gcc=-Wno-uninitialized
+CERRWARN	+= $(CNOWARN_UNINIT)
 CERRWARN	+= -_gcc=-Wno-unused-function
 
 # not linted
@@ -74,6 +74,7 @@ SMATCH=off
 CFLAGS +=	$(CCVERBOSE) -I..
 DYNFLAGS +=	$(KRUNPATH) $(KMECHLIB) -znodelete
 LDLIBS +=	-L $(ROOTLIBDIR) -lcrypto -lc
+NATIVE_LIBS +=	libcrypto.so
 
 ROOTLIBDIR= $(ROOT)/usr/lib/krb5/plugins/preauth
 

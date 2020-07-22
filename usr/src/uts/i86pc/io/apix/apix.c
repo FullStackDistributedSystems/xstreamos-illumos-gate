@@ -325,7 +325,7 @@ apix_softinit()
 	iptr = (int *)&apic_irq_table[0];
 	for (i = 0; i <= APIC_MAX_VECTOR; i++) {
 		apic_level_intr[i] = 0;
-		*iptr++ = NULL;
+		*iptr++ = 0;
 	}
 	mutex_init(&airq_mutex, NULL, MUTEX_DEFAULT, NULL);
 
@@ -357,7 +357,7 @@ apix_get_intr_handler(int cpu, short vec)
 
 	ASSERT(cpu < apic_nproc && vec < APIX_NVECTOR);
 	if (cpu >= apic_nproc || vec >= APIX_NVECTOR)
-		return (NULL);
+		return (0);
 
 	apix_vector = apixs[cpu]->x_vectbl[vec];
 
@@ -612,7 +612,7 @@ apix_picinit(void)
 	/* add nmi handler - least priority nmi handler */
 	LOCK_INIT_CLEAR(&apic_nmi_lock);
 
-	if (!psm_add_nmintr(0, (avfunc) apic_nmi_intr,
+	if (!psm_add_nmintr(0, apic_nmi_intr,
 	    "apix NMI handler", (caddr_t)NULL))
 		cmn_err(CE_WARN, "apix: Unable to add nmi handler");
 

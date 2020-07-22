@@ -63,10 +63,26 @@
 #define	ACDMAJOR	117
 #define	CDMAJOR		15
 
+/*
+ * INT13 commands
+ */
+#define	CMD_RESET	0x0000
+#define	CMD_READ_CHS	0x0200
+#define	CMD_WRITE_CHS	0x0300
+#define	CMD_READ_PARAM	0x0800
+#define	CMD_DRIVE_TYPE	0x1500
+#define	CMD_CHECK_EDD	0x4100
+#define	CMD_READ_LBA	0x4200
+#define	CMD_WRITE_LBA	0x4300
+#define	CMD_EXT_PARAM	0x4800
+#define	CMD_CD_GET_STATUS 0x4b01
+
+#define	DISK_BIOS	0x13
+
 #ifdef DISK_DEBUG
-#define	DEBUG(fmt, args...)	printf("%s: " fmt "\n", __func__, ## args)
+#define	DPRINTF(fmt, args...)	printf("%s: " fmt "\n", __func__, ## args)
 #else
-#define	DEBUG(fmt, args...)
+#define	DPRINTF(fmt, args...)	((void)0)
 #endif
 
 struct specification_packet {
@@ -81,7 +97,8 @@ struct specification_packet {
 	uint16_t	sp_sectorcount;
 	uint16_t	sp_cylsec;
 	uint8_t		sp_head;
-};
+	uint8_t		sp_dummy[16];	/* Avoid memory corruption */
+} __packed;
 
 /*
  * List of BIOS devices, translation from disk unit number to
@@ -217,12 +234,12 @@ bd_bios2unit(int biosdev)
 	bdinfo_t *bd;
 	int i, unit;
 
-	DEBUG("looking for bios device 0x%x", biosdev);
+	DPRINTF("looking for bios device 0x%x", biosdev);
 	for (i = 0; bdi[i] != NULL; i++) {
 		unit = 0;
 		STAILQ_FOREACH(bd, bdi[i], bd_link) {
 			if (bd->bd_unit == biosdev) {
-				DEBUG("bd unit %d is BIOS device 0x%x", unit,
+				DPRINTF("bd unit %d is BIOS device 0x%x", unit,
 				    bd->bd_unit);
 				return (unit);
 			}
@@ -264,8 +281,8 @@ fd_count(void)
 
 	for (drive = 0; drive < MAXBDDEV; drive++) {
 		v86.ctl = V86_FLAGS;
-		v86.addr = 0x13;
-		v86.eax = 0x1500;
+		v86.addr = DISK_BIOS;
+		v86.eax = CMD_DRIVE_TYPE;
 		v86.edx = drive;
 		v86int();
 
@@ -304,10 +321,8 @@ fd_init(void)
 		}
 		if (bd->bd_sectors == 0)
 			bd->bd_flags |= BD_NO_MEDIA;
-#ifndef BOOT2
 		printf("BIOS drive %c: is %s%d\n", ('A' + unit),
 		    biosfd.dv_name, unit);
-#endif
 		STAILQ_INSERT_TAIL(&fdinfo, bd, bd_link);
 	}
 
@@ -333,10 +348,8 @@ bd_init(void)
 			free(bd);
 			break;
 		}
-#ifndef BOOT2
 		printf("BIOS drive %c: is %s%d\n", ('C' + unit),
 		    bioshd.dv_name, unit);
-#endif
 		STAILQ_INSERT_TAIL(&hdinfo, bd, bd_link);
 	}
 	bcache_add_dev(unit);
@@ -355,52 +368,91 @@ cd_init(void)
 	return (0);
 }
 
+/*
+ * Information from bootable CD-ROM.
+ */
+static int
+bd_get_diskinfo_cd(struct bdinfo *bd)
+{
+	struct specification_packet bc_sp;
+	int ret = -1;
+
+	(void) memset(&bc_sp, 0, sizeof (bc_sp));
+	/* Set sp_size as per specification. */
+	bc_sp.sp_size = sizeof (bc_sp) - sizeof (bc_sp.sp_dummy);
+
+	v86.ctl = V86_FLAGS;
+	v86.addr = DISK_BIOS;
+	v86.eax = CMD_CD_GET_STATUS;
+	v86.edx = bd->bd_unit;
+	v86.ds = VTOPSEG(&bc_sp);
+	v86.esi = VTOPOFF(&bc_sp);
+	v86int();
+
+	if ((v86.eax & 0xff00) == 0 &&
+	    bc_sp.sp_drive == bd->bd_unit) {
+		bd->bd_cyl = ((bc_sp.sp_cylsec & 0xc0) << 2) +
+		    ((bc_sp.sp_cylsec & 0xff00) >> 8) + 1;
+		bd->bd_sec = bc_sp.sp_cylsec & 0x3f;
+		bd->bd_hds = bc_sp.sp_head + 1;
+		bd->bd_sectors = (uint64_t)bd->bd_cyl * bd->bd_hds * bd->bd_sec;
+
+		if (bc_sp.sp_bootmedia & 0x0F) {
+			/* Floppy or hard-disk emulation */
+			bd->bd_sectorsize = BIOSDISK_SECSIZE;
+			return (-1);
+		} else {
+			bd->bd_sectorsize = 2048;
+			bd->bd_flags = BD_MODEEDD | BD_CDROM;
+			ret = 0;
+		}
+	}
+
+	/*
+	 * If this is the boot_drive, default to non-emulation bootable CD-ROM.
+	 */
+	if (ret != 0 && bd->bd_unit >= 0x88) {
+		bd->bd_cyl = 0;
+		bd->bd_hds = 1;
+		bd->bd_sec = 15;
+		bd->bd_sectorsize = 2048;
+		bd->bd_flags = BD_MODEEDD | BD_CDROM;
+		bd->bd_sectors = 0;
+		ret = 0;
+	}
+
+	/*
+	 * Note we can not use bd_get_diskinfo_ext() nor bd_get_diskinfo_std()
+	 * here - some systems do get hung with those.
+	 */
+	/*
+	 * Still no size? use 7.961GB. The size does not really matter
+	 * as long as it is reasonably large to make our reads to pass
+	 * the sector count check.
+	 */
+	if (bd->bd_sectors == 0)
+		bd->bd_sectors = 4173824;
+
+	return (ret);
+}
+
 int
 bc_add(int biosdev)
 {
 	bdinfo_t *bd;
-	struct specification_packet bc_sp;
 	int nbcinfo = 0;
 
 	if (!STAILQ_EMPTY(&cdinfo))
 		return (-1);
 
-	v86.ctl = V86_FLAGS;
-	v86.addr = 0x13;
-	v86.eax = 0x4b01;
-	v86.edx = biosdev;
-	v86.ds = VTOPSEG(&bc_sp);
-	v86.esi = VTOPOFF(&bc_sp);
-	v86int();
-	if ((v86.eax & 0xff00) != 0)
-		return (-1);
-
 	if ((bd = calloc(1, sizeof (*bd))) == NULL)
 		return (-1);
 
-	bd->bd_flags = BD_CDROM;
 	bd->bd_unit = biosdev;
-
-	/*
-	 * Ignore result from bd_int13probe(), we will use local
-	 * workaround below.
-	 */
-	(void) bd_int13probe(bd);
-
-	if (bd->bd_cyl == 0) {
-		bd->bd_cyl = ((bc_sp.sp_cylsec & 0xc0) << 2) +
-		    ((bc_sp.sp_cylsec & 0xff00) >> 8) + 1;
+	if (bd_get_diskinfo_cd(bd) < 0) {
+		free(bd);
+		return (-1);
 	}
-	if (bd->bd_hds == 0)
-		bd->bd_hds = bc_sp.sp_head + 1;
-	if (bd->bd_sec == 0)
-		bd->bd_sec = bc_sp.sp_cylsec & 0x3f;
-	if (bd->bd_sectors == 0)
-		bd->bd_sectors = (uint64_t)bd->bd_cyl * bd->bd_hds * bd->bd_sec;
-
-	/* Still no size? use 7.961GB */
-	if (bd->bd_sectors == 0)
-		bd->bd_sectors = 4173824;
 
 	STAILQ_INSERT_TAIL(&cdinfo, bd, bd_link);
 	printf("BIOS CD is cd%d\n", nbcinfo);
@@ -421,14 +473,14 @@ bd_check_extensions(int unit)
 
 	/* Determine if we can use EDD with this device. */
 	v86.ctl = V86_FLAGS;
-	v86.addr = 0x13;
-	v86.eax = 0x4100;
+	v86.addr = DISK_BIOS;
+	v86.eax = CMD_CHECK_EDD;
 	v86.edx = unit;
-	v86.ebx = 0x55aa;
+	v86.ebx = EDD_QUERY_MAGIC;
 	v86int();
 
 	if (V86_CY(v86.efl) ||			/* carry set */
-	    (v86.ebx & 0xffff) != 0xaa55)	/* signature */
+	    (v86.ebx & 0xffff) != EDD_INSTALLED) /* signature */
 		return (0);
 
 	/* extended disk access functions (AH=42h-44h,47h,48h) supported */
@@ -443,8 +495,8 @@ bd_reset_disk(int unit)
 {
 	/* reset disk */
 	v86.ctl = V86_FLAGS;
-	v86.addr = 0x13;
-	v86.eax = 0;
+	v86.addr = DISK_BIOS;
+	v86.eax = CMD_RESET;
 	v86.edx = unit;
 	v86int();
 }
@@ -457,8 +509,8 @@ bd_get_diskinfo_std(struct bdinfo *bd)
 {
 	bzero(&v86, sizeof (v86));
 	v86.ctl = V86_FLAGS;
-	v86.addr = 0x13;
-	v86.eax = 0x800;
+	v86.addr = DISK_BIOS;
+	v86.eax = CMD_READ_PARAM;
 	v86.edx = bd->bd_unit;
 	v86int();
 
@@ -481,22 +533,31 @@ bd_get_diskinfo_std(struct bdinfo *bd)
 
 /*
  * Read EDD info. Return 0 on success, error otherwise.
+ *
+ * Avoid stack corruption on some systems by adding extra bytes to
+ * params block.
  */
 static int
 bd_get_diskinfo_ext(struct bdinfo *bd)
 {
-	struct edd_params params;
+	struct disk_params {
+		struct edd_params head;
+		struct edd_device_path_v3 device_path;
+		uint8_t	dummy[16];
+	} __packed dparams;
+	struct edd_params *params;
 	uint64_t total;
 
+	params = &dparams.head;
 	/* Get disk params */
-	bzero(&params, sizeof (params));
-	params.len = sizeof (params);
+	bzero(&dparams, sizeof (dparams));
+	params->len = sizeof (struct edd_params_v3);
 	v86.ctl = V86_FLAGS;
-	v86.addr = 0x13;
-	v86.eax = 0x4800;
+	v86.addr = DISK_BIOS;
+	v86.eax = CMD_EXT_PARAM;
 	v86.edx = bd->bd_unit;
-	v86.ds = VTOPSEG(&params);
-	v86.esi = VTOPOFF(&params);
+	v86.ds = VTOPSEG(&dparams);
+	v86.esi = VTOPOFF(&dparams);
 	v86int();
 
 	if (V86_CY(v86.efl) && ((v86.eax & 0xff00) != 0))
@@ -508,20 +569,20 @@ bd_get_diskinfo_ext(struct bdinfo *bd)
 	 * powerof2(params.sector_size).
 	 * 16K is largest read buffer we can use at this time.
 	 */
-	if (params.sector_size >= 512 &&
-	    params.sector_size <= 16384 &&
-	    (params.sector_size % BIOSDISK_SECSIZE) == 0)
-		bd->bd_sectorsize = params.sector_size;
+	if (params->sector_size >= 512 &&
+	    params->sector_size <= 16384 &&
+	    (params->sector_size % BIOSDISK_SECSIZE) == 0)
+		bd->bd_sectorsize = params->sector_size;
 
-	bd->bd_cyl = params.cylinders;
-	bd->bd_hds = params.heads;
-	bd->bd_sec = params.sectors_per_track;
+	bd->bd_cyl = params->cylinders;
+	bd->bd_hds = params->heads;
+	bd->bd_sec = params->sectors_per_track;
 
-	if (params.sectors != 0) {
-		total = params.sectors;
+	if (params->sectors != 0) {
+		total = params->sectors;
 	} else {
-		total = (uint64_t)params.cylinders *
-		    params.heads * params.sectors_per_track;
+		total = (uint64_t)params->cylinders *
+		    params->heads * params->sectors_per_track;
 	}
 	bd->bd_sectors = total;
 
@@ -538,6 +599,10 @@ bd_int13probe(bdinfo_t *bd)
 
 	bd->bd_flags &= ~BD_NO_MEDIA;
 
+	if ((bd->bd_flags & BD_CDROM) != 0) {
+		return (bd_get_diskinfo_cd(bd) == 0);
+	}
+
 	edd = bd_check_extensions(bd->bd_unit);
 	if (edd == 0)
 		bd->bd_flags |= BD_MODEINT13;
@@ -547,7 +612,8 @@ bd_int13probe(bdinfo_t *bd)
 		bd->bd_flags |= BD_MODEEDD3;
 
 	/* Default sector size */
-	bd->bd_sectorsize = BIOSDISK_SECSIZE;
+	if (bd->bd_sectorsize == 0)
+		bd->bd_sectorsize = BIOSDISK_SECSIZE;
 
 	/*
 	 * Test if the floppy device is present, so we can avoid receiving
@@ -559,8 +625,8 @@ bd_int13probe(bdinfo_t *bd)
 
 		/* Get disk type */
 		v86.ctl = V86_FLAGS;
-		v86.addr = 0x13;
-		v86.eax = 0x1500;
+		v86.addr = DISK_BIOS;
+		v86.eax = CMD_DRIVE_TYPE;
 		v86.edx = bd->bd_unit;
 		v86int();
 		if (V86_CY(v86.efl) || (v86.eax & 0x300) == 0)
@@ -585,10 +651,6 @@ bd_int13probe(bdinfo_t *bd)
 	}
 
 	if (ret != 0) {
-		/* CD is special case, bc_add() has its own fallback. */
-		if ((bd->bd_flags & BD_CDROM) != 0)
-			return (true);
-
 		if (bd->bd_sectors != 0 && edd != 0) {
 			bd->bd_sec = 63;
 			bd->bd_hds = 255;
@@ -600,8 +662,6 @@ bd_int13probe(bdinfo_t *bd)
 
 			if ((bd->bd_flags & BD_FLOPPY) != 0)
 				dv_name = biosfd.dv_name;
-			else if ((bd->bd_flags & BD_CDROM) != 0)
-				dv_name = bioscd.dv_name;
 			else
 				dv_name = bioshd.dv_name;
 
@@ -619,7 +679,7 @@ bd_int13probe(bdinfo_t *bd)
 	if (bd->bd_sectors == 0)
 		bd->bd_sectors = (uint64_t)bd->bd_cyl * bd->bd_hds * bd->bd_sec;
 
-	DEBUG("unit 0x%x geometry %d/%d/%d\n", bd->bd_unit, bd->bd_cyl,
+	DPRINTF("unit 0x%x geometry %d/%d/%d\n", bd->bd_unit, bd->bd_cyl,
 	    bd->bd_hds, bd->bd_sec);
 
 	return (true);
@@ -690,8 +750,8 @@ bd_print_common(struct devsw *dev, bdinfo_list_t *bdi, int verbose)
 
 		devd.dd.d_dev = dev;
 		devd.dd.d_unit = i;
-		devd.d_slice = -1;
-		devd.d_partition = -1;
+		devd.d_slice = D_SLICENONE;
+		devd.d_partition = D_PARTNONE;
 		if (disk_open(&devd,
 		    bd->bd_sectorsize * bd->bd_sectors,
 		    bd->bd_sectorsize) == 0) {
@@ -744,8 +804,8 @@ bd_disk_get_sectors(struct disk_devdesc *dev)
 
 	disk.dd.d_dev = dev->dd.d_dev;
 	disk.dd.d_unit = dev->dd.d_unit;
-	disk.d_slice = -1;
-	disk.d_partition = -1;
+	disk.d_slice = D_SLICENONE;
+	disk.d_partition = D_PARTNONE;
 	disk.d_offset = 0;
 
 	size = bd->bd_sectors * bd->bd_sectorsize;
@@ -918,7 +978,7 @@ bd_realstrategy(void *devdata, int rw, daddr_t dblk, size_t size,
 		return (EIO);
 	}
 
-	DEBUG("open_disk %p", dev);
+	DPRINTF("open_disk %p", dev);
 
 	offset = dblk * BIOSDISK_SECSIZE;
 	dblk = offset / bd->bd_sectorsize;
@@ -931,7 +991,7 @@ bd_realstrategy(void *devdata, int rw, daddr_t dblk, size_t size,
 	 * while translating block count to bytes.
 	 */
 	if (size > INT_MAX) {
-		DEBUG("too large I/O: %zu bytes", size);
+		DPRINTF("too large I/O: %zu bytes", size);
 		return (EIO);
 	}
 
@@ -971,7 +1031,7 @@ bd_realstrategy(void *devdata, int rw, daddr_t dblk, size_t size,
 	if (dblk + blks >= d_offset + disk_blocks) {
 		blks = d_offset + disk_blocks - dblk;
 		size = blks * bd->bd_sectorsize;
-		DEBUG("short I/O %d", blks);
+		DPRINTF("short I/O %d", blks);
 	}
 
 	bio_size = min(BIO_BUFFER_SIZE, size);
@@ -996,7 +1056,7 @@ bd_realstrategy(void *devdata, int rw, daddr_t dblk, size_t size,
 
 		switch (rw & F_MASK) {
 		case F_READ:
-			DEBUG("read %d from %lld to %p", x, dblk, buf);
+			DPRINTF("read %d from %lld to %p", x, dblk, buf);
 			bsize = bd->bd_sectorsize * x - blkoff;
 			if (rest < bsize)
 				bsize = rest;
@@ -1009,7 +1069,7 @@ bd_realstrategy(void *devdata, int rw, daddr_t dblk, size_t size,
 			bcopy(bbuf + blkoff, buf, bsize);
 			break;
 		case F_WRITE :
-			DEBUG("write %d from %lld to %p", x, dblk, buf);
+			DPRINTF("write %d from %lld to %p", x, dblk, buf);
 			if (blkoff != 0) {
 				/*
 				 * We got offset to sector, read 1 sector to
@@ -1074,12 +1134,11 @@ bd_edd_io(bdinfo_t *bd, daddr_t dblk, int blks, caddr_t dest,
 	packet.seg = VTOPSEG(dest);
 	packet.lba = dblk;
 	v86.ctl = V86_FLAGS;
-	v86.addr = 0x13;
-	/* Should we Write with verify ?? 0x4302 ? */
+	v86.addr = DISK_BIOS;
 	if (dowrite == BD_WR)
-		v86.eax = 0x4300;
+		v86.eax = CMD_WRITE_LBA; /* maybe Write with verify 0x4302? */
 	else
-		v86.eax = 0x4200;
+		v86.eax = CMD_READ_LBA;
 	v86.edx = bd->bd_unit;
 	v86.ds = VTOPSEG(&packet);
 	v86.esi = VTOPOFF(&packet);
@@ -1111,11 +1170,11 @@ bd_chs_io(bdinfo_t *bd, daddr_t dblk, int blks, caddr_t dest,
 	}
 
 	v86.ctl = V86_FLAGS;
-	v86.addr = 0x13;
+	v86.addr = DISK_BIOS;
 	if (dowrite == BD_WR)
-		v86.eax = 0x300 | blks;
+		v86.eax = CMD_WRITE_CHS | blks;
 	else
-		v86.eax = 0x200 | blks;
+		v86.eax = CMD_READ_CHS | blks;
 	v86.ecx = ((cyl & 0xff) << 8) | ((cyl & 0x300) >> 2) | sec;
 	v86.edx = (hd << 8) | bd->bd_unit;
 	v86.es = VTOPSEG(dest);
@@ -1220,8 +1279,8 @@ bd_getbigeom(int bunit)
 {
 
 	v86.ctl = V86_FLAGS;
-	v86.addr = 0x13;
-	v86.eax = 0x800;
+	v86.addr = DISK_BIOS;
+	v86.eax = CMD_READ_PARAM;
 	v86.edx = 0x80 + bunit;
 	v86int();
 	if (V86_CY(v86.efl))
@@ -1257,7 +1316,7 @@ bd_getdev(struct i386_devdesc *d)
 		return (-1);
 
 	biosdev = bd_unit2bios(d);
-	DEBUG("unit %d BIOS device %d", dev->dd.d_unit, biosdev);
+	DPRINTF("unit %d BIOS device %d", dev->dd.d_unit, biosdev);
 	if (biosdev == -1)			/* not a BIOS device */
 		return (-1);
 
@@ -1310,6 +1369,6 @@ bd_getdev(struct i386_devdesc *d)
 	}
 
 	rootdev = MAKEBOOTDEV(major, slice, unit, partition);
-	DEBUG("dev is 0x%x\n", rootdev);
+	DPRINTF("dev is 0x%x\n", rootdev);
 	return (rootdev);
 }

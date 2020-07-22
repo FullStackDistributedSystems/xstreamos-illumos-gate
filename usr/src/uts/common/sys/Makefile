@@ -21,12 +21,13 @@
 
 #
 # Copyright (c) 1989, 2010, Oracle and/or its affiliates. All rights reserved.
-# Copyright (c) 2018, Joyent, Inc.
+# Copyright 2019 Joyent, Inc.
 # Copyright 2013 Garrett D'Amore <garrett@damore.org>
 # Copyright 2013 Saso Kiselkov. All rights reserved.
 # Copyright 2015 Igor Kozhukhov <ikozhukhov@gmail.com>
 # Copyright 2017 Nexenta Systems, Inc.
 # Copyright 2016 Hans Rosenfeld <rosenfeld@grumpf.hope-2000.org>
+# Copyright 2019 Peter Tribble.
 #
 
 include $(SRC)/uts/Makefile.uts
@@ -42,12 +43,6 @@ FILEMODE=644
 #
 
 i386_HDRS=			\
-	agp/agpamd64gart_io.h	\
-	agp/agpdefs.h		\
-	agp/agpgart_impl.h	\
-	agp/agpmaster_io.h	\
-	agp/agptarget_io.h	\
-	agpgart.h		\
 	asy.h			\
 	fd_debug.h		\
 	fdc.h			\
@@ -170,6 +165,8 @@ CHKHDRS=			\
 	ddi_implfuncs.h		\
 	ddi_obsolete.h		\
 	ddi_periodic.h		\
+	ddi_ufm.h		\
+	ddi_ufm_impl.h		\
 	ddidevmap.h		\
 	ddidmareq.h		\
 	ddimapreq.h		\
@@ -352,6 +349,7 @@ CHKHDRS=			\
 	lgrp_user.h		\
 	libc_kernel.h		\
 	link.h			\
+	linker_set.h		\
 	list.h			\
 	list_impl.h		\
 	llc1.h			\
@@ -511,6 +509,7 @@ CHKHDRS=			\
 	sema_impl.h		\
 	semaphore.h		\
 	sendfile.h		\
+	sensors.h		\
 	ser_sync.h		\
 	session.h		\
 	sha1.h			\
@@ -695,12 +694,8 @@ AUDIOHDRS=			\
 AVHDRS=				\
 	iec61883.h
 
-BSCHDRS=			\
-	bscbus.h		\
-	bscv_impl.h		\
-	lom_ebuscodes.h		\
+LOMHDRS=			\
 	lom_io.h		\
-	lom_priv.h		\
 	lombus.h
 
 MDESCHDRS=			\
@@ -980,6 +975,7 @@ SATAGENHDRS=		\
 
 SYSEVENTHDRS=		\
 	ap_driver.h     \
+	datalink.h	\
 	dev.h		\
 	domain.h        \
 	dr.h            \
@@ -1129,7 +1125,7 @@ CHECKHDRS=						\
 	$($(MACH)_HDRS:%.h=%.check)			\
 	$(AUDIOHDRS:%.h=audio/%.check)			\
 	$(AVHDRS:%.h=av/%.check)			\
-	$(BSCHDRS:%.h=%.check)				\
+	$(LOMHDRS:%.h=%.check)				\
 	$(CHKHDRS:%.h=%.check)				\
 	$(CPUDRVHDRS:%.h=%.check)			\
 	$(CRYPTOHDRS:%.h=crypto/%.check)		\

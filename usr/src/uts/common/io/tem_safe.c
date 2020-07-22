@@ -516,6 +516,35 @@ tem_safe_setparam(struct tem_vt_state *tem, int count, int newparam)
 }
 
 
+static void
+tem_select_color(struct tem_vt_state *tem, text_color_t color, boolean_t fg)
+{
+	if (tems.ts_pdepth >= 24 ||
+	    (color < 8 && tems.ts_pdepth < 24)) {
+		if (fg == B_TRUE) {
+			tem->tvs_fg_color = color;
+			tem->tvs_flags &= ~TEM_ATTR_BRIGHT_FG;
+		} else {
+			tem->tvs_bg_color = color;
+			tem->tvs_flags &= ~TEM_ATTR_BRIGHT_BG;
+		}
+		return;
+	}
+
+	if (color > 15)
+		return;
+
+	/* Bright color and depth < 24 */
+	color -= 8;
+	if (fg == B_TRUE) {
+		tem->tvs_fg_color = color;
+		tem->tvs_flags |= TEM_ATTR_BRIGHT_FG;
+	} else {
+		tem->tvs_bg_color = color;
+		tem->tvs_flags |= TEM_ATTR_BRIGHT_BG;
+	}
+}
+
 /*
  * select graphics mode based on the param vals stored in a_params
  */
@@ -612,10 +641,8 @@ tem_safe_selgraph(struct tem_vt_state *tem)
 			case 5: /* 256 colors */
 				count++;
 				curparam--;
-				if (tems.ts_pdepth < 24)
-					break;
-				tem->tvs_fg_color = tem->tvs_params[count];
-				tem->tvs_flags &= ~TEM_ATTR_BRIGHT_FG;
+				tem_select_color(tem, tem->tvs_params[count],
+				    B_TRUE);
 				break;
 			default:
 				break;
@@ -661,10 +688,8 @@ tem_safe_selgraph(struct tem_vt_state *tem)
 			case 5: /* 256 colors */
 				count++;
 				curparam--;
-				if (tems.ts_pdepth < 24)
-					break;
-				tem->tvs_bg_color = tem->tvs_params[count];
-				tem->tvs_flags &= ~TEM_ATTR_BRIGHT_BG;
+				tem_select_color(tem, tem->tvs_params[count],
+				    B_FALSE);
 				break;
 			default:
 				break;
@@ -2188,9 +2213,17 @@ tem_safe_pix_cursor(struct tem_vt_state *tem, short action,
 
 	switch (tems.ts_pdepth) {
 	case 4:
-	case 8:
 		ca.fg_color.mono = fg;
 		ca.bg_color.mono = bg;
+		break;
+	case 8:
+#ifdef _HAVE_TEM_FIRMWARE
+		ca.fg_color.mono = fg;
+		ca.bg_color.mono = bg;
+#else
+		ca.fg_color.mono = tems.ts_color_map(fg);
+		ca.bg_color.mono = tems.ts_color_map(bg);
+#endif
 		break;
 	case 15:
 	case 16:
@@ -2231,8 +2264,8 @@ tem_safe_pix_cursor(struct tem_vt_state *tem, short action,
 		ca.bg_color.twentyfour[0] = (color >> 16) & 0xFF;
 		ca.bg_color.twentyfour[1] = (color >> 8) & 0xFF;
 		ca.bg_color.twentyfour[2] = color & 0xFF;
-		break;
 #endif
+		break;
 	}
 
 	ca.action = action;
@@ -2267,6 +2300,11 @@ bit_to_pix8(struct tem_vt_state *tem, tem_char_t c, text_color_t fg_color,
     text_color_t bg_color)
 {
 	uint8_t *dest = (uint8_t *)tem->tvs_pix_data;
+
+#ifndef _HAVE_TEM_FIRMWARE
+	fg_color = (text_color_t)tems.ts_color_map(fg_color);
+	bg_color = (text_color_t)tems.ts_color_map(bg_color);
+#endif
 	font_bit_to_pix8(&tems.ts_font, dest, c, fg_color, bg_color);
 }
 
@@ -2293,8 +2331,6 @@ bit_to_pix24(struct tem_vt_state *tem, tem_char_t c, text_color_t fg_color4,
 	uint32_t fg_color32, bg_color32;
 	uint8_t *dest;
 
-	ASSERT(fg_color4 < 16 && bg_color4 < 16);
-
 #ifdef _HAVE_TEM_FIRMWARE
 	fg_color32 = PIX4TO32(fg_color4);
 	bg_color32 = PIX4TO32(bg_color4);
@@ -2312,8 +2348,6 @@ bit_to_pix32(struct tem_vt_state *tem, tem_char_t c, text_color_t fg_color4,
     text_color_t bg_color4)
 {
 	uint32_t fg_color32, bg_color32, *dest;
-
-	ASSERT(fg_color4 < 16 && bg_color4 < 16);
 
 #ifdef _HAVE_TEM_FIRMWARE
 	fg_color32 = PIX4TO32(fg_color4);
@@ -2354,7 +2388,7 @@ tem_safe_get_color(text_color_t *fg, text_color_t *bg, term_char_t c)
 	*fg = c.tc_fg_color;
 	*bg = c.tc_bg_color;
 
-	if (c.tc_fg_color < 16) {
+	if (c.tc_fg_color < XLATE_NCOLORS) {
 		if (TEM_ATTR_ISSET(c.tc_char,
 		    TEM_ATTR_BRIGHT_FG | TEM_ATTR_BOLD))
 			*fg = brt_xlate[c.tc_fg_color];
@@ -2362,7 +2396,7 @@ tem_safe_get_color(text_color_t *fg, text_color_t *bg, term_char_t c)
 			*fg = dim_xlate[c.tc_fg_color];
 	}
 
-	if (c.tc_bg_color < 16) {
+	if (c.tc_bg_color < XLATE_NCOLORS) {
 		if (TEM_ATTR_ISSET(c.tc_char, TEM_ATTR_BRIGHT_BG))
 			*bg = brt_xlate[c.tc_bg_color];
 		else

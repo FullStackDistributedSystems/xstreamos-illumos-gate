@@ -27,7 +27,11 @@ struct sqlite3 *smatch_db;
 struct sqlite3 *mem_db;
 struct sqlite3 *cache_db;
 
+int debug_db;
+
 static int return_id;
+
+static void call_return_state_hooks(struct expression *expr);
 
 #define SQLITE_CACHE_PAGES 1000
 
@@ -79,7 +83,7 @@ char *escape_newlines(const char *str)
 	int i, j;
 
 	for (i = 0, j = 0; str[i] != '\0' && j != sizeof(buf); i++, j++) {
-		if (str[i] != '\n') {
+		if (str[i] != '\r' && str[i] != '\n') {
 			buf[j] = str[i];
 			continue;
 		}
@@ -105,7 +109,7 @@ static int print_sql_output(void *unused, int argc, char **argv, char **azColNam
 
 	for (i = 0; i < argc; i++) {
 		if (i != 0)
-			printf(", ");
+			sm_printf(", ");
 		sm_printf("%s", argv[i]);
 	}
 	sm_printf("\n");
@@ -120,7 +124,7 @@ void sql_exec(struct sqlite3 *db, int (*callback)(void*, int, char**, char**), v
 	if (!db)
 		return;
 
-	if (option_debug) {
+	if (option_debug || debug_db) {
 		sm_msg("%s", sql);
 		if (strncasecmp(sql, "select", strlen("select")) == 0)
 			sqlite3_exec(db, sql, print_sql_output, NULL, NULL);
@@ -252,8 +256,8 @@ void sql_insert_caller_info(struct expression *call, int type,
 
 void sql_insert_function_ptr(const char *fn, const char *struct_name)
 {
-	sql_insert(function_ptr, "'%s', '%s', '%s', 0", get_base_file(), fn,
-		   struct_name);
+	sql_insert_or_ignore(function_ptr, "'%s', '%s', '%s', 0",
+			     get_base_file(), fn, struct_name);
 }
 
 void sql_insert_return_implies(int type, int param, const char *key, const char *value)
@@ -331,7 +335,7 @@ void sql_save_constraint(const char *con)
 	if (!option_info)
 		return;
 
-        sm_msg("SQL: insert or ignore into constraints (str) values('%s');", con);
+        sm_msg("SQL: insert or ignore into constraints (str) values('%s');", escape_newlines(con));
 }
 
 void sql_save_constraint_required(const char *data, int op, const char *limit)
@@ -370,11 +374,6 @@ void sql_insert_mtag_about(mtag_t tag, const char *left_name, const char *right_
 {
 	sql_insert(mtag_about, "%lld, '%s', '%s', %d, '%s', '%s'",
 		   tag, get_filename(), get_function(), get_lineno(), left_name, right_name);
-}
-
-void sql_insert_mtag_data(mtag_t tag, const char *var, int offset, int type, const char *value)
-{
-	sql_insert(mtag_data, "%lld, '%s', %d, %d, '%s'", tag, var, offset, type, value);
 }
 
 void sql_insert_mtag_map(mtag_t tag, int offset, mtag_t container)
@@ -513,17 +512,19 @@ static int is_local_symbol(struct expression *expr)
 void sql_select_return_states(const char *cols, struct expression *call,
 	int (*callback)(void*, int, char**, char**), void *info)
 {
+	struct expression *fn;
 	int row_count = 0;
 
 	if (is_fake_call(call))
 		return;
 
-	if (call->fn->type != EXPR_SYMBOL || !call->fn->symbol || is_local_symbol(call->fn)) {
+	fn = strip_expr(call->fn);
+	if (fn->type != EXPR_SYMBOL || !fn->symbol || is_local_symbol(fn)) {
 		sql_select_return_states_pointer(cols, call, callback, info);
 		return;
 	}
 
-	if (inlinable(call->fn)) {
+	if (inlinable(fn)) {
 		mem_sql(callback, info,
 			"select %s from return_states where call_id = '%lu' order by return_id, type;",
 			cols, (unsigned long)call);
@@ -531,12 +532,12 @@ void sql_select_return_states(const char *cols, struct expression *call,
 	}
 
 	run_sql(get_row_count, &row_count, "select count(*) from return_states where %s;",
-		get_static_filter(call->fn->symbol));
+		get_static_filter(fn->symbol));
 	if (row_count > 3000)
 		return;
 
 	run_sql(callback, info, "select %s from return_states where %s order by file, return_id, type;",
-		cols, get_static_filter(call->fn->symbol));
+		cols, get_static_filter(fn->symbol));
 }
 
 #define CALL_IMPLIES 0
@@ -723,6 +724,33 @@ struct range_list *db_return_vals_from_str(const char *fn_name)
 	return ret_info.return_range_list;
 }
 
+/*
+ * This is used when we have a function that takes a function pointer as a
+ * parameter.  "frob(blah, blah, my_function);"  We know that the return values
+ * from frob() come from my_funcion() so we want to find the possible returns
+ * of my_function(), but we don't know which arguments are passed to it.
+ *
+ */
+struct range_list *db_return_vals_no_args(struct expression *expr)
+{
+	struct return_info ret_info = {};
+
+	if (!expr || expr->type != EXPR_SYMBOL)
+		return NULL;
+
+	ret_info.static_returns_call = expr;
+	ret_info.return_type = get_type(expr);
+	ret_info.return_type = get_real_base_type(ret_info.return_type);
+	if (!ret_info.return_type)
+		return NULL;
+
+	run_sql(db_return_callback, &ret_info,
+		"select distinct return from return_states where %s;",
+		get_static_filter(expr->symbol));
+
+	return ret_info.return_range_list;
+}
+
 static void match_call_marker(struct expression *expr)
 {
 	struct symbol *type;
@@ -740,38 +768,112 @@ static void match_call_marker(struct expression *expr)
 	sql_insert_caller_info(expr, INTERNAL, -1, "%call_marker%", type_to_str(type));
 }
 
-static char *show_offset(int offset)
+int is_recursive_member(const char *name)
 {
-	static char buf[64];
+	char buf[256];
+	const char *p, *next;
+	int size;
 
-	buf[0] = '\0';
-	if (offset != -1)
-		snprintf(buf, sizeof(buf), "(-%d)", offset);
-	return buf;
+	p = strchr(name, '>');
+	if (!p)
+		return 0;
+	p++;
+	while (true) {
+		next = strchr(p, '>');
+		if (!next)
+			return 0;
+		next++;
+
+		size = next - p;
+		if (size >= sizeof(buf))
+			return 0;
+		memcpy(buf, p, size);
+		buf[size] = '\0';
+		if (strstr(next, buf))
+			return 1;
+		p = next;
+	}
 }
 
-static void print_struct_members(struct expression *call, struct expression *expr, int param, int offset, struct stree *stree,
+char *sm_to_arg_name(struct expression *expr, struct sm_state *sm)
+{
+	struct symbol *sym;
+	const char *sm_name;
+	char *name;
+	bool is_address = false;
+	bool add_star = false;
+	char buf[256];
+	char *ret = NULL;
+	int len;
+
+	expr = strip_expr(expr);
+	if (!expr)
+		return NULL;
+
+	if (expr->type == EXPR_PREOP && expr->op == '&') {
+		expr = strip_expr(expr->unop);
+		is_address = true;
+	}
+
+	name = expr_to_var_sym(expr, &sym);
+	if (!name || !sym)
+		goto free;
+	if (sym != sm->sym)
+		goto free;
+
+	sm_name = sm->name;
+	add_star = false;
+	if (sm_name[0] == '*') {
+		add_star = true;
+		sm_name++;
+	}
+
+	len = strlen(name);
+	if (strncmp(name, sm_name, len) != 0)
+		goto free;
+	if (sm_name[len] == '\0') {
+		snprintf(buf, sizeof(buf), "%s%s$",
+			 add_star ? "*" : "", is_address ? "*" : "");
+	} else {
+		if (sm_name[len] != '.' && sm_name[len] != '-')
+			goto free;
+		if (sm_name[len] == '-')
+			len++;
+		// FIXME does is_address really imply that sm_name[len] == '-'
+		snprintf(buf, sizeof(buf), "%s$->%s", add_star ? "*" : "",
+			 sm_name + len);
+	}
+
+	ret = alloc_sname(buf);
+free:
+	free_string(name);
+	return ret;
+}
+
+static void print_struct_members(struct expression *call, struct expression *expr, int param, struct stree *stree,
 	void (*callback)(struct expression *call, int param, char *printed_name, struct sm_state *sm))
 {
 	struct sm_state *sm;
+	const char *sm_name;
 	char *name;
 	struct symbol *sym;
 	int len;
 	char printed_name[256];
 	int is_address = 0;
+	bool add_star;
 	struct symbol *type;
 
 	expr = strip_expr(expr);
 	if (!expr)
 		return;
+	type = get_type(expr);
+	if (type && type_bits(type) < type_bits(&ulong_ctype))
+		return;
+
 	if (expr->type == EXPR_PREOP && expr->op == '&') {
 		expr = strip_expr(expr->unop);
 		is_address = 1;
 	}
-
-	type = get_type(expr);
-	if (type && type_bits(type) < type_bits(&ulong_ctype))
-		return;
 
 	name = expr_to_var_sym(expr, &sym);
 	if (!name || !sym)
@@ -781,88 +883,41 @@ static void print_struct_members(struct expression *call, struct expression *exp
 	FOR_EACH_SM(stree, sm) {
 		if (sm->sym != sym)
 			continue;
-		if (strcmp(name, sm->name) == 0) {
+		sm_name = sm->name;
+		add_star = false;
+		if (sm_name[0] == '*') {
+			add_star = true;
+			sm_name++;
+		}
+		// FIXME: simplify?
+		if (!add_star && strcmp(name, sm_name) == 0) {
 			if (is_address)
-				snprintf(printed_name, sizeof(printed_name), "*$%s", show_offset(offset));
+				snprintf(printed_name, sizeof(printed_name), "*$");
 			else /* these are already handled. fixme: handle them here */
 				continue;
-		} else if (sm->name[0] == '*' && strcmp(name, sm->name + 1) == 0) {
-			snprintf(printed_name, sizeof(printed_name), "*$%s", show_offset(offset));
-		} else if (strncmp(name, sm->name, len) == 0) {
-			if (isalnum(sm->name[len]))
+		} else if (add_star && strcmp(name, sm_name) == 0) {
+			snprintf(printed_name, sizeof(printed_name), "%s*$",
+				 is_address ? "*" : "");
+		} else if (strncmp(name, sm_name, len) == 0) {
+			if (sm_name[len] != '.' && sm_name[len] != '-')
 				continue;
 			if (is_address)
-				snprintf(printed_name, sizeof(printed_name), "$%s->%s", show_offset(offset), sm->name + len + 1);
+				snprintf(printed_name, sizeof(printed_name),
+					 "%s$->%s", add_star ? "*" : "",
+					 sm_name + len + 1);
 			else
-				snprintf(printed_name, sizeof(printed_name), "$%s%s", show_offset(offset), sm->name + len);
+				snprintf(printed_name, sizeof(printed_name),
+					 "%s$%s", add_star ? "*" : "",
+					 sm_name + len);
 		} else {
 			continue;
 		}
+		if (is_recursive_member(printed_name))
+			continue;
 		callback(call, param, printed_name, sm);
 	} END_FOR_EACH_SM(sm);
 free:
 	free_string(name);
-}
-
-static int param_used_callback(void *_container, int argc, char **argv, char **azColName)
-{
-	char **container = _container;
-	static char buf[256];
-
-	snprintf(buf, sizeof(buf), "%s", argv[0]);
-	*container = buf;
-	return 0;
-}
-
-static void print_container_struct_members(struct expression *call, struct expression *expr, int param, struct stree *stree,
-	void (*callback)(struct expression *call, int param, char *printed_name, struct sm_state *sm))
-{
-	struct expression *tmp;
-	char *container = NULL;
-	int offset;
-	int holder_offset;
-	char *p;
-
-	if (!call->fn || call->fn->type != EXPR_SYMBOL || !call->fn->symbol)
-		return;
-
-	/*
-	 * We can't use the in-mem DB because we have to parse the function
-	 * first, then we know if it takes a container, then we know to pass it
-	 * the container data.
-	 *
-	 */
-	run_sql(&param_used_callback, &container,
-		"select key from return_implies where %s and type = %d and key like '%%$(%%' and parameter = %d limit 1;",
-		get_static_filter(call->fn->symbol), CONTAINER, param);
-	if (!container)
-		return;
-
-	p = strchr(container, '-');
-	if (!p)
-		return;
-	offset = atoi(p);
-	p = strchr(p, ')');
-	if (!p)
-		return;
-	p++;
-
-	tmp = get_assigned_expr(expr);
-	if (tmp)
-		expr = tmp;
-
-	if (expr->type != EXPR_PREOP || expr->op != '&')
-		return;
-	expr = strip_expr(expr->unop);
-	holder_offset = get_member_offset_from_deref(expr);
-	if (-holder_offset != offset)
-		return;
-
-	expr = strip_expr(expr->deref);
-	if (expr->type == EXPR_PREOP && expr->op == '*')
-		expr = strip_expr(expr->unop);
-
-	print_struct_members(call, expr, param, holder_offset, stree, callback);
 }
 
 static void match_call_info(struct expression *call)
@@ -881,8 +936,7 @@ static void match_call_info(struct expression *call)
 		stree = get_all_states_stree(cb->owner);
 		i = 0;
 		FOR_EACH_PTR(call->args, arg) {
-			print_struct_members(call, arg, i, -1, stree, cb->callback);
-			print_container_struct_members(call, arg, i, stree, cb->callback);
+			print_struct_members(call, arg, i, stree, cb->callback);
 			i++;
 		} END_FOR_EACH_PTR(arg);
 		free_stree(&stree);
@@ -1009,9 +1063,8 @@ static char *get_next_ptr_name(void)
 	char *ptr;
 
 	FOR_EACH_PTR(ptr_names, ptr) {
-		if (list_has_string(ptr_names_done, ptr))
+		if (!insert_string(&ptr_names_done, ptr))
 			continue;
-		insert_string(&ptr_names_done, ptr);
 		return ptr;
 	} END_FOR_EACH_PTR(ptr);
 	return NULL;
@@ -1069,8 +1122,7 @@ static void match_data_from_db(struct symbol *sym)
 		if (ptr_list_size((struct ptr_list *)ptr_names) > 20) {
 			__free_ptr_list((struct ptr_list **)&ptr_names);
 			__free_ptr_list((struct ptr_list **)&ptr_names_done);
-			stree = __pop_fake_cur_stree();
-			free_stree(&stree);
+			__free_fake_cur_stree();
 			return;
 		}
 
@@ -1087,6 +1139,7 @@ static void match_data_from_db(struct symbol *sym)
 		__unnullify_path();
 		data.prev_func_id = -1;
 		data.ignore = 0;
+		data.results = 0;
 
 		FOR_EACH_PTR(ptr_names, ptr) {
 			run_sql(caller_info_callback, &data,
@@ -1224,53 +1277,126 @@ static void match_call_implies(struct symbol *sym)
 			   call_implies_callbacks);
 }
 
-static void print_initializer_list(struct expression_list *expr_list,
-		struct symbol *struct_type)
+static char *get_fn_param_str(struct expression *expr)
 {
-	struct expression *expr;
-	struct symbol *base_type;
-	char struct_name[256];
+	struct expression *tmp;
+	int param;
+	char buf[32];
 
-	FOR_EACH_PTR(expr_list, expr) {
-		if (expr->type == EXPR_INDEX && expr->idx_expression && expr->idx_expression->type == EXPR_INITIALIZER) {
-			print_initializer_list(expr->idx_expression->expr_list, struct_type);
-			continue;
-		}
-		if (expr->type != EXPR_IDENTIFIER)
-			continue;
-		if (!expr->expr_ident)
-			continue;
-		if (!expr->ident_expression || !expr->ident_expression->symbol_name)
-			continue;
-		base_type = get_type(expr->ident_expression);
-		if (!base_type || base_type->type != SYM_FN)
-			continue;
-		snprintf(struct_name, sizeof(struct_name), "(struct %s)->%s",
-			 struct_type->ident->name, expr->expr_ident->name);
-		sql_insert_function_ptr(expr->ident_expression->symbol_name->name,
-				        struct_name);
-	} END_FOR_EACH_PTR(expr);
+	tmp = get_assigned_expr(expr);
+	if (tmp)
+		expr = tmp;
+	expr = strip_expr(expr);
+	if (!expr || expr->type != EXPR_CALL)
+		return NULL;
+	expr = strip_expr(expr->fn);
+	if (!expr || expr->type != EXPR_SYMBOL)
+		return NULL;
+	param = get_param_num(expr);
+	if (param < 0)
+		return NULL;
+
+	snprintf(buf, sizeof(buf), "[r $%d]", param);
+	return alloc_sname(buf);
 }
 
-static void global_variable(struct symbol *sym)
+static char *get_return_compare_is_param(struct expression *expr)
 {
-	struct symbol *struct_type;
+	char *var;
+	char buf[256];
+	int comparison;
+	int param;
 
-	if (!sym->ident)
-		return;
-	if (!sym->initializer || sym->initializer->type != EXPR_INITIALIZER)
-		return;
-	struct_type = get_base_type(sym);
-	if (!struct_type)
-		return;
-	if (struct_type->type == SYM_ARRAY) {
-		struct_type = get_base_type(struct_type);
-		if (!struct_type)
-			return;
+	param = get_param_num(expr);
+	if (param < 0)
+		return NULL;
+
+	var = expr_to_var(expr);
+	if (!var)
+		return NULL;
+	snprintf(buf, sizeof(buf), "%s orig", var);
+	comparison = get_comparison_strings(var, buf);
+	free_string(var);
+
+	if (!comparison)
+		return NULL;
+
+	snprintf(buf, sizeof(buf), "[%s$%d]", show_special(comparison), param);
+	return alloc_sname(buf);
+}
+
+static char *get_return_compare_str(struct expression *expr)
+{
+	char *compare_str;
+
+	compare_str = get_return_compare_is_param(expr);
+	if (compare_str)
+		return compare_str;
+
+	compare_str = expr_lte_to_param(expr, -1);
+	if (compare_str)
+		return compare_str;
+
+	return expr_param_comparison(expr, -1);
+}
+
+static const char *get_return_ranges_str(struct expression *expr, struct range_list **rl_p)
+{
+	struct range_list *rl;
+	char *return_ranges;
+	sval_t sval;
+	char *fn_param_str;
+	char *compare_str;
+	char *math_str;
+	char buf[128];
+
+	*rl_p = NULL;
+
+	if (!expr)
+		return alloc_sname("");
+
+	if (get_implied_value(expr, &sval)) {
+		sval = sval_cast(cur_func_return_type(), sval);
+		*rl_p = alloc_rl(sval, sval);
+		return sval_to_str_or_err_ptr(sval);
 	}
-	if (struct_type->type != SYM_STRUCT || !struct_type->ident)
-		return;
-	print_initializer_list(sym->initializer->expr_list, struct_type);
+
+	fn_param_str = get_fn_param_str(expr);
+	compare_str = expr_equal_to_param(expr, -1);
+	math_str = get_value_in_terms_of_parameter_math(expr);
+
+	if (get_implied_rl(expr, &rl) && !is_whole_rl(rl)) {
+		rl = cast_rl(cur_func_return_type(), rl);
+		return_ranges = show_rl(rl);
+	} else if (get_imaginary_absolute(expr, &rl)){
+		rl = cast_rl(cur_func_return_type(), rl);
+		return alloc_sname(show_rl(rl));
+	} else {
+		get_absolute_rl(expr, &rl);
+		rl = cast_rl(cur_func_return_type(), rl);
+		return_ranges = show_rl(rl);
+	}
+	*rl_p = rl;
+
+	if (fn_param_str) {
+		snprintf(buf, sizeof(buf), "%s%s", return_ranges, fn_param_str);
+		return alloc_sname(buf);
+	}
+	if (compare_str) {
+		snprintf(buf, sizeof(buf), "%s%s", return_ranges, compare_str);
+		return alloc_sname(buf);
+	}
+	if (math_str) {
+		snprintf(buf, sizeof(buf), "%s[%s]", return_ranges, math_str);
+		return alloc_sname(buf);
+	}
+	compare_str = get_return_compare_str(expr);
+	if (compare_str) {
+		snprintf(buf, sizeof(buf), "%s%s", return_ranges, compare_str);
+		return alloc_sname(buf);
+	}
+
+	return return_ranges;
 }
 
 static void match_return_info(int return_id, char *return_ranges, struct expression *expr)
@@ -1278,12 +1404,18 @@ static void match_return_info(int return_id, char *return_ranges, struct express
 	sql_insert_return_states(return_id, return_ranges, INTERNAL, -1, "", function_signature());
 }
 
-static void call_return_state_hooks_conditional(struct expression *expr)
+static bool call_return_state_hooks_conditional(struct expression *expr)
 {
-	struct returned_state_callback *cb;
-	struct range_list *rl;
-	char *return_ranges;
 	int final_pass_orig = final_pass;
+	static int recurse;
+
+	if (recurse >= 2)
+		return false;
+	if (!expr ||
+	    (expr->type != EXPR_CONDITIONAL && expr->type != EXPR_SELECT))
+		return false;
+
+	recurse++;
 
 	__push_fake_cur_stree();
 
@@ -1291,35 +1423,18 @@ static void call_return_state_hooks_conditional(struct expression *expr)
 	__split_whole_condition(expr->conditional);
 	final_pass = final_pass_orig;
 
-	if (get_implied_rl(expr->cond_true, &rl))
-		rl = cast_rl(cur_func_return_type(), rl);
-	else
-		rl = cast_rl(cur_func_return_type(), alloc_whole_rl(get_type(expr->cond_true)));
-	return_ranges = show_rl(rl);
-	set_state(RETURN_ID, "return_ranges", NULL, alloc_estate_rl(rl));
-
-	return_id++;
-	FOR_EACH_PTR(returned_state_callbacks, cb) {
-		cb->callback(return_id, return_ranges, expr->cond_true);
-	} END_FOR_EACH_PTR(cb);
+	call_return_state_hooks(expr->cond_true ?: expr->conditional);
 
 	__push_true_states();
 	__use_false_states();
 
-	if (get_implied_rl(expr->cond_false, &rl))
-		rl = cast_rl(cur_func_return_type(), rl);
-	else
-		rl = cast_rl(cur_func_return_type(), alloc_whole_rl(get_type(expr->cond_false)));
-	return_ranges = show_rl(rl);
-	set_state(RETURN_ID, "return_ranges", NULL, alloc_estate_rl(rl));
-
-	return_id++;
-	FOR_EACH_PTR(returned_state_callbacks, cb) {
-		cb->callback(return_id, return_ranges, expr->cond_false);
-	} END_FOR_EACH_PTR(cb);
+	call_return_state_hooks(expr->cond_false);
 
 	__merge_true_states();
 	__free_fake_cur_stree();
+
+	recurse--;
+	return true;
 }
 
 static void call_return_state_hooks_compare(struct expression *expr)
@@ -1380,35 +1495,6 @@ static int ptr_in_list(struct sm_state *sm, struct state_list *slist)
 	return 0;
 }
 
-static char *get_return_compare_str(struct expression *expr)
-{
-	char *compare_str;
-	char *var;
-	char buf[256];
-	int comparison;
-	int param;
-
-	compare_str = expr_lte_to_param(expr, -1);
-	if (compare_str)
-		return compare_str;
-	param = get_param_num(expr);
-	if (param < 0)
-		return NULL;
-
-	var = expr_to_var(expr);
-	if (!var)
-		return NULL;
-	snprintf(buf, sizeof(buf), "%s orig", var);
-	comparison = get_comparison_strings(var, buf);
-	free_string(var);
-
-	if (!comparison)
-		return NULL;
-
-	snprintf(buf, sizeof(buf), "[%s$%d]", show_special(comparison), param);
-	return alloc_sname(buf);
-}
-
 static int split_possible_helper(struct sm_state *sm, struct expression *expr)
 {
 	struct returned_state_callback *cb;
@@ -1417,9 +1503,10 @@ static int split_possible_helper(struct sm_state *sm, struct expression *expr)
 	struct sm_state *tmp;
 	int ret = 0;
 	int nr_possible, nr_states;
-	char *compare_str = NULL;
+	char *compare_str;
 	char buf[128];
 	struct state_list *already_handled = NULL;
+	sval_t sval;
 
 	if (!sm || !sm->merged)
 		return 0;
@@ -1428,7 +1515,16 @@ static int split_possible_helper(struct sm_state *sm, struct expression *expr)
 		return 0;
 
 	/* bail if it gets too complicated */
-	nr_possible = ptr_list_size((struct ptr_list *)sm->possible);
+	nr_possible = 0;
+	FOR_EACH_PTR(sm->possible, tmp) {
+		if (tmp->merged)
+			continue;
+		if (ptr_in_list(tmp, already_handled))
+			continue;
+		add_ptr_list(&already_handled, tmp);
+		nr_possible++;
+	} END_FOR_EACH_PTR(tmp);
+	free_slist(&already_handled);
 	nr_states = get_db_state_count();
 	if (nr_states * nr_possible >= 2000)
 		return 0;
@@ -1448,10 +1544,12 @@ static int split_possible_helper(struct sm_state *sm, struct expression *expr)
 		rl = cast_rl(cur_func_return_type(), estate_rl(tmp->state));
 		return_ranges = show_rl(rl);
 		set_state(RETURN_ID, "return_ranges", NULL, alloc_estate_rl(clone_rl(rl)));
-		compare_str = get_return_compare_str(expr);
-		if (compare_str) {
-			snprintf(buf, sizeof(buf), "%s%s", return_ranges, compare_str);
-			return_ranges = alloc_sname(buf);
+		if (!rl_to_sval(rl, &sval)) {
+			compare_str = get_return_compare_str(expr);
+			if (compare_str) {
+				snprintf(buf, sizeof(buf), "%s%s", return_ranges, compare_str);
+				return_ranges = alloc_sname(buf);
+			}
 		}
 
 		return_id++;
@@ -1478,61 +1576,12 @@ static int call_return_state_hooks_split_possible(struct expression *expr)
 	return split_possible_helper(sm, expr);
 }
 
-static const char *get_return_ranges_str(struct expression *expr, struct range_list **rl_p)
-{
-	struct range_list *rl;
-	char *return_ranges;
-	sval_t sval;
-	char *compare_str;
-	char *math_str;
-	char buf[128];
-
-	*rl_p = NULL;
-
-	if (!expr)
-		return alloc_sname("");
-
-	if (get_implied_value(expr, &sval)) {
-		sval = sval_cast(cur_func_return_type(), sval);
-		*rl_p = alloc_rl(sval, sval);
-		return sval_to_str(sval);
-	}
-
-	compare_str = expr_equal_to_param(expr, -1);
-	math_str = get_value_in_terms_of_parameter_math(expr);
-
-	if (get_implied_rl(expr, &rl)) {
-		rl = cast_rl(cur_func_return_type(), rl);
-		return_ranges = show_rl(rl);
-	} else if (get_imaginary_absolute(expr, &rl)){
-		rl = cast_rl(cur_func_return_type(), rl);
-		return alloc_sname(show_rl(rl));
-	} else {
-		rl = cast_rl(cur_func_return_type(), alloc_whole_rl(get_type(expr)));
-		return_ranges = show_rl(rl);
-	}
-	*rl_p = rl;
-
-	if (compare_str) {
-		snprintf(buf, sizeof(buf), "%s%s", return_ranges, compare_str);
-		return alloc_sname(buf);
-	}
-	if (math_str) {
-		snprintf(buf, sizeof(buf), "%s[%s]", return_ranges, math_str);
-		return alloc_sname(buf);
-	}
-	compare_str = get_return_compare_str(expr);
-	if (compare_str) {
-		snprintf(buf, sizeof(buf), "%s%s", return_ranges, compare_str);
-		return alloc_sname(buf);
-	}
-
-	return return_ranges;
-}
-
 static bool has_possible_negative(struct sm_state *sm)
 {
 	struct sm_state *tmp;
+
+	if (!type_signed(estate_type(sm->state)))
+		return false;
 
 	FOR_EACH_PTR(sm->possible, tmp) {
 		if (!estate_rl(tmp->state))
@@ -1545,7 +1594,7 @@ static bool has_possible_negative(struct sm_state *sm)
 	return false;
 }
 
-static bool has_possible_zero_null(struct sm_state *sm)
+static bool has_separate_zero_null(struct sm_state *sm)
 {
 	struct sm_state *tmp;
 	sval_t sval;
@@ -1567,6 +1616,7 @@ static int split_positive_from_negative(struct expression *expr)
 	struct range_list *rl;
 	const char *return_ranges;
 	struct range_list *ret_rl;
+	bool separate_zero;
 	int undo;
 
 	/* We're going to print the states 3 times */
@@ -1574,8 +1624,6 @@ static int split_positive_from_negative(struct expression *expr)
 		return 0;
 
 	if (!get_implied_rl(expr, &rl) || !rl)
-		return 0;
-	if (is_whole_rl(rl) || is_whole_rl_non_zero(rl))
 		return 0;
 	/* Forget about INT_MAX and larger */
 	if (rl_max(rl).value <= 0)
@@ -1588,8 +1636,9 @@ static int split_positive_from_negative(struct expression *expr)
 		return 0;
 	if (!has_possible_negative(sm))
 		return 0;
+	separate_zero = has_separate_zero_null(sm);
 
-	if (!assume(compare_expression(expr, '>', zero_expr())))
+	if (!assume(compare_expression(expr, separate_zero ? '>' : SPECIAL_GTE, zero_expr())))
 		return 0;
 
 	return_id++;
@@ -1601,7 +1650,7 @@ static int split_positive_from_negative(struct expression *expr)
 
 	end_assume();
 
-	if (rl_has_sval(rl, sval_type_val(rl_type(rl), 0))) {
+	if (separate_zero) {
 		undo = assume(compare_expression(expr, SPECIAL_EQUAL, zero_expr()));
 
 		return_id++;
@@ -1630,7 +1679,7 @@ static int split_positive_from_negative(struct expression *expr)
 	return 1;
 }
 
-static int call_return_state_hooks_split_null_non_null(struct expression *expr)
+static int call_return_state_hooks_split_null_non_null_zero(struct expression *expr)
 {
 	struct returned_state_callback *cb;
 	struct range_list *rl;
@@ -1647,8 +1696,6 @@ static int call_return_state_hooks_split_null_non_null(struct expression *expr)
 		return 0;
 	if (expr->type == EXPR_CALL)
 		return 0;
-	if (!is_pointer(expr))
-		return 0;
 
 	sm = get_sm_state_expr(SMATCH_EXTRA, expr);
 	if (!sm)
@@ -1660,7 +1707,7 @@ static int call_return_state_hooks_split_null_non_null(struct expression *expr)
 		return 0;
 	if (estate_min(state).value == 0 && estate_max(state).value == 0)
 		return 0;
-	if (!has_possible_zero_null(sm))
+	if (!has_separate_zero_null(sm))
 		return 0;
 
 	nr_states = get_db_state_count();
@@ -1702,6 +1749,37 @@ static int call_return_state_hooks_split_null_non_null(struct expression *expr)
 	return 1;
 }
 
+static bool is_kernel_success_fail(struct sm_state *sm)
+{
+	struct sm_state *tmp;
+	struct range_list *rl;
+	bool has_zero = false;
+	bool has_neg = false;
+
+	if (!type_signed(estate_type(sm->state)))
+		return false;
+
+	FOR_EACH_PTR(sm->possible, tmp) {
+		rl = estate_rl(tmp->state);
+		if (!rl)
+			return false;
+		if (rl_min(rl).value == 0 && rl_max(rl).value == 0) {
+			has_zero = true;
+			continue;
+		}
+		has_neg = true;
+		if (rl_min(rl).value >= -4095 && rl_max(rl).value < 0)
+			continue;
+		if (strcmp(tmp->state->name, "s32min-(-1)") == 0)
+			continue;
+		if (strcmp(tmp->state->name, "s32min-(-1),1-s32max") == 0)
+			continue;
+		return false;
+	} END_FOR_EACH_PTR(tmp);
+
+	return has_zero && has_neg;
+}
+
 static int call_return_state_hooks_split_success_fail(struct expression *expr)
 {
 	struct sm_state *sm;
@@ -1718,7 +1796,7 @@ static int call_return_state_hooks_split_success_fail(struct expression *expr)
 		return 0;
 
 	nr_states = get_db_state_count();
-	if (nr_states > 1500)
+	if (nr_states > 2000)
 		return 0;
 
 	sm = get_sm_state_expr(SMATCH_EXTRA, expr);
@@ -1726,16 +1804,11 @@ static int call_return_state_hooks_split_success_fail(struct expression *expr)
 		return 0;
 	if (ptr_list_size((struct ptr_list *)sm->possible) == 1)
 		return 0;
+	if (!is_kernel_success_fail(sm))
+		return 0;
 
 	rl = estate_rl(sm->state);
 	if (!rl)
-		return 0;
-
-	if (rl_min(rl).value < -4095 || rl_min(rl).value >= 0)
-		return 0;
-	if (rl_max(rl).value != 0)
-		return 0;
-	if (!has_possible_zero_null(sm))
 		return 0;
 
 	__push_fake_cur_stree();
@@ -1779,15 +1852,6 @@ static int is_boolean(struct expression *expr)
 	if (!get_implied_rl(expr, &rl))
 		return 0;
 	if (rl_min(rl).value == 0 && rl_max(rl).value == 1)
-		return 1;
-	return 0;
-}
-
-static int is_conditional(struct expression *expr)
-{
-	if (!expr)
-		return 0;
-	if (expr->type == EXPR_CONDITIONAL || expr->type == EXPR_SELECT)
 		return 1;
 	return 0;
 }
@@ -1849,21 +1913,12 @@ static int split_on_bool_sm(struct sm_state *sm, struct expression *expr)
 	const char *return_ranges;
 	struct sm_state *tmp;
 	int ret = 0;
-	int nr_possible, nr_states;
-	char *compare_str = NULL;
-	char buf[128];
 	struct state_list *already_handled = NULL;
 
 	if (!sm || !sm->merged)
 		return 0;
 
 	if (too_many_possible(sm))
-		return 0;
-
-	/* bail if it gets too complicated */
-	nr_possible = ptr_list_size((struct ptr_list *)sm->possible);
-	nr_states = get_db_state_count();
-	if (nr_states * nr_possible >= 2000)
 		return 0;
 
 	FOR_EACH_PTR(sm->possible, tmp) {
@@ -1880,12 +1935,6 @@ static int split_on_bool_sm(struct sm_state *sm, struct expression *expr)
 
 		return_ranges = get_return_ranges_str(expr, &ret_rl);
 		set_state(RETURN_ID, "return_ranges", NULL, alloc_estate_rl(ret_rl));
-		compare_str = get_return_compare_str(expr);
-		if (compare_str) {
-			snprintf(buf, sizeof(buf), "%s%s", return_ranges, compare_str);
-			return_ranges = alloc_sname(buf);
-		}
-
 		return_id++;
 		FOR_EACH_PTR(returned_state_callbacks, cb) {
 			cb->callback(return_id, (char *)return_ranges, expr);
@@ -1910,6 +1959,10 @@ static int split_by_bool_param(struct expression *expr)
 	sm = get_sm_state(SMATCH_EXTRA, start_sm->name, start_sm->sym);
 	if (!sm || estate_get_single_value(sm->state, &sval))
 		return 0;
+
+	if (get_db_state_count() * 2 >= 2000)
+		return 0;
+
 	return split_on_bool_sm(sm, expr);
 }
 
@@ -1917,9 +1970,7 @@ static int split_by_null_nonnull_param(struct expression *expr)
 {
 	struct symbol *arg;
 	struct sm_state *sm;
-	sval_t zero = {
-		.type = &ulong_ctype,
-	};
+	int nr_possible;
 
 	/* function must only take one pointer */
 	if (ptr_list_size((struct ptr_list *)cur_func_sym->ctype.base_type->arguments) != 1)
@@ -1936,7 +1987,11 @@ static int split_by_null_nonnull_param(struct expression *expr)
 	if (!sm)
 		return 0;
 
-	if (!rl_has_sval(estate_rl(sm->state), zero))
+	if (!has_separate_zero_null(sm))
+		return 0;
+
+	nr_possible = ptr_list_size((struct ptr_list *)sm->possible);
+	if (get_db_state_count() * nr_possible >= 2000)
 		return 0;
 
 	return split_on_bool_sm(sm, expr);
@@ -1987,18 +2042,17 @@ static void call_return_state_hooks(struct expression *expr)
 	    (is_condition(expr) || is_boolean(expr))) {
 		call_return_state_hooks_compare(expr);
 		return;
-	} else if (is_conditional(expr)) {
-		call_return_state_hooks_conditional(expr);
+	} else if (call_return_state_hooks_conditional(expr)) {
 		return;
 	} else if (call_return_state_hooks_split_possible(expr)) {
 		return;
-	} else if (call_return_state_hooks_split_null_non_null(expr)) {
+	} else if (split_positive_from_negative(expr)) {
+		return;
+	} else if (call_return_state_hooks_split_null_non_null_zero(expr)) {
 		return;
 	} else if (call_return_state_hooks_split_success_fail(expr)) {
 		return;
 	} else if (splitable_function_call(expr)) {
-		return;
-	} else if (split_positive_from_negative(expr)) {
 		return;
 	} else if (split_by_bool_param(expr)) {
 	} else if (split_by_null_nonnull_param(expr)) {
@@ -2013,6 +2067,7 @@ vanilla:
 	nr_states = get_db_state_count();
 	if (nr_states >= 10000) {
 		match_return_info(return_id, (char *)return_ranges, expr);
+		print_limited_param_set(return_id, (char *)return_ranges, expr);
 		mark_all_params_untracked(return_id, (char *)return_ranges, expr);
 		return;
 	}
@@ -2208,7 +2263,7 @@ static int save_cache_data(void *_table, int argc, char **argv, char **azColName
 	for (i = 0; i < argc; i++) {
 		if (i)
 			p += snprintf(p, 4096 - (p - buf), ", ");
-		sqlite3_snprintf(sizeof(tmp), tmp, "%q", argv[i]);
+		sqlite3_snprintf(sizeof(tmp), tmp, "%q", escape_newlines(argv[i]));
 		p += snprintf(p, 4096 - (p - buf), "'%s'", tmp);
 
 	}
@@ -2286,25 +2341,38 @@ static char *get_next_string(char **str)
 	static char string[256];
 	char *start;
 	char *p = *str;
-	int len;
+	int len, i, j;
 
 	if (*p == '\0')
 		return NULL;
 	start = p;
 
-	while (*p != '\0' && *p != ' ' && *p != '\n')
+	while (*p != '\0' && *p != '\n') {
+		if (*p == '\\' && *(p + 1) == ' ') {
+			p += 2;
+			continue;
+		}
+		if (*p == ' ')
+			break;
 		p++;
+	}
 
 	len = p - start;
-	if (len > 256) {
-		memcpy(string, start, 255);
-		string[255] = '\0';
+	if (len >= sizeof(string)) {
+		memcpy(string, start, sizeof(string));
+		string[sizeof(string) - 1] = '\0';
 		sm_ierror("return_fix: '%s' too long", string);
 		**str = '\0';
 		return NULL;
 	}
 	memcpy(string, start, len);
 	string[len] = '\0';
+	for (i = 0; i < sizeof(string) - 1; i++) {
+		if (string[i] == '\\' && string[i + 1] == ' ') {
+			for (j = i; string[j] != '\0'; j++)
+				string[j] = string[j + 1];
+		}
+	}
 	if (*p != '\0')
 		p++;
 	*str = p;
@@ -2361,8 +2429,6 @@ static void register_return_replacements(void)
 void register_definition_db_callbacks(int id)
 {
 	add_hook(&match_call_info, FUNCTION_CALL_HOOK);
-	add_hook(&global_variable, BASE_HOOK);
-	add_hook(&global_variable, DECLARATION_HOOK);
 	add_split_return_callback(match_return_info);
 	add_split_return_callback(print_returned_struct_members);
 	add_hook(&call_return_state_hooks, RETURN_HOOK);
@@ -2397,6 +2463,8 @@ char *return_state_to_var_sym(struct expression *expr, int param, const char *ke
 
 		if (expr->type != EXPR_ASSIGNMENT)
 			return NULL;
+		if (get_type(expr->left) == &int_ctype && strcmp(key, "$") != 0)
+			return NULL;
 		name = expr_to_var_sym(expr->left, sym);
 		if (!name)
 			return NULL;
@@ -2427,6 +2495,7 @@ char *get_variable_from_key(struct expression *arg, const char *key, struct symb
 {
 	char buf[256];
 	char *tmp;
+	int star_cnt = 0;
 
 	if (!arg)
 		return NULL;
@@ -2450,19 +2519,30 @@ char *get_variable_from_key(struct expression *arg, const char *key, struct symb
 		}
 	}
 
+	while (key[0] == '*') {
+		star_cnt++;
+		key++;
+	}
+
+	if (arg->type == EXPR_PREOP && arg->op == '&' && star_cnt) {
+		arg = strip_expr(arg->unop);
+		star_cnt--;
+	}
+
 	if (arg->type == EXPR_PREOP && arg->op == '&') {
 		arg = strip_expr(arg->unop);
 		tmp = expr_to_var_sym(arg, sym);
 		if (!tmp)
 			return NULL;
-		snprintf(buf, sizeof(buf), "%s.%s", tmp, key + 3);
+		snprintf(buf, sizeof(buf), "%.*s%s.%s",
+			 star_cnt, "**********", tmp, key + 3);
 		return alloc_string(buf);
 	}
 
 	tmp = expr_to_var_sym(arg, sym);
 	if (!tmp)
 		return NULL;
-	snprintf(buf, sizeof(buf), "%s%s", tmp, key + 1);
+	snprintf(buf, sizeof(buf), "%.*s%s%s", star_cnt, "**********", tmp, key + 1);
 	free_string(tmp);
 	return alloc_string(buf);
 }
@@ -2478,19 +2558,30 @@ char *get_chunk_from_key(struct expression *arg, char *key, struct symbol **sym,
 
 const char *state_name_to_param_name(const char *state_name, const char *param_name)
 {
+	int star_cnt = 0;
 	int name_len;
-	static char buf[256];
+	char buf[256];
 
 	name_len = strlen(param_name);
 
+	while (state_name[0] == '*') {
+		star_cnt++;
+		state_name++;
+	}
+
+	/* ten out of ten stars! */
+	if (star_cnt > 10)
+		return NULL;
+
 	if (strcmp(state_name, param_name) == 0) {
-		return "$";
-	} else if (state_name[name_len] == '-' && /* check for '-' from "->" */
+		snprintf(buf, sizeof(buf), "%.*s$", star_cnt, "**********");
+		return alloc_sname(buf);
+	}
+
+	if (state_name[name_len] == '-' && /* check for '-' from "->" */
 	    strncmp(state_name, param_name, name_len) == 0) {
-		snprintf(buf, sizeof(buf), "$%s", state_name + name_len);
-		return buf;
-	} else if (state_name[0] == '*' && strcmp(state_name + 1, param_name) == 0) {
-		return "*$";
+		snprintf(buf, sizeof(buf), "%.*s$%s", star_cnt, "**********", state_name + name_len);
+		return alloc_sname(buf);
 	}
 	return NULL;
 }

@@ -27,7 +27,7 @@
  * All rights reserved.
  */
 /*
- * Copyright 2019 Joyent, Inc.
+ * Copyright 2020 Joyent, Inc.
  * Copyright 2013 Nexenta Systems, Inc.  All rights reserved.
  * Copyright 2018 OmniOS Community Edition (OmniOSce) Association.
  */
@@ -549,7 +549,7 @@ mp_cpu_unconfigure_common(struct cpu *cp, int error)
 		trap_trace_ctl_t *ttc = &trap_trace_ctl[cp->cpu_id];
 
 		kmem_free((void *)ttc->ttc_first, trap_trace_bufsize);
-		ttc->ttc_first = NULL;
+		ttc->ttc_first = (uintptr_t)NULL;
 	}
 #endif
 
@@ -1861,7 +1861,9 @@ mp_startup_common(boolean_t boot)
 	(void) spl0();
 
 	/*
-	 * Fill out cpu_ucode_info.  Update microcode if necessary.
+	 * Fill out cpu_ucode_info.  Update microcode if necessary. Note that
+	 * this is done after pass1 on the boot CPU, but it needs to be later on
+	 * for the other CPUs.
 	 */
 	ucode_check(cp);
 	cpuid_pass_ucode(cp, new_x86_featureset);
@@ -1923,7 +1925,6 @@ mp_startup_common(boolean_t boot)
 	 * Now we are done with the startup thread, so free it up.
 	 */
 	thread_exit();
-	panic("mp_startup: cannot return");
 	/*NOTREACHED*/
 }
 
@@ -1986,6 +1987,10 @@ mp_cpu_stop(struct cpu *cp)
 
 /*
  * Take the specified CPU out of participation in interrupts.
+ *
+ * Usually, we hold cpu_lock. But we cannot assert as such due to the
+ * exception - i_cpr_save_context() - where we have mutual exclusion via a
+ * separate mechanism.
  */
 int
 cpu_disable_intr(struct cpu *cp)
@@ -1994,6 +1999,7 @@ cpu_disable_intr(struct cpu *cp)
 		return (EBUSY);
 
 	cp->cpu_flags &= ~CPU_ENABLE;
+	ncpus_intr_enabled--;
 	return (0);
 }
 
@@ -2005,6 +2011,7 @@ cpu_enable_intr(struct cpu *cp)
 {
 	ASSERT(MUTEX_HELD(&cpu_lock));
 	cp->cpu_flags |= CPU_ENABLE;
+	ncpus_intr_enabled++;
 	psm_enable_intr(cp->cpu_id);
 }
 

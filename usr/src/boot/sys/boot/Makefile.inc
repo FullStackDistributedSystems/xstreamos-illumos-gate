@@ -11,6 +11,8 @@
 
 #
 # Copyright 2017 Toomas Soome <tsoome@me.com>
+# Copyright 2019 Joyent, Inc.
+# Copyright 2019 OmniOS Community Edition (OmniOSce) Association.
 #
 
 # loader.help build needs better awk
@@ -19,6 +21,9 @@ LD=		$(GNU_ROOT)/bin/gld
 OBJCOPY=	$(GNU_ROOT)/bin/gobjcopy
 OBJDUMP=	$(GNU_ROOT)/bin/gobjdump
 GSTRIP=		$(GNU_ROOT)/bin/gstrip
+
+GLDTARGET=	-melf_i386_sol2
+LDFLAGS	+=	$(GLDTARGET)
 
 # Default Console font setup.
 # We want it to be the same as kernel.
@@ -35,6 +40,8 @@ BOOTSRC=	$(SRC)/boot/sys/boot
 LIBSRC=		$(SRC)/boot/lib
 SASRC=		$(LIBSRC)/libstand
 ZFSSRC=		$(SASRC)/zfs
+ZLIB=		$(SRC)/contrib/zlib
+LZ4=		$(SRC)/common/lz4
 
 # set standard values
 AS_CPPFLAGS=
@@ -42,6 +49,7 @@ CPPFLAGS=	-D_STANDALONE -_gcc=-nostdinc
 CFLAGS64=	-_gcc=-mno-red-zone
 
 CFLAGS=		-_gcc=-Os -_gcc=-fPIC -_gcc=-ffreestanding -_gcc=-fno-builtin
+CFLAGS +=	-_gcc=-ffunction-sections -_gcc=-fdata-sections
 CFLAGS +=	-_gcc=-mno-mmx -_gcc=-mno-3dnow -_gcc=-mno-sse -_gcc=-mno-sse2
 CFLAGS +=	-_gcc=-mno-sse3 -_gcc=-msoft-float
 CFLAGS +=	-_gcc=-mno-avx -_gcc=-mno-aes
@@ -50,7 +58,18 @@ CFLAGS +=	$(CCNOAUTOINLINE) $(CCNOREORDER) $(CSTD_GNU99)
 CCASFLAGS=	-fPIC -Wa,--divide
 ASFLAGS=	--divide
 
-COMPILE.S=	$(CC) $(CCASFLAGS) $(CPPFLAGS) -c
+SMATCH_ =
+SMATCH_on =
+SMATCH_off = -_smatch=off
+
+# SMATCH_ARGS will bring in set of -Wno-* options.
+#CFLAGS +=	$(SMATCH_ARGS:%=-_smatch=%)
+CFLAGS +=	$(SMOFF:%=-_smatch=--disable=%)
+CFLAGS +=	$(SMATCH_$(MACHINE))
+CFLAGS +=	$(SMATCH_$(SMATCH))
+CFLAGS +=	-_smatch=--timeout=0
+
+COMPILE.S=	$(CC) $(SMATCH_off) $(CCASFLAGS) $(CPPFLAGS) -c
 
 ROOT_BOOT=	$(ROOT)/boot
 ROOTBOOTPROG=$(PROG:%=$(ROOT_BOOT)/%)

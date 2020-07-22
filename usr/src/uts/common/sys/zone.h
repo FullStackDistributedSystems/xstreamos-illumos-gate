@@ -18,31 +18,41 @@
  *
  * CDDL HEADER END
  */
+
 /*
  * Copyright (c) 2003, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2018 Joyent, Inc.
- * Copyright 2014 Nexenta Systems, Inc. All rights reserved.
  * Copyright 2014 Igor Kozhukhov <ikozhukhov@gmail.com>.
+ * Copyright 2019 Nexenta Systems, Inc. All rights reserved.
+ * Copyright 2020 Joyent, Inc.
  */
 
 #ifndef _SYS_ZONE_H
 #define	_SYS_ZONE_H
 
 #include <sys/types.h>
-#include <sys/mutex.h>
 #include <sys/param.h>
+#include <sys/tsol/label.h>
+#include <sys/uadmin.h>
+#include <netinet/in.h>
+
+#ifdef _KERNEL
+/*
+ * Many includes are kernel-only to reduce namespace pollution of
+ * userland applications.
+ */
+#include <sys/mutex.h>
 #include <sys/rctl.h>
 #include <sys/ipc_rctl.h>
 #include <sys/pset.h>
-#include <sys/tsol/label.h>
 #include <sys/cred.h>
 #include <sys/netstack.h>
-#include <sys/uadmin.h>
 #include <sys/ksynch.h>
 #include <sys/socket_impl.h>
 #include <sys/secflags.h>
-#include <netinet/in.h>
 #include <sys/cpu_uarray.h>
+#include <sys/list.h>
+#include <sys/loadavg.h>
+#endif	/* _KERNEL */
 
 #ifdef	__cplusplus
 extern "C" {
@@ -321,13 +331,6 @@ typedef struct zone_net_data {
 
 
 #ifdef _KERNEL
-
-/*
- * We need to protect the definition of 'list_t' from userland applications and
- * libraries which may be defining ther own versions.
- */
-#include <sys/list.h>
-#include <sys/loadavg.h>
 
 #define	GLOBAL_ZONEUNIQID	0	/* uniqid of the global zone */
 
@@ -637,7 +640,6 @@ typedef struct zone {
  */
 #define	ZONE_PS_INVAL	PS_MYID
 
-
 extern zone_t zone0;
 extern zone_t *global_zone;
 extern uint_t maxzones;
@@ -777,6 +779,26 @@ struct zsd_entry {
  * Special processes visible in all zones.
  */
 #define	ZONE_SPECIALPID(x)	 ((x) == 0 || (x) == 1)
+
+/*
+ * A root vnode of the current zone.
+ *
+ * NOTE: It may be necessary (initialization time for file sharing where an
+ * NGZ loads a file-sharing kernel module that does zsd initialization) to NOT
+ * use this macro. One should ASSERT() that curzone == active ZSD (an
+ * ASSERTion that's not always true at ZSD initialization time) during regular
+ * use of this macro.
+ */
+#define	ZONE_ROOTVP()	(curzone->zone_rootvp)
+
+/*
+ * Since a zone's root isn't necessarily an actual filesystem boundary
+ * (i.e. VROOT may not be set on zone->zone_rootvp) we need to not assume it.
+ * This macro helps in checking if a vnode is the current zone's rootvp.
+ * NOTE:  Using the VN_ prefix, even though it's defined here in zone.h.
+ * NOTE2: See above warning about ZONE_ROOTVP().
+ */
+#define	VN_IS_CURZONEROOT(vp)   (VN_CMP(vp, ZONE_ROOTVP()))
 
 /*
  * Zone-safe version of thread_create() to be used when the caller wants to

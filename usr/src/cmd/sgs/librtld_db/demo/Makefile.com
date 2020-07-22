@@ -53,7 +53,8 @@ MV =		mv
 .PARALLEL:	$(OBJS)
 
 CPPFLAGS=	-I../common -I. $(CPPFLAGS.master)
-LDLIBS +=	-lrtld_db -lelf -ll -ly
+LDLIBS +=	$(BDIRECT) $(ZLAZYLOAD) -lrtld_db -lelf -ll -ly
+NATIVE_LIBS +=	libelf.so liby.so libl.so
 
 CLEANFILES +=	$(BLTSRC) $(BLTHDR) simp libsub.so.1
 
@@ -62,6 +63,7 @@ CLEANFILES +=	$(BLTSRC) $(BLTHDR) simp libsub.so.1
 CERRWARN +=	-_gcc=-Wno-parentheses
 CERRWARN +=	-_gcc=-Wno-unused-label
 CERRWARN +=	-_gcc=-Wno-unused-variable
+SMOFF +=	buffer_too_small_for_struct
 # DEMO DELETE END
 
 test-sparc=	test-sparc-regs

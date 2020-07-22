@@ -29,7 +29,8 @@
 # Copyright 2015 Igor Kozhukhov <ikozhukhov@gmail.com>
 # Copyright 2016 Toomas Soome <tsoome@me.com>
 # Copyright 2018 OmniOS Community Edition (OmniOSce) Association.
-# Copyright (c) 2019, Joyent, Inc.
+# Copyright 2020 Joyent, Inc.
+# Copyright 2019 RackTop Systems.
 #
 
 #
@@ -42,6 +43,14 @@ ROOT=		/proto
 # and libraries.
 #
 ADJUNCT_PROTO=
+# HAVE_ADJUNCT_PROTO - ADJUNCT_PROTO is set to a non-default value
+# NO_ADJUNCT_PROTO - ADJUNCT_PROTO is unset
+#
+# This works by replacing any value in ADJUNCT_PROTO with POUND_SIGN, which
+# only happens if it has some value, and then setting HAVE_ADJUNCT_PROTO
+# oppositely.
+NO_ADJUNCT_PROTO=$(ADJUNCT_PROTO:%=$(POUND_SIGN))
+$(NO_ADJUNCT_PROTO)HAVE_ADJUNCT_PROTO=$(POUND_SIGN)
 
 #
 # Adjunct for building things that run on the build machine.
@@ -127,7 +136,7 @@ JAVA_ROOT=	/usr/java
 BLD_JAVA_6=	$(POUND_SIGN)
 BLD_JAVA_8=	$(POUND_SIGN)
 
-GNUC_ROOT=	/opt/gcc/4.4.4
+GNUC_ROOT=	/usr/gcc/7
 GCCLIBDIR=	$(GNUC_ROOT)/lib
 GCCLIBDIR64=	$(GNUC_ROOT)/lib/$(MACH64)
 
@@ -192,10 +201,13 @@ GENOFFSETS=	$(ONBLD_TOOLS)/bin/genoffsets
 XREF=		$(ONBLD_TOOLS)/bin/xref
 FIND=		/usr/bin/find
 PERL=		/usr/bin/perl
-PERL_VERSION=	5.12
-PERL_PKGVERS=	-512
-PERL_ARCH =		i86pc-solaris-64int
-$(SPARC_BLD)PERL_ARCH =	sun4-solaris-64int
+PERL_VERSION=	5.10
+PERL_PKGVERS=	-510
+PERL_MACH=	i86pc
+$(SPARC_BLD)PERL_MACH=	sun4
+PERL_VARIANT=
+PERL_ARCH=	$(PERL_MACH)-solaris$(PERL_VARIANT)-64int
+PERL_ARCH64=	$(PERL_MACH)-solaris$(PERL_VARIANT)-64
 PYTHON_VERSION=	2.7
 PYTHON_PKGVERS=	-27
 PYTHON_SUFFIX=
@@ -223,6 +235,10 @@ TIC=		$(ONBLD_TOOLS)/bin/$(MACH)/tic
 ZIC=		$(ONBLD_TOOLS)/bin/$(MACH)/zic
 OPENSSL=	/usr/bin/openssl
 CPCGEN=		$(ONBLD_TOOLS)/bin/$(MACH)/cpcgen
+
+DEFAULT_CONSOLE_COLOR=					\
+	-DDEFAULT_ANSI_FOREGROUND=ANSI_COLOR_WHITE	\
+	-DDEFAULT_ANSI_BACKGROUND=ANSI_COLOR_BLACK
 
 FILEMODE=	644
 DIRMODE=	755
@@ -275,6 +291,8 @@ INS.symlink=	$(RM) $@; $(SYMLINK) $(INSLINKTARGET) $@
 # python scripts to the proto area. This is overridden by makefiles to
 # select to the correct version.
 PYSHEBANG=	$(PYTHON)
+$(BUILDPY3)PYSHEBANG=	$(PYTHON3)
+$(BUILDPY2)PYSHEBANG=	$(PYTHON)
 
 #
 # Python bakes the mtime of the .py file into the compiled .pyc and
@@ -360,8 +378,10 @@ CCNOAUTOINLINE= \
 	-_gcc=-fno-ipa-cp \
 	-_gcc7=-fno-ipa-icf \
 	-_gcc8=-fno-ipa-icf \
+	-_gcc9=-fno-ipa-icf \
 	-_gcc7=-fno-clone-functions \
-	-_gcc8=-fno-clone-functions
+	-_gcc8=-fno-clone-functions \
+	-_gcc9=-fno-clone-functions
 
 # GCC may put functions in different named sub-sections of .text based on
 # their presumed calling frequency.  At least in the kernel, where we actually
@@ -371,7 +391,8 @@ CCNOAUTOINLINE= \
 # but the application of this may move into usr/src/uts/ in future.
 CCNOREORDER=	\
 	-_gcc7=-fno-reorder-functions \
-	-_gcc8=-fno-reorder-functions
+	-_gcc8=-fno-reorder-functions \
+	-_gcc9=-fno-reorder-functions
 
 #
 # gcc has a rather aggressive optimization on by default that infers loop
@@ -382,7 +403,8 @@ CCNOREORDER=	\
 #
 CCNOAGGRESSIVELOOPS= \
 	-_gcc7=-fno-aggressive-loop-optimizations \
-	-_gcc8=-fno-aggressive-loop-optimizations
+	-_gcc8=-fno-aggressive-loop-optimizations \
+	-_gcc9=-fno-aggressive-loop-optimizations
 
 # One optimization the compiler might perform is to turn this:
 #	#pragma weak foo
@@ -453,21 +475,31 @@ CERRWARN += -_gcc=-Wno-sign-compare
 CERRWARN += -_gcc=-Wno-unknown-pragmas
 CERRWARN += -_gcc=-Wno-unused-parameter
 CERRWARN += -_gcc=-Wno-missing-field-initializers
+#CERRWARN += -_gcc=-Wno-parentheses
 
 # Unfortunately, this option can misfire very easily and unfixably.
 CERRWARN +=	-_gcc=-Wno-array-bounds
 
-# DEBUG v. -nd make for frequent unused variables, empty conditions, etc. in
-# -nd builds
-$(RELEASE_BUILD)CERRWARN += -_gcc=-Wno-unused
-$(RELEASE_BUILD)CERRWARN += -_gcc=-Wno-empty-body
+# gcc4 lacks -Wno-maybe-uninitialized
+CNOWARN_UNINIT = -_gcc4=-Wno-uninitialized \
+    -_gcc7=-Wno-maybe-uninitialized \
+    -_gcc8=-Wno-maybe-uninitialized \
+    -_gcc9=-Wno-maybe-uninitialized
 
 CERRWARN += -_smatch=-p=illumos_user
 include $(SRC)/Makefile.smatch
 
 #
 # turn warnings into errors (C++)
-CCERRWARN=		-xwe
+CCERRWARN = -errtags=yes -errwarn=%all
+CCERRWARN += -erroff=E_EMPTY_TRANSLATION_UNIT
+CCERRWARN += -erroff=E_STATEMENT_NOT_REACHED
+
+CCERRWARN += -_gcc=-Wno-missing-braces
+CCERRWARN += -_gcc=-Wno-sign-compare
+CCERRWARN += -_gcc=-Wno-unknown-pragmas
+CCERRWARN += -_gcc=-Wno-unused-parameter
+CCERRWARN += -_gcc=-Wno-missing-field-initializers
 
 # C standard.  Keep Studio flags until we get rid of lint.
 CSTD_GNU89=	-xc99=%none
@@ -600,9 +632,9 @@ SRCDBGBLD	= $(SOURCEDEBUG:yes=)
 # explicitly override things if necessary, there are gaps in this, but it's
 # the best we can manage.
 #
-CUSERFLAGS		= -DXS_MAJBUILDNUM='"$(ONNV_MAJBUILDNUM)"' -DXS_RELEASE_DATE='"$(RELEASE_DATE)"'
+CUSERFLAGS		= -DXS_RELEASE_NAME='"$(ONNV_RELEASE_NAME)"' -DXS_RELEASE_DATE='"$(RELEASE_DATE)"'
 CUSERFLAGS64		= $(CUSERFLAGS)
-CCUSERFLAGS		= -DXS_MAJBUILDNUM='"$(ONNV_MAJBUILDNUM)"' -DXS_RELEASE_DATE='"$(RELEASE_DATE)"'
+CCUSERFLAGS		= -DXS_RELEASE_NAME='"$(ONNV_RELEASE_NAME)"' -DXS_RELEASE_DATE='"$(RELEASE_DATE)"'
 CCUSERFLAGS64		= $(CCUSERFLAGS)
 
 CSOURCEDEBUGFLAGS	=
@@ -628,6 +660,9 @@ NATIVE_CFLAGS=	$(COPTFLAG) $($(NATIVE_MACH)_CFLAGS) $(CCMODE) \
 		$(ILDOFF) $(CERRWARN) $(CSTD) $($(NATIVE_MACH)_CCUNBOUND) \
 		$(IROPTFLAG) $(CGLOBALSTATIC) $(CCNOAUTOINLINE) \
 		$(CCNOREORDER) $(CSOURCEDEBUGFLAGS) $(CUSERFLAGS)
+
+NATIVE_CCFLAGS=	$(CCOPTFLAG) $($(NATIVE_MACH)_CCFLAGS) $(CCSOURCEDEBUGFLAGS) \
+		$(CCUSERFLAGS)
 
 DTEXTDOM=-DTEXT_DOMAIN=\"$(TEXT_DOMAIN)\"	# For messaging.
 DTS_ERRNO=-D_TS_ERRNO
@@ -668,7 +703,7 @@ BUILD.po= $(XGETTEXT) $(XGETFLAGS) -d $(<F) $<.i ;\
 #
 POFILE= $(PROG).po
 
-sparc_CCFLAGS=		-cg92 -compat=4 \
+sparc_CCFLAGS=		$(sparc_XARCH) -cg92 -compat=4 \
 			-Qoption ccfe -messages=no%anachronism \
 			$(CCERRWARN)
 sparcv9_CCFLAGS=	$(sparcv9_XARCH) -dalign -compat=5 \
@@ -676,7 +711,7 @@ sparcv9_CCFLAGS=	$(sparcv9_XARCH) -dalign -compat=5 \
 			-Qoption ccfe -features=no%conststrings \
 			$(CCCREGSYM) \
 			$(CCERRWARN)
-i386_CCFLAGS=		-compat=4 \
+i386_CCFLAGS=		$(i386_XARCH) -compat=4 \
 			-Qoption ccfe -messages=no%anachronism \
 			-Qoption ccfe -features=no%conststrings \
 			$(CCERRWARN)
@@ -780,16 +815,31 @@ COMPILE.java=	$(JAVAC) $(JAVAFLAGS) -classpath $(CLASSPATH)
 #
 CCNEEDED		= -lC
 CCEXTNEEDED		= -lCrun -lCstd
+NATIVECCNEEDED		= -lC
 $(__GNUC)CCNEEDED	= -L$(GCCLIBDIR) -lstdc++ -lgcc_s
 $(__GNUC)CCEXTNEEDED	= $(CCNEEDED)
+$(__GNUC)NATIVECCNEEDED	= -R$(GCCLIBDIR) -L$(GCCLIBDIR) -lstdc++ -lgcc_s
 
-LINK.c=		$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS)
-LINK64.c=	$(CC) $(CFLAGS64) $(CPPFLAGS) $(LDFLAGS)
-NORUNPATH=	-norunpath -nolib
-LINK.cc=	$(CCC) $(CCFLAGS) $(CPPFLAGS) $(NORUNPATH) \
-		$(LDFLAGS) $(CCNEEDED)
-LINK64.cc=	$(CCC) $(CCFLAGS64) $(CPPFLAGS) $(NORUNPATH) \
-		$(LDFLAGS) $(CCNEEDED)
+CCNEEDED64		= -lCrun
+CCEXTNEEDED64		= -lCrun -lCstd
+NATIVECCNEEDED64	= -lCrun
+$(__GNUC64)CCNEEDED64	= -L$(GCCLIBDIR) -lstdc++ -lgcc_s
+$(__GNUC64)NATIVECCNEEDED64 = -R$(GCCLIBDIR) -L$(GCCLIBDIR) -lstdc++ -lgcc_s
+$(__GNUC64)CCEXTNEEDED	= $(CCNEEDED64)
+
+# Libraries we expect to use natively on the build machine
+NATIVE_LIBS=
+
+LDCHECKS		= $(ZASSERTDEFLIB) $(ZGUIDANCE) $(ZFATALWARNINGS)
+LDCHECKS		+= $(NATIVE_LIBS:%=$(ZASSERTDEFLIB)=%)
+
+LINK.c=			$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) $(LDCHECKS)
+LINK64.c=		$(CC) $(CFLAGS64) $(CPPFLAGS) $(LDFLAGS) $(LDCHECKS)
+NORUNPATH=		-norunpath -nolib
+LINK.cc=		$(CCC) $(CCFLAGS) $(CPPFLAGS) $(NORUNPATH) \
+			$(LDFLAGS) $(CCNEEDED) $(LDCHECKS)
+LINK64.cc=		$(CCC) $(CCFLAGS64) $(CPPFLAGS) $(NORUNPATH) \
+			$(LDFLAGS) $(CCNEEDED64) $(LDCHECKS)
 
 #
 # lint macros
@@ -832,6 +882,7 @@ LINT.s=		$(LINT.c)
 #
 # For now at least, we cross-compile amd64 on i386 machines.
 NATIVE_MACH=	$(MACH:amd64=i386)
+NATIVE_MACH64=	$(MACH64)
 
 # Define native compilation macros
 #
@@ -843,14 +894,15 @@ SPRO_ROOT=		$(BUILD_TOOLS)/SUNWspro
 SPRO_VROOT=		$(SPRO_ROOT)/SS12
 GNU_ROOT=		/usr
 
-$(__GNUC)PRIMARY_CC=	gcc4,$(GNUC_ROOT)/bin/gcc,gnu
+$(__GNUC)PRIMARY_CC=	gcc7,$(GNUC_ROOT)/bin/gcc,gnu
 $(__SUNC)PRIMARY_CC=	studio12,$(SPRO_VROOT)/bin/cc,sun
-$(__GNUC)PRIMARY_CCC=	gcc4,$(GNUC_ROOT)/bin/g++,gnu
+$(__GNUC)PRIMARY_CCC=	gcc7,$(GNUC_ROOT)/bin/g++,gnu
 $(__SUNC)PRIMARY_CCC=	studio12,$(SPRO_VROOT)/bin/CC,sun
 
 CW_CC_COMPILERS=	$(PRIMARY_CC:%=--primary %) $(SHADOW_CCS:%=--shadow %)
 CW_CCC_COMPILERS=	$(PRIMARY_CCC:%=--primary %) $(SHADOW_CCCS:%=--shadow %)
 
+CW_LINKER=		--linker $(LD)
 
 # Till SS12u1 formally becomes the NV CBE, LINT is hard
 # coded to be picked up from the $SPRO_ROOT/sunstudio12.1/
@@ -864,10 +916,10 @@ CW_CCC_COMPILERS=	$(PRIMARY_CCC:%=--primary %) $(SHADOW_CCCS:%=--shadow %)
 #
 CW=			$(ONBLD_TOOLS)/bin/$(MACH)/cw
 
-BUILD_CC=		$(CW) $(CW_CC_COMPILERS) --
-BUILD_CCC=		$(CW) -C $(CW_CCC_COMPILERS) --
+BUILD_CC=		$(CW) $(CW_LINKER) $(CW_CC_COMPILERS) --
+BUILD_CCC=		$(CW) -C $(CW_LINKER) $(CW_CCC_COMPILERS) --
 BUILD_CPP=		/usr/ccs/lib/cpp
-BUILD_LD=		/usr/ccs/bin/ld
+BUILD_LD=		$(ONBLD_TOOLS)/bin/$(MACH)/ld
 BUILD_LINT=		$(SPRO_ROOT)/sunstudio12.1/bin/lint
 
 $(MACH)_CC=		$(BUILD_CC)
@@ -895,6 +947,13 @@ NATIVEAS=		$($(NATIVE_MACH)_AS)
 NATIVELD=		$($(NATIVE_MACH)_LD)
 NATIVELINT=		$($(NATIVE_MACH)_LINT)
 
+NATIVECC64=		$($(NATIVE_MACH64)_CC)
+NATIVECCC64=		$($(NATIVE_MACH64)_CCC)
+NATIVECPP64=		$($(NATIVE_MACH64)_CPP)
+NATIVEAS64=		$($(NATIVE_MACH64)_AS)
+NATIVELD64=		$($(NATIVE_MACH64)_LD)
+NATIVELINT64=		$($(NATIVE_MACH64)_LINT)
+
 #
 # Makefile.master.64 overrides these settings
 #
@@ -904,6 +963,13 @@ CPP=			$(NATIVECPP)
 AS=			$(NATIVEAS)
 LD=			$(NATIVELD)
 LINT=			$(NATIVELINT)
+
+CC64=			$(NATIVECC64)
+CCC64=			$(NATIVECCC64)
+CPP64=			$(NATIVECPP64)
+AS64=			$(NATIVEAS64)
+LD64=			$(NATIVELD64)
+LINT64=			$(NATIVELINT64)
 
 # Pass -Y flag to cpp (method of which is release-dependent)
 CCYFLAG=		-Y I,
@@ -936,6 +1002,9 @@ ZRECORD=	-zrecord
 ZREDLOCSYM=	-zredlocsym
 ZTEXT=		-ztext
 ZVERBOSE=	-zverbose
+ZASSERTDEFLIB=	-zassert-deflib
+ZGUIDANCE=	-zguidance
+ZFATALWARNINGS=	-zfatal-warnings
 
 GSHARED=	-G
 CCMT=		-mt
@@ -972,7 +1041,7 @@ AS_BIGPICFLAGS=		-K PIC
 #
 # Default label for CTF sections
 #
-CTFCVTFLAGS=		-i -L VERSION
+CTFCVTFLAGS=		-L VERSION
 
 #
 # Override to pass module-specific flags to ctfmerge.  Currently used only by
@@ -981,25 +1050,19 @@ CTFCVTFLAGS=		-i -L VERSION
 #
 CTFMRGFLAGS=
 
-#
-# Make the transition between old and new CTF Tools. The new ctf tools
-# do not support stabs (eg. Sun Studio). By setting BUILD_OLD_CTF_TOOLS
-# here or in the environment file, the old ones will be built.
-#
-BUILD_NEW_CTF_TOOLS=
-BUILD_OLD_CTF_TOOLS=$(POUND_SIGN)
-$(BUILD_OLD_CTF_TOOLS)BUILD_NEW_CTF_TOOLS= $(POUND_SIGN)
-
 CTFCONVERT_O		= $(CTFCONVERT) $(CTFCVTFLAGS) $@
 
 # Rules (normally from make.rules) and macros which are used for post
 # processing files. Normally, these do stripping of the comment section
 # automatically.
-#    RELEASE_CM:	Should be editted to reflect the release.
-#    POST_PROCESS_O:	Post-processing for `.o' files.
-#    POST_PROCESS_A:	Post-processing for `.a' files (currently null).
+#    RELEASE_CM:	Should be edited to reflect the release.
+#    POST_PROCESS_O:	Post-processing for `.o' files (typically C source)
+#    POST_PROCESS_S_O:	Post-processing for `.o' files built from asssembly
+#    POST_PROCESS_CC_O:	Post-processing for `.o' files built from C++
+#    POST_PROCESS_A:		Post-processing for `.a' files (currently null).
 #    POST_PROCESS_SO:	Post-processing for `.so' files.
 #    POST_PROCESS:	Post-processing for executable files (no suffix).
+#
 # Note that these macros are not completely generalized as they are to be
 # used with the file name to be processed following.
 #
@@ -1043,6 +1106,7 @@ RELEASE_DATE=	release date not set
 PATCH_DATE=	$(RELEASE_DATE)
 RELEASE_CM=	"@($(POUND_SIGN))SunOS $(RELEASE) $(PATCHID) $(PATCH_DATE)"
 DEV_CM=		"@($(POUND_SIGN))SunOS Internal Development: non-nightly build"
+UTS_LABEL=	$(RELEASE)
 
 PROCESS_COMMENT=  @?${MCS} -d -a $(RELEASE_CM) -a $(DEV_CM)
 $(RELEASE_BUILD)PROCESS_COMMENT=   @?${MCS} -d -a $(RELEASE_CM)
@@ -1051,6 +1115,8 @@ STRIP_STABS=			   $(STRIP) -x $@
 $(SRCDBGBLD)STRIP_STABS=	   :
 
 POST_PROCESS_O=
+POST_PROCESS_S_O=
+POST_PROCESS_CC_O=
 POST_PROCESS_A=
 POST_PROCESS_SO=	$(PROCESS_COMMENT) $@ ; $(STRIP_STABS) ; \
 			$(ELFSIGN_OBJECT)
@@ -1096,7 +1162,7 @@ PKGPUBLISHER_NONREDIST=	on-extra
 	$(RM) $%
 .s.o:
 	$(COMPILE.s) -o $@ $<
-	$(POST_PROCESS_O)
+	$(POST_PROCESS_S_O)
 .s.a:
 	$(COMPILE.s) -o $% $<
 	$(PROCESS_COMMENT) $%
@@ -1107,7 +1173,7 @@ PKGPUBLISHER_NONREDIST=	on-extra
 	$(POST_PROCESS)
 .cc.o:
 	$(COMPILE.cc) $(OUTPUT_OPTION) $<
-	$(POST_PROCESS_O)
+	$(POST_PROCESS_CC_O)
 .cc.a:
 	$(COMPILE.cc) -o $% $<
 	$(AR) $(ARFLAGS) $@ $%
@@ -1244,8 +1310,3 @@ CPPFORPO=$(COMPILE.cpp:\"$(TEXT_DOMAIN)\"=TEXT_DOMAIN)
 
 .xml.xmlchk:
 	$(MANIFEST_CHECK)
-
-#
-# Include rules to render automated sccs get rules "safe".
-#
-include $(SRC)/Makefile.noget

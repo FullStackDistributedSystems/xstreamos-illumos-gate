@@ -22,7 +22,12 @@
 /*
  * Copyright 2010 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
+ */
+
+/*
  * Copyright 2012 Milan Jurik. All rights reserved.
+ * Copyright 2018 Nexenta Systems, Inc.
+ * Copyright 2019, Joyent, Inc.
  */
 
 #include <sys/types.h>
@@ -1770,7 +1775,7 @@ sa_list(sa_handle_t handle, int flags, int argc, char *argv[])
 			}
 			(void) printf(gettext("usage: %s\n"),
 			    sa_get_usage(USAGE_LIST));
-				return (ret);
+			return (ret);
 		}
 	}
 
@@ -2166,7 +2171,6 @@ static void
 show_group(sa_group_t group, int verbose, int properties, char *proto,
     char *subgroup)
 {
-	sa_share_t share;
 	char *groupname;
 	char *zfs = NULL;
 	int iszfs = 0;
@@ -2174,6 +2178,8 @@ show_group(sa_group_t group, int verbose, int properties, char *proto,
 
 	groupname = sa_get_group_attr(group, "name");
 	if (groupname != NULL) {
+		sa_share_t share;
+
 		if (proto != NULL && !has_protocol(group, proto)) {
 			sa_free_attr_string(groupname);
 			return;
@@ -2190,7 +2196,7 @@ show_group(sa_group_t group, int verbose, int properties, char *proto,
 			iszfs = 1;
 			sa_free_attr_string(zfs);
 		}
-		share = sa_get_share(group, NULL);
+
 		if (subgroup == NULL)
 			(void) printf("%s", groupname);
 		else
@@ -5897,7 +5903,7 @@ static sa_command_t commands[] = {
 	{"stop", CMD_NODISPLAY, sa_stop_group, USAGE_STOP, SVC_SET|SVC_ACTION},
 	{"unset", 0, sa_unset, USAGE_UNSET, SVC_SET},
 	{"unshare", 0, sa_legacy_unshare, USAGE_UNSHARE, SVC_SET|SVC_ACTION},
-	{NULL, 0, NULL, NULL}
+	{NULL, 0, NULL, 0}
 };
 
 static char *

@@ -19,13 +19,13 @@
  * CDDL HEADER END
  */
 /*	Copyright (c) 1984, 1986, 1987, 1988, 1989 AT&T	*/
-/*	  All Rights Reserved  	*/
+/*	  All Rights Reserved	*/
 
 
 /*
  * Copyright (c) 1988, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2017 Joyent, Inc.
- * Copyright 2018 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2019 OmniOS Community Edition (OmniOSce) Association.
  */
 
 #include <sys/types.h>
@@ -384,6 +384,7 @@ ckreturn:
 	stp->sd_sidp = NULL;
 	stp->sd_pgidp = NULL;
 	stp->sd_vnode = vp;
+	stp->sd_pvnode = NULL;
 	stp->sd_rerror = 0;
 	stp->sd_werror = 0;
 	stp->sd_wroff = 0;
@@ -803,7 +804,7 @@ strclose(struct vnode *vp, int flag, cred_t *crp)
 		}
 		stp->sd_iocblk = NULL;
 	}
-	stp->sd_vnode = NULL;
+	stp->sd_vnode = stp->sd_pvnode = NULL;
 	vp->v_stream = NULL;
 	mutex_exit(&vp->v_lock);
 	mutex_enter(&stp->sd_lock);
@@ -3419,6 +3420,7 @@ strioctl(struct vnode *vp, int cmd, intptr_t arg, int flag, int copyflag,
 			case KIOCSDIRECT:
 			case KIOCSCOMPAT:
 			case KIOCSKABORTEN:
+			case KIOCSRPTCOUNT:
 			case KIOCSRPTDELAY:
 			case KIOCSRPTRATE:
 			case VUIDSFORMAT:
@@ -3488,6 +3490,7 @@ strioctl(struct vnode *vp, int cmd, intptr_t arg, int flag, int copyflag,
 			case TCGETS:
 			case LDGETT:
 			case TIOCGETP:
+			case KIOCGRPTCOUNT:
 			case KIOCGRPTDELAY:
 			case KIOCGRPTRATE:
 				strioc.ic_len = 0;
@@ -3572,29 +3575,39 @@ strioctl(struct vnode *vp, int cmd, intptr_t arg, int flag, int copyflag,
 		if (stp->sd_flag & STRHUP)
 			return (ENXIO);
 
-		if ((scp = kmem_alloc(sizeof (strcmd_t), KM_NOSLEEP)) == NULL)
-			return (ENOMEM);
+		if (copyflag == U_TO_K) {
+			if ((scp = kmem_alloc(sizeof (strcmd_t),
+			    KM_NOSLEEP)) == NULL) {
+				return (ENOMEM);
+			}
 
-		if (copyin((void *)arg, scp, sizeof (strcmd_t))) {
-			kmem_free(scp, sizeof (strcmd_t));
-			return (EFAULT);
+			if (copyin((void *)arg, scp, sizeof (strcmd_t))) {
+				kmem_free(scp, sizeof (strcmd_t));
+				return (EFAULT);
+			}
+		} else {
+			scp = (strcmd_t *)arg;
 		}
 
 		access = job_control_type(scp->sc_cmd);
 		mutex_enter(&stp->sd_lock);
 		if (access != -1 && (error = i_straccess(stp, access)) != 0) {
 			mutex_exit(&stp->sd_lock);
-			kmem_free(scp, sizeof (strcmd_t));
+			if (copyflag == U_TO_K)
+				kmem_free(scp, sizeof (strcmd_t));
 			return (error);
 		}
 		mutex_exit(&stp->sd_lock);
 
 		*rvalp = 0;
 		if ((error = strdocmd(stp, scp, crp)) == 0) {
-			if (copyout(scp, (void *)arg, sizeof (strcmd_t)))
+			if (copyflag == U_TO_K &&
+			    copyout(scp, (void *)arg, sizeof (strcmd_t))) {
 				error = EFAULT;
+			}
 		}
-		kmem_free(scp, sizeof (strcmd_t));
+		if (copyflag == U_TO_K)
+			kmem_free(scp, sizeof (strcmd_t));
 		return (error);
 
 	case I_NREAD:
@@ -5422,7 +5435,7 @@ strioctl(struct vnode *vp, int cmd, intptr_t arg, int flag, int copyflag,
 		/*
 		 * Set/clear the write options. arg is a bit
 		 * mask with any of the following bits set...
-		 * 	SNDZERO - send zero length message
+		 *	SNDZERO - send zero length message
 		 *	SNDPIPE - send sigpipe to process if
 		 *		sd_werror is set and process is
 		 *		doing a write or putmsg.
@@ -5883,7 +5896,7 @@ out:
  *	ic_timout is not INFTIM).  Non-stream head errors may be returned if
  *	the ioc_error indicates that the driver/module had problems,
  *	an EFAULT was found when accessing user data, a lack of
- * 	resources, etc.
+ *	resources, etc.
  */
 int
 strdoioctl(
@@ -6537,7 +6550,7 @@ strgetmsg(
 	mblk_t *savemp = NULL;
 	mblk_t *savemptail = NULL;
 	uint_t old_sd_flag;
-	int flg;
+	int flg = MSG_BAND;
 	int more = 0;
 	int error = 0;
 	char first = 1;
@@ -7103,7 +7116,7 @@ kstrgetmsg(
 	mblk_t *savemptail = NULL;
 	int flags;
 	uint_t old_sd_flag;
-	int flg;
+	int flg = MSG_BAND;
 	int more = 0;
 	int error = 0;
 	char first = 1;

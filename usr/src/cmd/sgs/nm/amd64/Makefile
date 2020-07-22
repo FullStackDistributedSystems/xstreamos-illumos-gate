@@ -22,7 +22,7 @@
 # Copyright 2010 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
 #
-# Copyright (c) 2018, Joyent, Inc.
+# Copyright (c) 2019, Joyent, Inc.
 # Copyright 2019 OmniOS Community Edition (OmniOSce) Association.
 #
 
@@ -41,14 +41,10 @@ SRCS=		$(COMOBJS:%.o=../common/%.c)
 
 LDFLAGS +=	'-R$$ORIGIN/../../../lib/$(MACH64)'
 INCLIST=	-I../../include -I../../include/i386 \
-		-I$(SRCBASE)/uts/$(ARCH)/sys
+		-I$(SRC)/uts/$(ARCH)/sys
 CPPFLAGS=	$(INCLIST) $(DEFLIST) $(CPPFLAGS.master) -I$(ELFCAP)
 
-CERRWARN +=	-_gcc=-Wno-uninitialized
-
-SMOFF += precedence,indenting
-
-LDLIBS +=	$(CONVLIBDIR64) $(CONV_LIB) $(ELFLIBDIR) -lelf
+LDLIBS +=	$(CONVLIBDIR64) -lconv $(ELFLIBDIR) -lelf
 
 %.o:		../common/%.c
 		$(COMPILE.c) $<

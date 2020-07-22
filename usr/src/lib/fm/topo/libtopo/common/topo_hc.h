@@ -21,7 +21,7 @@
 
 /*
  * Copyright (c) 2006, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2018, Joyent, Inc.
+ * Copyright 2019 Joyent, Inc.
  */
 
 #ifndef _TOPO_HC_H
@@ -42,6 +42,7 @@ extern "C" {
 #define	CENTERPLANE	"centerplane"
 #define	CHASSIS		"chassis"
 #define	CHIP		"chip"
+#define	CHIPSET		"chipset"
 #define	CORE		"core"
 #define	STRAND		"strand"
 #define	CHIP_SELECT	"chip-select"
@@ -93,6 +94,7 @@ extern "C" {
 #define	SUBCHASSIS	"subchassis"
 #define	SYSTEMBOARD	"systemboard"
 #define	TRANSCEIVER	"transceiver"
+#define	UFM		"ufm"
 #define	USB_DEVICE	"usb-device"
 #define	XAUI		"xaui"
 #define	XFP		"xfp"
@@ -122,12 +124,20 @@ extern "C" {
 #define	TOPO_PCI_CLASS		"class-code"
 #define	TOPO_PCI_AADDR		"assigned-addresses"
 
+#define	TOPO_PCI_MAX_WIDTH	"link-maximum-width"
+#define	TOPO_PCI_CUR_WIDTH	"link-current-width"
+#define	TOPO_PCI_MAX_SPEED	"link-maximum-speed"
+#define	TOPO_PCI_CUR_SPEED	"link-current-speed"
+#define	TOPO_PCI_SUP_SPEED	"link-supported-speeds"
+#define	TOPO_PCI_ADMIN_SPEED	"link-admin-target-speed"
+
 #define	TOPO_PGROUP_BINDING	"binding"
 #define	TOPO_BINDING_OCCUPANT	"occupant-path"
 #define	TOPO_BINDING_DRIVER	"driver"
 #define	TOPO_BINDING_DEVCTL	"devctl"
 #define	TOPO_BINDING_ENCLOSURE	"enclosure"
 #define	TOPO_BINDING_SLOT	"slot"
+#define	TOPO_BINDING_PORT	"port"
 
 #define	TOPO_PGROUP_STORAGE	"storage"
 #define	TOPO_STORAGE_INITIATOR_PORT	"initiator-port"
@@ -173,6 +183,7 @@ extern "C" {
 #define	TOPO_PROP_PORT_TYPE	"type"
 #define	TOPO_PROP_PORT_TYPE_SFF	"sff"
 #define	TOPO_PROP_PORT_TYPE_USB	"usb"
+#define	TOPO_PROP_PORT_TYPE_UNKNOWN	"unknown"
 
 #define	TOPO_PGROUP_TRANSCEIVER	"transceiver"
 #define	TOPO_PROP_TRANSCEIVER_TYPE	"type"
@@ -206,6 +217,9 @@ extern "C" {
 #define	TOPO_PGROUP_USB_PROPS_VERSION	"usb-version"
 #define	TOPO_PGROUP_USB_PROPS_SPEED	"usb-speed"
 #define	TOPO_PGROUP_USB_PROPS_PORT	"usb-port"
+#define	TOPO_PGROUP_USB_PROPS_SUPPORTED_SPEEDS	"usb-supported-speeds"
+#define	TOPO_PGROUP_USB_PROPS_MIN_SPEED	"usb-minimum-speed"
+
 
 /*
  * These properties will exist on nodes enumerated by the ipmi module. They
@@ -246,8 +260,28 @@ extern "C" {
 #define	TOPO_PROP_MB_PRODUCT		"product-id"
 #define	TOPO_PROP_MB_ASSET		"asset-tag"
 #define	TOPO_PROP_MB_FIRMWARE_VENDOR	"firmware-vendor"
-#define	TOPO_PROP_MB_FIRMWARE_REV	"firmware-revision"
 #define	TOPO_PROP_MB_FIRMWARE_RELDATE	"firmware-release-date"
+
+#define	TOPO_PGROUP_UFM			"ufm-properties"
+#define	TOPO_PROP_UFM_DESCR		"ufm-description"
+
+#define	TOPO_PGROUP_UFM_SLOT		"ufm-slot-properties"
+#define	TOPO_PROP_UFM_SLOT_VERSION	"ufm-slot-version"
+#define	TOPO_PROP_UFM_SLOT_MODE		"ufm-slot-mode"
+#define	TOPO_PROP_UFM_SLOT_ACTIVE	"ufm-slot-active"
+
+#define	TOPO_PGROUP_DATALINK		"datalink"
+#define	TOPO_PGROUP_DATALINK_PMAC	"primary-mac-address"
+#define	TOPO_PGROUP_DATALINK_LINK_SPEED		"link-speed"
+#define	TOPO_PGROUP_DATALINK_LINK_STATUS	"link-status"
+#define	TOPO_PGROUP_DATALINK_LINK_STATUS_UP	"up"
+#define	TOPO_PGROUP_DATALINK_LINK_STATUS_DOWN	"down"
+#define	TOPO_PGROUP_DATALINK_LINK_STATUS_UNKNOWN	"unknown"
+#define	TOPO_PGROUP_DATALINK_LINK_DUPLEX	"link-duplex"
+#define	TOPO_PGROUP_DATALINK_LINK_DUPLEX_FULL	"full"
+#define	TOPO_PGROUP_DATALINK_LINK_DUPLEX_HALF	"half"
+#define	TOPO_PGROUP_DATALINK_LINK_DUPLEX_UNKNOWN	"unknown"
+#define	TOPO_PGROUP_DATALINK_LINK_NAME		"link-name"
 
 #ifdef	__cplusplus
 }

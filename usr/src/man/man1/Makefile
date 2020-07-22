@@ -13,6 +13,7 @@
 # Copyright 2011, Richard Lowe
 # Copyright 2018 Nexenta Systems, Inc.
 # Copyright 2014 Garrett D'Amore <garrett@damore.org>
+# Copyright 2019 OmniOS Community Edition (OmniOSce) Association.
 #
 
 include		$(SRC)/Makefile.master
@@ -419,7 +420,8 @@ MANFILES=	acctcom.1			\
 		yppasswd.1			\
 		ypwhich.1			\
 		zlogin.1			\
-		zonename.1
+		zonename.1			\
+		zonestat.1
 
 MANLINKS=	batch.1		\
 		bg.1		\
@@ -479,8 +481,10 @@ MANLINKS=	batch.1		\
 		notify.1	\
 		onintr.1	\
 		page.1		\
+		pauxv.1		\
 		pcat.1		\
 		pcred.1		\
+		penv.1		\
 		pfcsh.1		\
 		pfiles.1	\
 		pfksh.1		\
@@ -659,6 +663,9 @@ snca.1		:= LINKSRC = nca.1
 
 pcat.1		:= LINKSRC = pack.1
 unpack.1	:= LINKSRC = pack.1
+
+pauxv.1		:= LINKSRC = pargs.1
+penv.1		:= LINKSRC = pargs.1
 
 pfcsh.1		:= LINKSRC = pfexec.1
 pfksh.1		:= LINKSRC = pfexec.1

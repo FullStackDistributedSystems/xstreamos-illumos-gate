@@ -31,10 +31,17 @@ $(OBJDIR)/%.o:	../common/%.c
 		$(POST_PROCESS_O)
 
 # DEMO DELETE START
-$(ROOTONLDBIN)/%: %
+
+$(ROOTONLDBIN):
+		$(INS.dir)
+
+$(ROOTONLDBIN)/$(MACH64):
+		$(INS.dir)
+
+$(ROOTONLDBIN)/%: % $(ROOTONLDBIN)
 		$(INS.file)
 
-$(ROOTONLDBIN)/$(MACH64)/%: %
+$(ROOTONLDBIN)/$(MACH64)/%: % $(ROOTONLDBIN)/$(MACH64)
 		$(INS.file)
 # DEMO DELETE END
 
@@ -60,7 +67,7 @@ simp: ../tests/simp.c libsub.so.1
 		$(LINK.c) $(LDFLAG) -o $@ ../tests/simp.c -R. ./libsub.so.1
 
 libsub.so.1: ../tests/sub.c
-		$(LINK.c) $(LDFLAG) -o $@ -G -Kpic -hlibsub.so.1 ../tests/sub.c
+		$(LINK.c) $(LDFLAG) -o $@ -G -fpic -hlibsub.so.1 ../tests/sub.c
 
 #
 # RDB sample runs & tests
@@ -91,6 +98,10 @@ clean: FRC
 
 clobber: clean FRC
 		$(RM) $(PROG)
+
+# DEMO DELETE START
+catalog check chkmsg:
+# DEMO DELETE END
 
 FRC:
 

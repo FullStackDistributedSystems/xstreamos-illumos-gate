@@ -27,6 +27,7 @@
  * Copyright (c) 2018, Joyent, Inc. All rights reserved.
  * Copyright (c) 2013 by Delphix. All rights reserved.
  * Copyright 2015 Gary Mills
+ * Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
  */
 
 #include <sys/types.h>
@@ -50,6 +51,7 @@
 #include "Pcontrol.h"
 #include "P32ton.h"
 #include "Putil.h"
+#include "proc_fd.h"
 #ifdef __x86
 #include "Pcore_linux.h"
 #endif
@@ -754,7 +756,7 @@ err:
 static int
 note_fdinfo(struct ps_prochandle *P, size_t nbytes)
 {
-	prfdinfo_t prfd;
+	prfdinfo_core_t prfd;
 	fd_info_t *fip;
 
 	if ((nbytes < sizeof (prfd)) ||
@@ -767,7 +769,13 @@ note_fdinfo(struct ps_prochandle *P, size_t nbytes)
 		dprintf("Pgrab_core: failed to add NT_FDINFO\n");
 		return (-1);
 	}
-	(void) memcpy(&fip->fd_info, &prfd, sizeof (prfd));
+	if (fip->fd_info == NULL) {
+		if (proc_fdinfo_from_core(&prfd, &fip->fd_info) != 0) {
+			dprintf("Pgrab_core: failed to convert NT_FDINFO\n");
+			return (-1);
+		}
+	}
+
 	return (0);
 }
 
@@ -1934,7 +1942,7 @@ core_find_data(struct ps_prochandle *P, Elf *elf, rd_loadobj_t *rlp)
 	uint_t i, pagemask;
 	size_t nphdrs;
 
-	rlp->rl_data_base = NULL;
+	rlp->rl_data_base = (uintptr_t)NULL;
 
 	/*
 	 * Find the first loadable, writeable Phdr and compute rl_data_base
@@ -1958,7 +1966,7 @@ core_find_data(struct ps_prochandle *P, Elf *elf, rd_loadobj_t *rlp)
 	 * If we didn't find an appropriate phdr or if the address we
 	 * computed has no mapping, return NULL.
 	 */
-	if (rlp->rl_data_base == NULL ||
+	if (rlp->rl_data_base == (uintptr_t)NULL ||
 	    (mp = Paddr2mptr(P, rlp->rl_data_base)) == NULL)
 		return (NULL);
 

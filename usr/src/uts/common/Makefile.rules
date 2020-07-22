@@ -23,9 +23,9 @@
 # Copyright (c) 1991, 2010, Oracle and/or its affiliates. All rights reserved.
 # Copyright 2016 Garrett D'Amore <garrett@damore.org>
 # Copyright 2013 Saso Kiselkov. All rights reserved.
-# Copyright 2016 Joyent, Inc.
+# Copyright 2019 Joyent, Inc.
 # Copyright 2018 Nexenta Systems, Inc.
-# Copyright (c) 2016 by Delphix. All rights reserved.
+# Copyright (c) 2017 by Delphix. All rights reserved.
 #
 
 #
@@ -46,6 +46,11 @@
 #
 #	Section 1a: C objects build rules
 #
+$(OBJS_DIR)/decompress.o := CPPFLAGS += -I$(SRC)/contrib/zlib
+$(OBJS_DIR)/zmod.o := CPPFLAGS += -I$(SRC)/contrib/zlib
+$(OBJS_DIR)/zmod_subr.o := CPPFLAGS += -I$(SRC)/contrib/zlib
+$(OBJS_DIR)/lz4.o := CPPFLAGS += -I$(COMMONBASE)/lz4
+
 $(OBJS_DIR)/%.o:		$(COMMONBASE)/crypto/aes/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
@@ -357,6 +362,10 @@ $(OBJS_DIR)/%.o:		$(UTSBASE)/common/fs/zfs/lua/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
 
+$(OBJS_DIR)/%.o:		$(COMMONBASE)/lz4/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
 $(OBJS_DIR)/%.o:		$(UTSBASE)/common/fs/zut/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
@@ -375,7 +384,6 @@ $(OBJS_DIR)/%.o:	$(UTSBASE)/common/io/scsi/adapters/pmcs/%.c
 
 $(OBJS_DIR)/%.o:	$(UTSBASE)/common/io/scsi/adapters/pmcs/%.bin
 	$(COMPILE.b) -o $@ $<
-	$(CTFCONVERT_O)
 
 $(OBJS_DIR)/%.o:		$(COMMONBASE)/fsreparse/%.c
 	$(COMPILE.c) -o $@ $<
@@ -521,6 +529,10 @@ $(OBJS_DIR)/%.o:		$(UTSBASE)/common/inet/sockmods/%.c
 	$(CTFCONVERT_O)
 
 $(OBJS_DIR)/%.o:		$(UTSBASE)/common/inet/dlpistub/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
+$(OBJS_DIR)/%.o:		$(UTSBASE)/common/inet/cc/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
 
@@ -749,10 +761,6 @@ $(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/dls/%.c
 	$(CTFCONVERT_O)
 
 $(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/dmfe/%.c
-	$(COMPILE.c) -o $@ $<
-	$(CTFCONVERT_O)
-
-$(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/drm/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
 
@@ -1598,6 +1606,10 @@ $(OBJS_DIR)/%.o:		$(UTSBASE)/common/vm/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
 
+$(OBJS_DIR)/%.o:		$(SRC)/contrib/zlib/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
 $(OBJS_DIR)/%.o:		$(UTSBASE)/common/zmod/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
@@ -1605,7 +1617,7 @@ $(OBJS_DIR)/%.o:		$(UTSBASE)/common/zmod/%.c
 $(OBJS_DIR)/zlib_obj.o:		$(ZLIB_OBJS:%=$(OBJS_DIR)/%)
 	$(LD) -r -Breduce -M$(UTSBASE)/common/zmod/mapfile -o $@ \
 	    $(ZLIB_OBJS:%=$(OBJS_DIR)/%)
-	$(CTFMERGE) -t -f -L VERSION -o $@ $(ZLIB_OBJS:%=$(OBJS_DIR)/%)
+	$(CTFMERGE) $(CTFMRGFLAGS) -o $@ $(ZLIB_OBJS:%=$(OBJS_DIR)/%)
 
 $(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/hxge/%.c
 	$(COMPILE.c) -o $@ $<
@@ -1963,6 +1975,9 @@ $(LINTS_DIR)/%.ln:		$(UTSBASE)/common/inet/nca/%.c
 $(LINTS_DIR)/%.ln:		$(UTSBASE)/common/inet/dlpistub/%.c
 	@($(LHEAD) $(LINT.c) $< $(LTAIL))
 
+$(LINTS_DIR)/%.ln:		$(UTSBASE)/common/inet/cc/%.c
+	@($(LHEAD) $(LINT.c) $< $(LTAIL))
+
 $(LINTS_DIR)/%.ln:		$(UTSBASE)/common/io/%.c
 	@($(LHEAD) $(LINT.c) $< $(LTAIL))
 
@@ -2129,9 +2144,6 @@ $(LINTS_DIR)/%.ln:		$(UTSBASE)/common/io/dls/%.c
 	@($(LHEAD) $(LINT.c) $< $(LTAIL))
 
 $(LINTS_DIR)/%.ln:		$(UTSBASE)/common/io/dmfe/%.c
-	@($(LHEAD) $(LINT.c) $< $(LTAIL))
-
-$(LINTS_DIR)/%.ln:		$(UTSBASE)/common/io/drm/%.c
 	@($(LHEAD) $(LINT.c) $< $(LTAIL))
 
 $(LINTS_DIR)/%.ln:		$(UTSBASE)/common/io/efe/%.c

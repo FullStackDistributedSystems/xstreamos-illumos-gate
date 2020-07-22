@@ -21,8 +21,9 @@
 # Copyright 2019 OmniOS Community Edition (OmniOSce) Association.
 # Copyright 2015 Gary Mills
 # Copyright 2015 Igor Kozhukhov <ikozhukhov@gmail.com>
+# Copyright 2016 RackTop Systems.
 # Copyright (c) 1989, 2010, Oracle and/or its affiliates. All rights reserved.
-# Copyright (c) 2015, Joyent, Inc.
+# Copyright 2019, Joyent, Inc.
 #
 #
 # Definitions common to libraries.
@@ -126,7 +127,8 @@ SONAME=		$(DYNLIB)
 
 HSONAME=	-h$(SONAME)
 DYNFLAGS=	$(HSONAME) $(ZTEXT) $(ZDEFS) $(BDIRECT) \
-		$(MAPFILES:%=-M%) $(MAPFILE.PGA:%=-M%) $(MAPFILE.NED:%=-M%)
+		$(MAPFILES:%=-M%) $(MAPFILE.PGA:%=-M%) $(MAPFILE.NED:%=-M%) \
+		$(LDCHECKS)
 
 LDLIBS=		$(LDLIBS.lib)
 
@@ -146,8 +148,12 @@ SRCS=		$(OBJECTS:%.o=$(SRCDIR)/%.c)
 BUILD.AR=	$(AR) $(ARFLAGS) $@ $(AROBJS)
 BUILD.SO=	$(CC) $(CFLAGS) -o $@ $(GSHARED) $(DYNFLAGS) \
 		$(PICS) $(EXTPICS) $(LDLIBS)
+BUILD64.SO=	$(CC64) $(CFLAGS64) -o $@ $(GSHARED) $(DYNFLAGS) \
+		$(PICS) $(EXTPICS) -L $(ROOTLIBDIR64) $(LDLIBS)
 BUILDCCC.SO=	$(CCC) $(CCFLAGS) -o $@ $(GSHARED) $(DYNFLAGS) \
 		$(PICS) $(EXTPICS) $(LDLIBS)
+BUILDCCC64.SO=	$(CCC64) $(CCFLAGS64) -o $@ $(GSHARED) $(DYNFLAGS) \
+		$(PICS) $(EXTPICS) $(LDLIBS) $(CCNEEDED64)
 
 # default dynamic library symlink
 INS.liblink=	-$(RM) $@; $(SYMLINK) $(LIBLINKPATH)$(LIBLINKS)$(VERS) $@
@@ -212,7 +218,7 @@ objs/%.o pics/%.o: %.c
 
 objs/%.o pics/%.o: %.cc
 	$(COMPILE.cc) -o $@ $<
-	$(POST_PROCESS_O)
+	$(POST_PROCESS_CC_O)
 
 .PRECIOUS: $(LIBS)
 

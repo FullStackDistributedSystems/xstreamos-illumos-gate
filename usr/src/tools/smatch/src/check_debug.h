@@ -46,6 +46,9 @@ static inline void __smatch_debug_off(void){}
 static inline void __smatch_local_debug_on(void){}
 static inline void __smatch_local_debug_off(void){}
 
+static inline void __smatch_debug_db_on(void){}
+static inline void __smatch_debug_db_off(void){}
+
 static inline void __smatch_debug_implied_on(void){}
 static inline void __smatch_debug_implied_off(void){}
 
@@ -74,4 +77,6 @@ static inline void __smatch_exit(void){}
 
 static inline void __smatch_state_count(void){}
 static inline void __smatch_mem(void){}
+
+static inline void __smatch_container(long long container, long long x){}
 #endif

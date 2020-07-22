@@ -22,10 +22,11 @@
 # Copyright 2015 Nexenta Systems, Inc.  All rights reserved.
 # Copyright 2012 Joshua M. Clulow <josh@sysmgr.org>
 # Copyright 2015, OmniTI Computer Consulting, Inc. All rights reserved.
-# Copyright 2018 OmniOS Community Edition (OmniOSce) Association.
-# Copyright (c) 2019, Joyent, Inc.
+# Copyright 2016 RackTop Systems.
+# Copyright 2019 OmniOS Community Edition (OmniOSce) Association.
+# Copyright 2020 Joyent, Inc.
 #
-# - This file is sourced by "bldenv.sh" and "nightly.sh" and should not
+# - This file is sourced by "bldenv" and "nightly" and should not
 #   be executed directly.
 # - This script is only interpreted by ksh93 and explicitly allows the
 #   use of ksh93 language extensions.
@@ -78,11 +79,14 @@ export CODEMGR_WS="`git rev-parse --show-toplevel`"
 #
 # To disable shadow compilation, unset SHADOW_* or set them to the empty string.
 #
-export SHADOW_CCS=gcc7,/usr/gcc/7/bin/gcc,gnu
-export SHADOW_CCCS=gcc7,/usr/gcc/7/bin/g++,gnu
+export GNUC_ROOT=/usr/gcc/7
+export PRIMARY_CC=gcc7,$GNUC_ROOT/bin/gcc,gnu
+export PRIMARY_CCC=gcc7,$GNUC_ROOT/bin/g++,gnu
+export SHADOW_CCS=gcc4,/opt/gcc/4.4.4/bin/gcc,gnu
+export SHADOW_CCCS=gcc4,/opt/gcc/4.4.4/bin/g++,gnu
 
-# uncomment to enable smatch
-#export ENABLE_SMATCH=1
+# comment to disable smatch
+export ENABLE_SMATCH=1
 
 # Comment this out to disable support for SMB printing, i.e. if you
 # don't want to bother providing the CUPS headers this needs.
@@ -92,8 +96,13 @@ export ENABLE_SMB_PRINTING=
 # contains your new defaults OR your .env file sets them.
 # These are how you would override for building on OmniOS r151028, for example.
 #export PERL_VERSION=5.28
-#export PERL_ARCH=i86pc-solaris-thread-multi-64int
+#export PERL_VARIANT=-thread-multi
 #export PERL_PKGVERS=
+
+# To disable building of the 32-bit or 64-bit perl modules (or both),
+# uncomment these lines:
+#export BUILDPERL32='#'
+#export BUILDPERL64='#'
 
 # If your distro uses certain versions of Python, make sure either
 # Makefile.master contains your new defaults OR your .env file sets them.
@@ -109,6 +118,24 @@ export ENABLE_SMB_PRINTING=
 #export BUILDPY2='#'
 #export BUILDPY3='#'
 
+# To disable building this workspace's tools in $SRC/tools with either Python2
+# or Python3 (but not both!), uncomment either of these lines:
+#export BUILDPY2TOOLS='#'
+#export BUILDPY3TOOLS='#'
+
+# Set console color scheme either by build type:
+#
+#export RELEASE_CONSOLE_COLOR="-DDEFAULT_ANSI_FOREGROUND=ANSI_COLOR_BLACK \
+#	-DDEFAULT_ANSI_BACKGROUND=ANSI_COLOR_WHITE"
+#
+#export DEBUG_CONSOLE_COLOR="-DDEFAULT_ANSI_FOREGROUND=ANSI_COLOR_RED \
+#	-DDEFAULT_ANSI_BACKGROUND=ANSI_COLOR_WHITE"
+#
+# or just one for any build type:
+#
+#export DEFAULT_CONSOLE_COLOR="-DDEFAULT_ANSI_FOREGROUND=ANSI_COLOR_BLACK \
+#	-DDEFAULT_ANSI_BACKGROUND=ANSI_COLOR_WHITE"
+
 # Set if your distribution has different package versioning
 #export PKGVERS_BRANCH=2018.0.0.17900
 
@@ -118,6 +145,9 @@ export ENABLE_SMB_PRINTING=
 # POST_NIGHTLY can be any command to be run at the end of nightly.  See
 # nightly(1) for interactions between environment variables and this command.
 #POST_NIGHTLY=
+
+# Populates /etc/versions/build on each nightly run
+export BUILDVERSION_EXEC="git describe --all --long --dirty"
 
 # -----------------------------------------------------------------------------
 # You are less likely to need to modify parameters below.
@@ -265,13 +295,6 @@ export BUILD_TOOLS='/opt'
 #export ONBLD_TOOLS='/opt/onbld'
 export SPRO_ROOT='/opt/SUNWspro'
 export SPRO_VROOT="$SPRO_ROOT"
-
-# This goes along with lint - it is a series of the form "A [y|n]" which
-# means "go to directory A and run 'make lint'" Then mail me (y) the
-# difference in the lint output. 'y' should only be used if the area you're
-# linting is actually lint clean or you'll get lots of mail.
-# You shouldn't need to change this though.
-#export LINTDIRS="$SRC y"
 
 # Set this flag to 'n' to disable the use of 'checkpaths'.  The default,
 # if the 'N' option is not specified, is to run this test.

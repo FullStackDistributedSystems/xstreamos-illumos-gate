@@ -21,7 +21,7 @@
 /*
  * Copyright (c) 2001, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2012 Nexenta Systems, Inc. All rights reserved.
- * Copyright 2017 Joyent, Inc.
+ * Copyright 2019, Joyent, Inc.
  */
 
 #include <sys/param.h>
@@ -2773,10 +2773,14 @@ spdsock_do_updatealg(spd_ext_t *extv[], spd_stack_t *spds)
 bail:
 	/* cleanup */
 	ipsec_alg_free(alg);
-	for (alg_type = 0; alg_type < IPSEC_NALGTYPES; alg_type++)
-		for (algid = 0; algid < IPSEC_MAX_ALGS; algid++)
-		if (spds->spds_algs[alg_type][algid] != NULL)
-			ipsec_alg_free(spds->spds_algs[alg_type][algid]);
+	for (alg_type = 0; alg_type < IPSEC_NALGTYPES; alg_type++) {
+		for (algid = 0; algid < IPSEC_MAX_ALGS; algid++) {
+			if (spds->spds_algs[alg_type][algid] != NULL) {
+				ipsec_alg_free(
+				    spds->spds_algs[alg_type][algid]);
+			}
+		}
+	}
 	return (diag);
 }
 
@@ -3609,7 +3613,7 @@ spdsock_wsrv(queue_t *q)
 
 	while ((mp = getq(q)) != NULL) {
 		if (ipsec_loaded(ipss)) {
-			spdsock_wput(q, mp);
+			(void) spdsock_wput(q, mp);
 			if (ss->spdsock_dump_req != NULL)
 				return (0);
 		} else if (!ipsec_failed(ipss)) {

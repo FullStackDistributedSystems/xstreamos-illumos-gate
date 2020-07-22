@@ -20,7 +20,7 @@
  */
 /*
  * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2017 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2019 Nexenta Systems, Inc.  All rights reserved.
  */
 
 #ifndef	_LIBMLSVC_H
@@ -50,12 +50,24 @@
 #include <smbsrv/smb_dfs.h>
 #include <smbsrv/libsmb.h>
 
+/*
+ * XXX: Some temporary left-overs from the old ntstatus.h
+ * Should eliminate uses of these macros when convenient.
+ */
+/* This used to OR in the severity bits. */
+#define	NT_SC_ERROR(S)		(S)
+/* This used to mask off the severity bits. */
+#define	NT_SC_VALUE(S)		(S)
+/* XXX end of temporary left-overs. */
+
 #ifdef	__cplusplus
 extern "C" {
 #endif
 
 uint32_t lsa_lookup_name(char *, uint16_t, smb_account_t *);
+uint32_t lsa_lookup_lname(char *, uint16_t, smb_account_t *);
 uint32_t lsa_lookup_sid(smb_sid_t *, smb_account_t *);
+uint32_t lsa_lookup_lsid(smb_sid_t *, smb_account_t *);
 
 /*
  * SMB domain API to discover a domain controller and obtain domain

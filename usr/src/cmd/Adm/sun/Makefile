@@ -62,8 +62,8 @@ clobber:
 
 motd:	FRC
 	@-$(ECHO) "rebuilding motd"
-	@$(RELEASE_BUILD)-$(ECHO) "Sonicle $(VERSION) (powered by illumos) SunOS $(RELEASE) xs_$(ONNV_MAJBUILDNUM) $(RELEASE_DATE)" > motd
-	@$(NOT_RELEASE_BUILD)-$(ECHO) "Sonicle $(VERSION) (powered by illumos) SunOS $(RELEASE) xs_$(ONNV_MAJBUILDNUM) `date +'%h. %d, %Y'`" > motd
+	@$(RELEASE_BUILD)-$(ECHO) "$(VERSION) $(ONNV_RELEASE_NAME) (powered by illumos) SunOS $(RELEASE) $(RELEASE_DATE)" > motd
+	@$(NOT_RELEASE_BUILD)-$(ECHO) "$(VERSION) $(ONNV_RELEASE_NAME) (powered by illumos) SunOS $(RELEASE) `date +'%h. %d, %Y'`" > motd
 	@$(NOT_RELEASE_BUILD)-$(ECHO) $(DEV_CM) | sed -e "s/@(#)//" >> motd
 	@-$(CAT) release_info >> motd
 

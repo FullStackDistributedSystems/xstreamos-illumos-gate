@@ -23,7 +23,7 @@
 #include "smatch_extra.h"
 #include "smatch_function_hashtable.h"
 
-#define UNKNOWN_SIZE (-1)
+#define UNKNOWN_SIZE -1
 
 static int my_size_id;
 
@@ -274,8 +274,7 @@ static void db_returns_buf_size(struct expression *expr, int param, char *unused
 		return;
 	call = strip_expr(expr->right);
 
-	if (!parse_call_math_rl(call, math, &rl))
-		return;
+	call_results_to_rl(call, &int_ctype, math, &rl);
 	rl = cast_rl(&int_ctype, rl);
 	set_state_expr(my_size_id, expr->left, alloc_estate_rl(rl));
 }
@@ -330,8 +329,6 @@ static int get_bytes_from_address(struct expression *expr)
 	struct symbol *type;
 	int ret;
 
-	if (!option_spammy)
-		return 0;
 	if (expr->type != EXPR_PREOP || expr->op != '&')
 		return 0;
 	type = get_type(expr);
@@ -473,6 +470,7 @@ static struct range_list *alloc_int_rl(int value)
 struct range_list *get_array_size_bytes_rl(struct expression *expr)
 {
 	struct range_list *ret = NULL;
+	sval_t sval;
 	int size;
 
 	expr = remove_addr_fluff(expr);
@@ -506,6 +504,10 @@ struct range_list *get_array_size_bytes_rl(struct expression *expr)
 		return alloc_int_rl(size - offset.value);
 	}
 
+	size = get_stored_size_end_struct_bytes(expr);
+	if (size)
+		return alloc_int_rl(size);
+
 	/* buf[4] */
 	size = get_real_array_size(expr);
 	if (size)
@@ -515,10 +517,6 @@ struct range_list *get_array_size_bytes_rl(struct expression *expr)
 	ret = get_stored_size_bytes(expr);
 	if (ret)
 		return ret;
-
-	size = get_stored_size_end_struct_bytes(expr);
-	if (size)
-		return alloc_int_rl(size);
 
 	/* char *foo = "BAR" */
 	size = get_size_from_initializer(expr);
@@ -530,6 +528,8 @@ struct range_list *get_array_size_bytes_rl(struct expression *expr)
 		return alloc_int_rl(size);
 
 	ret = size_from_db(expr);
+	if (rl_to_sval(ret, &sval) && sval.value == -1)
+		return NULL;
 	if (ret)
 		return ret;
 
@@ -634,6 +634,8 @@ static void store_alloc(struct expression *expr, struct range_list *rl)
 	struct symbol *type;
 
 	rl = clone_rl(rl); // FIXME!!!
+	if (!rl)
+		rl = size_to_rl(UNKNOWN_SIZE);
 	set_state_expr(my_size_id, expr, alloc_estate_rl(rl));
 
 	type = get_type(expr);
@@ -711,19 +713,17 @@ static void match_alloc(const char *fn, struct expression *expr, void *_size_arg
 static void match_calloc(const char *fn, struct expression *expr, void *unused)
 {
 	struct expression *right;
-	struct expression *arg;
-	sval_t elements;
-	sval_t size;
+	struct expression *size, *nr, *mult;
+	struct range_list *rl;
 
 	right = strip_expr(expr->right);
-	arg = get_argument_from_call_expr(right->args, 0);
-	if (!get_implied_value(arg, &elements))
-		return; // FIXME!!!
-	arg = get_argument_from_call_expr(right->args, 1);
-	if (get_implied_value(arg, &size))
-		store_alloc(expr->left, size_to_rl(elements.value * size.value));
+	nr = get_argument_from_call_expr(right->args, 0);
+	size = get_argument_from_call_expr(right->args, 1);
+	mult = binop_expression(nr, '*', size);
+	if (get_implied_rl(mult, &rl))
+		store_alloc(expr->left, rl);
 	else
-		store_alloc(expr->left, size_to_rl(-1));
+		store_alloc(expr->left, size_to_rl(UNKNOWN_SIZE));
 }
 
 static void match_page(const char *fn, struct expression *expr, void *_unused)
@@ -748,7 +748,7 @@ static void match_strndup(const char *fn, struct expression *expr, void *unused)
 		size.value++;
 		store_alloc(expr->left, size_to_rl(size.value));
 	} else {
-		store_alloc(expr->left, size_to_rl(-1));
+		store_alloc(expr->left, size_to_rl(UNKNOWN_SIZE));
 	}
 
 }
@@ -822,11 +822,13 @@ static void match_call(struct expression *expr)
 
 static void struct_member_callback(struct expression *call, int param, char *printed_name, struct sm_state *sm)
 {
-	if (sm->state == &merged ||
-	    strcmp(sm->state->name, "(-1)") == 0 ||
-	    strcmp(sm->state->name, "empty") == 0 ||
-	    strcmp(sm->state->name, "0") == 0)
+	sval_t sval;
+
+	if (!estate_rl(sm->state) ||
+	    (estate_get_single_value(sm->state, &sval) &&
+	     (sval.value == -1 || sval.value == 0)))
 		return;
+
 	sql_insert_caller_info(call, BUF_SIZE, param, printed_name, sm->state->name);
 }
 
@@ -838,14 +840,28 @@ static void struct_member_callback(struct expression *call, int param, char *pri
  */
 static void print_returned_allocations(int return_id, char *return_ranges, struct expression *expr)
 {
-	char buf[16];
-	int size;
+	const char *param_math;
+	struct range_list *rl;
+	char buf[64];
+	sval_t sval;
 
-	size = get_array_size_bytes(expr);
-	if (!size)
+	rl = get_array_size_bytes_rl(expr);
+	param_math = get_allocation_math(expr);
+	if (!rl && !param_math)
 		return;
 
-	snprintf(buf, sizeof(buf), "%d", size);
+	if (!param_math &&
+	    rl_to_sval(rl, &sval) &&
+	    (sval.value == -1 || sval.value == 0))
+		return;
+
+	if (param_math)
+		snprintf(buf, sizeof(buf), "%s[%s]", show_rl(rl), param_math);
+	else
+		snprintf(buf, sizeof(buf), "%s", show_rl(rl));
+
+	// FIXME: don't store if you can guess the size from the type
+	// FIXME: return if we allocate a parameter $0->bar
 	sql_insert_return_states(return_id, return_ranges, BUF_SIZE, -1, "", buf);
 }
 
@@ -873,7 +889,10 @@ void register_buf_size(int id)
 {
 	my_size_id = id;
 
+	set_dynamic_states(my_size_id);
+
 	add_unmatched_state_hook(my_size_id, &unmatched_size_state);
+	add_merge_hook(my_size_id, &merge_estates);
 
 	select_caller_info_hook(set_param_buf_size, BUF_SIZE);
 	select_return_states_hook(BUF_SIZE, &db_returns_buf_size);
@@ -891,6 +910,7 @@ void register_buf_size(int id)
 		add_allocation_function("kzalloc_node", &match_alloc, 0);
 		add_allocation_function("vmalloc", &match_alloc, 0);
 		add_allocation_function("__vmalloc", &match_alloc, 0);
+		add_allocation_function("kvmalloc", &match_alloc, 0);
 		add_allocation_function("kcalloc", &match_calloc, 0);
 		add_allocation_function("kmalloc_array", &match_calloc, 0);
 		add_allocation_function("drm_malloc_ab", &match_calloc, 0);
@@ -907,10 +927,14 @@ void register_buf_size(int id)
 		add_allocation_function("__alloc_bootmem", &match_alloc, 0);
 		add_allocation_function("alloc_bootmem", &match_alloc, 0);
 		add_allocation_function("kmap", &match_page, 0);
+		add_allocation_function("kmap_atomic", &match_page, 0);
 		add_allocation_function("get_zeroed_page", &match_page, 0);
+		add_allocation_function("alloc_page", &match_page, 0);
 		add_allocation_function("alloc_pages", &match_alloc_pages, 1);
 		add_allocation_function("alloc_pages_current", &match_alloc_pages, 1);
 		add_allocation_function("__get_free_pages", &match_alloc_pages, 1);
+		add_allocation_function("dma_alloc_contiguous", &match_alloc, 1);
+		add_allocation_function("dma_alloc_coherent", &match_alloc, 1);
 	}
 
 	add_allocation_function("strndup", match_strndup, 0);
