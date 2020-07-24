@@ -247,6 +247,8 @@ extern "C" {
 						/* Fabric Devices */
 #define	DDI_NT_IB_ATTACHMENT_POINT	"ddi_ctl:attachment_point:ib"
 						/* IB devices */
+#define	DDI_NT_CCID_ATTACHMENT_POINT	"ddi_ctl:attachment_point:ccid"
+						/* CCID devices */
 
 #define	DDI_NT_AV_ASYNC "ddi_av:async"		/* asynchronous AV device */
 #define	DDI_NT_AV_ISOCH "ddi_av:isoch"		/* isochronous AV device */
@@ -1572,16 +1574,16 @@ void
 swab(void *src, void *dst, size_t nbytes);
 
 int
-ddi_create_minor_node(dev_info_t *dip, char *name, int spec_type,
-    minor_t minor_num, char *node_type, int flag);
+ddi_create_minor_node(dev_info_t *dip, const char *name, int spec_type,
+    minor_t minor_num, const char *node_type, int flag);
 
 int
-ddi_create_priv_minor_node(dev_info_t *dip, char *name, int spec_type,
-    minor_t minor_num, char *node_type, int flag,
+ddi_create_priv_minor_node(dev_info_t *dip, const char *name, int spec_type,
+    minor_t minor_num, const char *node_type, int flag,
     const char *rdpriv, const char *wrpriv, mode_t priv_mode);
 
 void
-ddi_remove_minor_node(dev_info_t *dip, char *name);
+ddi_remove_minor_node(dev_info_t *dip, const char *name);
 
 int
 ddi_in_panic(void);

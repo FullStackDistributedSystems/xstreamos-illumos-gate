@@ -21,7 +21,7 @@
 
 /*
  * Copyright (c) 1989, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2013, Joyent, Inc. All rights reserved.
+ * Copyright 2017, Joyent, Inc.
  * Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
  */
 
@@ -75,6 +75,7 @@
 #include <sys/autoconf.h>
 #include <sys/dtrace.h>
 #include <sys/timod.h>
+#include <sys/fs/namenode.h>
 #include <netinet/udp.h>
 #include <netinet/tcp.h>
 #include <inet/cc.h>
@@ -158,6 +159,11 @@ prchoose(proc_t *p)
 		if (VSTOPPED(t)) {	/* virtually stopped */
 			if (t_req == NULL)
 				t_req = t;
+			continue;
+		}
+
+		/* If this is a process kernel thread, ignore it. */
+		if ((t->t_proc_flag & TP_KTHREAD) != 0) {
 			continue;
 		}
 
@@ -716,7 +722,6 @@ pr_p_lock(prnode_t *pnp)
 		mutex_enter(&p->p_lock);
 	}
 	p->p_proc_flag |= P_PR_LOCK;
-	THREAD_KPRI_REQUEST();
 	return (p);
 }
 
@@ -823,7 +828,6 @@ prunmark(proc_t *p)
 
 	cv_signal(&pr_pid_cv[p->p_slot]);
 	p->p_proc_flag &= ~P_PR_LOCK;
-	THREAD_KPRI_RELEASE();
 }
 
 void
@@ -932,6 +936,29 @@ prgetstatus(proc_t *p, pstatus_t *sp, zone_t *zp)
 	sp->pr_flags = sp->pr_lwp.pr_flags;
 }
 
+/*
+ * Query mask of held signals for a given thread.
+ *
+ * This makes use of schedctl_sigblock() to query if userspace has requested
+ * that all maskable signals be held.  While it would be tempting to call
+ * schedctl_finish_sigblock() and apply that update to t->t_hold, it cannot be
+ * done safely without the risk of racing with the thread under consideration.
+ */
+void
+prgethold(kthread_t *t, sigset_t *sp)
+{
+	k_sigset_t set;
+
+	if (schedctl_sigblock(t)) {
+		set.__sigbits[0] = FILLSET0 & ~CANTMASK0;
+		set.__sigbits[1] = FILLSET1 & ~CANTMASK1;
+		set.__sigbits[2] = FILLSET2 & ~CANTMASK2;
+	} else {
+		set = t->t_hold;
+	}
+	sigktou(&set, sp);
+}
+
 #ifdef _SYSCALL32_IMPL
 void
 prgetlwpstatus32(kthread_t *t, lwpstatus32_t *sp, zone_t *zp)
@@ -993,8 +1020,7 @@ prgetlwpstatus32(kthread_t *t, lwpstatus32_t *sp, zone_t *zp)
 	sp->pr_lwpid = t->t_tid;
 	sp->pr_cursig  = lwp->lwp_cursig;
 	prassignset(&sp->pr_lwppend, &t->t_sig);
-	schedctl_finish_sigblock(t);
-	prassignset(&sp->pr_lwphold, &t->t_hold);
+	prgethold(t, &sp->pr_lwphold);
 	if (t->t_whystop == PR_FAULTED) {
 		siginfo_kto32(&lwp->lwp_siginfo, &sp->pr_info);
 		if (t->t_whatstop == FLTPAGE)
@@ -1225,8 +1251,7 @@ prgetlwpstatus(kthread_t *t, lwpstatus_t *sp, zone_t *zp)
 	sp->pr_lwpid = t->t_tid;
 	sp->pr_cursig  = lwp->lwp_cursig;
 	prassignset(&sp->pr_lwppend, &t->t_sig);
-	schedctl_finish_sigblock(t);
-	prassignset(&sp->pr_lwphold, &t->t_hold);
+	prgethold(t, &sp->pr_lwphold);
 	if (t->t_whystop == PR_FAULTED)
 		bcopy(&lwp->lwp_siginfo,
 		    &sp->pr_info, sizeof (k_siginfo_t));
@@ -2508,7 +2533,11 @@ prfdinfopath(proc_t *p, vnode_t *vp, list_t *data, cred_t *cred)
 	size_t pathlen;
 	size_t sz = 0;
 
-	pathlen = MAXPATHLEN + 1;
+	/*
+	 * The global zone's path to a file in a non-global zone can exceed
+	 * MAXPATHLEN.
+	 */
+	pathlen = MAXPATHLEN * 2 + 1;
 	pathname = kmem_alloc(pathlen, KM_SLEEP);
 
 	if (vnodetopath(NULL, vp, pathname, pathlen, cred) == 0) {
@@ -2517,6 +2546,7 @@ prfdinfopath(proc_t *p, vnode_t *vp, list_t *data, cred_t *cred)
 	}
 
 	kmem_free(pathname, pathlen);
+
 	return (sz);
 }
 
@@ -2745,6 +2775,22 @@ prfdinfosockopt(vnode_t *vp, list_t *data, cred_t *cred)
 	return (sz);
 }
 
+typedef struct prfdinfo_nm_path_cbdata {
+	proc_t		*nmp_p;
+	u_offset_t	nmp_sz;
+	list_t		*nmp_data;
+} prfdinfo_nm_path_cbdata_t;
+
+static int
+prfdinfo_nm_path(const struct namenode *np, cred_t *cred, void *arg)
+{
+	prfdinfo_nm_path_cbdata_t *cb = arg;
+
+	cb->nmp_sz += prfdinfopath(cb->nmp_p, np->nm_vnode, cb->nmp_data, cred);
+
+	return (0);
+}
+
 u_offset_t
 prgetfdinfosize(proc_t *p, vnode_t *vp, cred_t *cred)
 {
@@ -2757,8 +2803,23 @@ prgetfdinfosize(proc_t *p, vnode_t *vp, cred_t *cred)
 	sz = offsetof(prfdinfo_t, pr_misc) + sizeof (pr_misc_header_t);
 
 	/* Pathname */
-	if (vp->v_type != VSOCK && vp->v_type != VDOOR)
+	switch (vp->v_type) {
+	case VDOOR: {
+		prfdinfo_nm_path_cbdata_t cb = {
+			.nmp_p		= p,
+			.nmp_data	= NULL,
+			.nmp_sz		= 0
+		};
+
+		(void) nm_walk_mounts(vp, prfdinfo_nm_path, cred, &cb);
+		sz += cb.nmp_sz;
+		break;
+	}
+	case VSOCK:
+		break;
+	default:
 		sz += prfdinfopath(p, vp, NULL, cred);
+	}
 
 	/* Socket options */
 	if (vp->v_type == VSOCK)
@@ -2902,14 +2963,31 @@ prgetfdinfo(proc_t *p, vnode_t *vp, prfdinfo_t *fdinfo, cred_t *cred,
 		}
 	}
 
-	/*
-	 * Don't attempt to determine the vnode path for a socket or a door
-	 * as it will cause a linear scan of the dnlc table given there is no
-	 * v_path associated with the vnode.
-	 */
-	if (vp->v_type != VSOCK && vp->v_type != VDOOR)
-		(void) prfdinfopath(p, vp, data, cred);
+	/* pathname */
 
+	switch (vp->v_type) {
+	case VDOOR: {
+		prfdinfo_nm_path_cbdata_t cb = {
+			.nmp_p		= p,
+			.nmp_data	= data,
+			.nmp_sz		= 0
+		};
+
+		(void) nm_walk_mounts(vp, prfdinfo_nm_path, cred, &cb);
+		break;
+	}
+	case VSOCK:
+		/*
+		 * Don't attempt to determine the path for a socket as the
+		 * vnode has no associated v_path. It will cause a linear scan
+		 * of the dnlc table and result in no path being found.
+		 */
+		break;
+	default:
+		(void) prfdinfopath(p, vp, data, cred);
+	}
+
+	/* socket options */
 	if (vp->v_type == VSOCK)
 		(void) prfdinfosockopt(vp, data, cred);
 
@@ -3145,7 +3223,6 @@ prgetlwpsinfo(kthread_t *t, lwpsinfo_t *psp)
 void
 prgetlwpsinfo32(kthread_t *t, lwpsinfo32_t *psp)
 {
-	proc_t *p = ttoproc(t);
 	klwp_t *lwp = ttolwp(t);
 	sobj_ops_t *sobj;
 	char c, state;
@@ -3153,7 +3230,7 @@ prgetlwpsinfo32(kthread_t *t, lwpsinfo32_t *psp)
 	int retval, niceval;
 	hrtime_t hrutime, hrstime;
 
-	ASSERT(MUTEX_HELD(&p->p_lock));
+	ASSERT(MUTEX_HELD(&ttoproc(t)->p_lock));
 
 	bzero(psp, sizeof (*psp));
 

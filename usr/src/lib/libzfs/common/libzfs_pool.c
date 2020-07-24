@@ -473,10 +473,11 @@ zpool_valid_proplist(libzfs_handle_t *hdl, const char *poolname,
 			}
 
 			(void) nvpair_value_string(elem, &strval);
-			if (strcmp(strval, ZFS_FEATURE_ENABLED) != 0) {
+			if (strcmp(strval, ZFS_FEATURE_ENABLED) != 0 &&
+			    strcmp(strval, ZFS_FEATURE_DISABLED) != 0) {
 				zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 				    "property '%s' can only be set to "
-				    "'enabled'"), propname);
+				    "'enabled' or 'disabled'"), propname);
 				(void) zfs_error(hdl, EZFS_BADPROP, errbuf);
 				goto error;
 			}
@@ -1500,13 +1501,6 @@ zpool_add(zpool_handle_t *zhp, nvlist_t *nvroot)
 			zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 			    "pool must be upgraded to add these vdevs"));
 			(void) zfs_error(hdl, EZFS_BADVERSION, msg);
-			break;
-
-		case EDOM:
-			zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
-			    "root pool can not have multiple vdevs"
-			    " or separate logs"));
-			(void) zfs_error(hdl, EZFS_POOL_NOTSUP, msg);
 			break;
 
 		default:

@@ -35,19 +35,22 @@ all :=		TARGET= all
 install :=	TARGET= install
 clean :=	TARGET= clean
 clobber :=	TARGET= clobber
-lint :=		TARGET= lint
-_msg :=		TARGET= _msg
+#lint :=		TARGET= lint
+#_msg :=		TARGET= _msg
+#
+#INSDIRS = $(ETCBRANDDIR) $(ROOTBRANDDIR)
+#
+#all clean clobber lint _msg: $(SUBDIRS)
+#
+#install: insdirs .WAIT $(SUBDIRS)
+#
+#insdirs: $(INSDIRS)
+#
+#$(ETCBRANDDIR) $(ROOTBRANDDIR) $(ROOTBRANDDIR64):
+#	$(INS.dir)
 
-INSDIRS = $(ETCBRANDDIR) $(ROOTBRANDDIR)
+all install clean clobber: $(SUBDIRS)
 
-all clean clobber lint _msg: $(SUBDIRS)
-
-install: insdirs .WAIT $(SUBDIRS)
-
-insdirs: $(INSDIRS)
-
-$(ETCBRANDDIR) $(ROOTBRANDDIR) $(ROOTBRANDDIR64):
-	$(INS.dir)
 
 $(SUBDIRS): FRC
 	@cd $@; pwd; $(MAKE) $(TARGET)

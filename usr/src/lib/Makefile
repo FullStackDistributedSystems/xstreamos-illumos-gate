@@ -179,6 +179,7 @@ SUBDIRS +=				\
 	libofmt		\
 	libpam		\
 	libpcidb	\
+	libpcsc		\
 	libpctx		\
 	libpicl		\
 	libpicltree	\
@@ -231,6 +232,7 @@ SUBDIRS +=				\
 	libtsnet	\
 	libtsol		\
 	libumem		\
+	libutempter	\
 	libuuid		\
 	libuutil	\
 	libvolmgt	\
@@ -278,7 +280,10 @@ SUBDIRS +=				\
 
 i386_SUBDIRS=		\
 	libfdisk	\
-	libsaveargs
+	libppt		\
+	libsaveargs	\
+	libvmm		\
+	libvmmapi
 
 sparc_SUBDIRS=		\
 	efcode		\
@@ -437,6 +442,7 @@ HDRSUBDIRS=				\
 	libofmt		\
 	libpam		\
 	libpcidb	\
+	libpcsc		\
 	libpctx		\
 	libpicl		\
 	libpicltree	\
@@ -477,6 +483,7 @@ HDRSUBDIRS=				\
 	libtsnet	\
 	libtsol		\
 	libumem		\
+	libutempter	\
 	libuutil	\
 	libvolmgt	\
 	libvrrpadm	\
@@ -500,7 +507,10 @@ HDRSUBDIRS=				\
 
 i386_HDRSUBDIRS=	\
 	libfdisk	\
-	libsaveargs
+	libppt		\
+	libsaveargs	\
+	libvmm		\
+	libvmmapi
 
 sparc_HDRSUBDIRS=	\
 	libds		\
@@ -543,13 +553,14 @@ install_extra:
 
 clean clobber:		$(NOWAIT_SUBDIRS:%=%-nodepend)
 
-lint:
 
 install_h check:	$(HDRSUBDIRS:%=%-nodepend)
 
 _msg:			$(MSGSUBDIRS:%=%-nodepend) .WAIT _dc
 
 _dc:			$(DCSUBDIRS:%=%-nodepend)
+
+lint:
 
 # Library interdependencies are called out explicitly here.
 ../cmd/sgs/libconv: crt
@@ -650,6 +661,7 @@ libpctx:	libproc
 libpkg:		libscf libadm
 libpool:	libscf libexacct
 libpp:		libast
+libppt:		libpcidb libdevinfo libcmdutils
 libproc:	../cmd/sgs/librtld_db ../cmd/sgs/libelf libctf
 $(INTEL_BLD)libproc: libsaveargs
 libproject:	libpool libproc libsecdb
@@ -684,6 +696,7 @@ libtsnet:	libtsol libsecdb
 libtsol:	libsecdb
 libuuid:	libdlpi
 libv12n:	libds libuuid
+libvmm:		libvmmapi
 libvolmgt:	libadm
 libvrrpadm:	libdladm libscf
 libvscan:	libscf libsecdb

@@ -20,6 +20,7 @@
  */
 
 /*
+ * Copyright 2020 Oxide Computer Company
  * Copyright (c) 2013 Gary Mills
  * Copyright (c) 1998, 2010, Oracle and/or its affiliates. All rights reserved.
  */
@@ -42,6 +43,7 @@
 #include <sys/utsname.h>
 #include <sys/id_space.h>
 #include <sys/zone.h>
+#include <sys/bootbanner.h>
 
 log_zone_t log_global;
 queue_t *log_consq;
@@ -181,6 +183,14 @@ log_zonefree(zoneid_t zoneid, void *arg)
 	kmem_free(lzp, sizeof (log_zone_t));
 }
 
+static void
+log_bootbanner_print(const char *line, uint_t num)
+{
+	const char *pfx = (num == 0) ? "\r" : "";
+
+	printf("%s%s\n", pfx, line);
+}
+
 void
 log_init(void)
 {
@@ -245,15 +255,18 @@ log_init(void)
 	log_update(&log_backlog, log_backlogq, SL_CONSOLE, log_console);
 
 	/*
-	 * Now that logging is enabled, emit the SunOS banner.
+	 * Now that logging is enabled, emit the boot banner.
 	 */
+#ifdef	LEGACY_BANNER
 	printf("\rSunOS Release %s Version %s %s %u-bit %s\n",
 	    utsname.release, utsname.version, XS_RELEASE_NAME, NBBY * (uint_t)sizeof (void *), XS_RELEASE_DATE);
 /*      printf("Copyright (c) 1983, 2010, Oracle and/or its affiliates. "
             "All rights reserved.\n");*/
         printf("XStreamOS is mantained and distributed by Sonicle (http://www.sonicle.com).\n");
         printf("All other trademarks and copyrights are the property of their respective owners.\n");
-
+#else
+	bootbanner_print(log_bootbanner_print, KM_SLEEP);
+#endif
 #ifdef DEBUG
 	printf("DEBUG enabled\n");
 #endif
@@ -494,7 +507,7 @@ log_console(log_t *lp, log_ctl_t *lc)
 
 mblk_t *
 log_makemsg(int mid, int sid, int level, int sl, int pri, void *msg,
-	size_t size, int on_intr)
+    size_t size, int on_intr)
 {
 	mblk_t *mp = NULL;
 	mblk_t *mp2;

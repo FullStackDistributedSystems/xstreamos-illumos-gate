@@ -349,7 +349,7 @@ get_usage(zpool_help_t idx)
 	case HELP_IOSTAT:
 		return (gettext("\tiostat "
 		    "[[-lq]|[-rw]] [-T d | u] [-ghHLpPvy]\n"
-		    "\t    [pool] ..."
+		    "\t    [[pool] ...]|[pool vdev ...]|[vdev ...]]"
 		    " [[-n] interval [count]]\n"));
 	case HELP_LABELCLEAR:
 		return (gettext("\tlabelclear [-f] <vdev>\n"));
@@ -1081,6 +1081,7 @@ errout:
  *		'/<pool>'
  *	-t	Use the temporary name until the pool is exported.
  *	-o	Set property=value.
+ *	-o	Set feature@feature=enabled|disabled.
  *	-d	Don't automatically enable all supported pool features
  *		(individual features can be enabled with -o).
  *	-O	Set fsproperty=value in the pool's root file system
@@ -1414,22 +1415,26 @@ zpool_do_create(int argc, char **argv)
 		/*
 		 * Hand off to libzfs.
 		 */
-		if (enable_all_pool_feat) {
-			spa_feature_t i;
-			for (i = 0; i < SPA_FEATURES; i++) {
-				char propname[MAXPATHLEN];
-				zfeature_info_t *feat = &spa_feature_table[i];
 
-				(void) snprintf(propname, sizeof (propname),
-				    "feature@%s", feat->fi_uname);
+		spa_feature_t i;
+		for (i = 0; i < SPA_FEATURES; i++) {
+			char propname[MAXPATHLEN];
+			char *propval;
+			zfeature_info_t *feat = &spa_feature_table[i];
+			(void) snprintf(propname, sizeof (propname),
+			    "feature@%s", feat->fi_uname);
 
-				/*
-				 * Skip feature if user specified it manually
-				 * on the command line.
-				 */
-				if (nvlist_exists(props, propname))
-					continue;
-
+			/*
+			 * Only features contained in props will be enabled:
+			 * remove from the nvlist every ZFS_FEATURE_DISABLED
+			 * value and add every missing ZFS_FEATURE_ENABLED if
+			 * enable_all_pool_feat is set.
+			 */
+			if (!nvlist_lookup_string(props, propname, &propval)) {
+				if (strcmp(propval, ZFS_FEATURE_DISABLED) == 0)
+					(void) nvlist_remove_all(props,
+					    propname);
+			} else if (enable_all_pool_feat) {
 				ret = add_prop_list(propname,
 				    ZFS_FEATURE_ENABLED, &props, B_TRUE);
 				if (ret != 0)
@@ -3408,20 +3413,20 @@ print_iostat_labels(iostat_cbdata_t *cb, unsigned int force_column_width,
 /*
  * Utility function to print out a line of dashes like:
  *
- * 	--------------------------------  -----  -----  -----  -----  -----
+ *	--------------------------------  -----  -----  -----  -----  -----
  *
  * ...or a dashed named-row line like:
  *
- * 	logs                                  -      -      -      -      -
+ *	logs                                  -      -      -      -      -
  *
  * @cb:				iostat data
  *
  * @force_column_width		If non-zero, use the value as the column width.
- * 				Otherwise use the default column widths.
+ *				Otherwise use the default column widths.
  *
  * @name:			Print a dashed named-row line starting
- * 				with @name.  Otherwise, print a regular
- * 				dashed line.
+ *				with @name.  Otherwise, print a regular
+ *				dashed line.
  */
 static void
 print_iostat_dashes(iostat_cbdata_t *cb, unsigned int force_column_width,
@@ -4984,6 +4989,7 @@ zpool_do_iostat(int argc, char **argv)
 			    cb.cb_vdev_names_count)) &&
 			    !cb.cb_scripted) {
 				print_iostat_separator(&cb);
+				printf("\n");
 			}
 		}
 

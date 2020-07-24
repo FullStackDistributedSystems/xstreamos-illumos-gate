@@ -162,11 +162,6 @@ usr/include/inet/sadb.h
 usr/include/sys/sha1_consts.h
 usr/include/sys/sha2_consts.h
 #
-#
-# Filtering out directories not shipped
-#
-usr/4lib				i386
-#
 # These files contain definitions shared privately between the kernel
 # and libc.  There is no reason for them to be part of a package that
 # a customer should ever see.  They are installed in the proto area by
@@ -530,6 +525,10 @@ usr/platform/sun4v/include/sys/vlds.h	sparc
 #
 usr/include/sys/u8_textprep_data.h
 #
+# Private, for the boot banner code shared between zone init and the kernel:
+#
+usr/include/sys/bootbanner.h
+#
 # SQLite is private, used by SMF (svc.configd), idmapd and libsmb.
 #
 usr/include/sqlite-sys
@@ -746,8 +745,10 @@ usr/lib/sparcv9/libvrrpadm.so		sparc
 opt/onbld/bin/i386/mandoc	i386
 opt/onbld/bin/sparc/mandoc	sparc
 opt/onbld/bin/i386/makesoftcore	i386
+opt/onbld/bin/i386/rpcgen	i386
 opt/onbld/bin/i386/vtfontcvt	i386
 opt/onbld/bin/sparc/makesoftcore	sparc
+opt/onbld/bin/sparc/rpcgen	sparc
 opt/onbld/bin/sparc/vtfontcvt	sparc
 
 #
@@ -818,6 +819,17 @@ usr/lib/sparcv9/libsff.so		sparc
 usr/lib/libsff.so
 
 #
+# private bhyve files
+#
+lib/amd64/libvmm.so			i386
+lib/amd64/libvmmapi.so			i386
+usr/include/libppt.h			i386
+usr/include/libvmm.h			i386
+usr/include/vmmapi.h			i386
+usr/lib/amd64/libppt.so			i386
+usr/lib/libppt.so			i386
+
+#
 # libcustr is private
 #
 usr/include/libcustr.h
@@ -847,12 +859,6 @@ usr/lib/libdwarf.so
 #
 usr/bin/ctfconvert
 usr/bin/ctfmerge
-
-#
-# SPARC doesn't currently use this today, though it may in the future.
-#
-usr/include/sys/sensors.h	sparc
-usr/lib/devfsadm/linkmod/SUNW_sensor_link.so	sparc
 
 #
 # libjedec is private

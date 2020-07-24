@@ -13,6 +13,7 @@
  * Copyright 2015 OmniTI Computer Consulting, Inc. All rights reserved.
  * Copyright (c) 2018, Joyent, Inc.
  * Copyright 2017 Tegile Systems, Inc.  All rights reserved.
+ * Copyright 2020 Ryan Zezeski
  */
 
 /*
@@ -565,7 +566,7 @@ i40e_fill_rx_group(void *arg, mac_ring_type_t rtype, const int index,
 	infop->mgi_addmac = i40e_group_add_mac;
 	infop->mgi_remmac = i40e_group_remove_mac;
 
-	ASSERT(i40e->i40e_num_rx_groups <= I40E_GROUP_MAX);
+	ASSERT3U(i40e->i40e_num_rx_groups, <=, I40E_MAX_NUM_RX_GROUPS);
 	infop->mgi_count = i40e->i40e_num_trqpairs_per_vsi;
 }
 
@@ -733,8 +734,10 @@ i40e_m_getcapab(void *arg, mac_capab_t cap, void *cap_data)
 		mac_capab_lso_t *cap_lso = cap_data;
 
 		if (i40e->i40e_tx_lso_enable == B_TRUE) {
-			cap_lso->lso_flags = LSO_TX_BASIC_TCP_IPV4;
+			cap_lso->lso_flags = LSO_TX_BASIC_TCP_IPV4 |
+			    LSO_TX_BASIC_TCP_IPV6;
 			cap_lso->lso_basic_tcp_ipv4.lso_max = I40E_LSO_MAXLEN;
+			cap_lso->lso_basic_tcp_ipv6.lso_max = I40E_LSO_MAXLEN;
 		} else {
 			return (B_FALSE);
 		}

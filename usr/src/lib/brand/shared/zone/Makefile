@@ -52,6 +52,5 @@ $(POFILE): $(POFILES)
 
 clean:
 
-lint:
 
 include $(SRC)/cmd/Makefile.targ

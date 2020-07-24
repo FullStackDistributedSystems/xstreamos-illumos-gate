@@ -28,6 +28,7 @@
 # Copyright 2017 Nexenta Systems, Inc.
 # Copyright 2016 Hans Rosenfeld <rosenfeld@grumpf.hope-2000.org>
 # Copyright 2019 Peter Tribble.
+# Copyright 2015, Joyent, Inc. All rights reserved.
 #
 
 include $(SRC)/uts/Makefile.uts
@@ -95,6 +96,7 @@ CHKHDRS=			\
 	bofi.h			\
 	bofi_impl.h		\
 	bpp_io.h		\
+	bootbanner.h		\
 	bootstat.h		\
 	brand.h			\
 	buf.h			\
@@ -348,6 +350,7 @@ CHKHDRS=			\
 	lgrp.h			\
 	lgrp_user.h		\
 	libc_kernel.h		\
+	limits.h		\
 	link.h			\
 	linker_set.h		\
 	list.h			\
@@ -836,6 +839,7 @@ FSHDRS=				\
 	decomp.h		\
 	dv_node.h		\
 	sdev_impl.h		\
+	sdev_plugin.h		\
 	fifonode.h		\
 	hsfs_isospec.h		\
 	hsfs_node.h		\
@@ -1024,6 +1028,10 @@ USBWCMHDRS=		\
 UGENHDRS=           \
 	usb_ugen.h
 
+USBCCIDHDRS = \
+	ccid.h \
+	uccid.h
+
 HOTPLUGHDRS=	\
 	hpcsvc.h	\
 	hpctrl.h
@@ -1170,6 +1178,7 @@ CHECKHDRS=						\
 	$(SYSEVENTHDRS:%.h=sysevent/%.check)            \
 	$(CONTRACTHDRS:%.h=contract/%.check)            \
 	$(USBAUDHDRS:%.h=usb/clients/audio/%.check)   \
+	$(USBCCIDHDRS:%.h=usb/clients/ccid/%.check)	\
 	$(USBHUBDHDRS:%.h=usb/hubd/%.check)		\
 	$(USBHIDHDRS:%.h=usb/clients/hid/%.check)	\
 	$(USBMSHDRS:%.h=usb/clients/mass_storage/%.check)	\
@@ -1244,6 +1253,7 @@ CHECKHDRS=						\
 	$(ROOTUSBCDCHDRS)       \
 	$(ROOTUSBVIDHDRS)       \
 	$(ROOTUSBWCMHDRS)	\
+	$(ROOTUSBCCIDHDRS)	\
 	$(ROOTUGENHDRS)		\
 	$(ROOT1394HDRS)         \
 	$(ROOTHOTPLUGHDRS)	\
@@ -1302,6 +1312,7 @@ install_h:			\
 	$(ROOTUWBHDRS)		\
 	$(ROOTUWBAHDRS)		\
 	$(ROOTUSBHDRS)		\
+	$(ROOTUSBCCIDHDRS)	\
 	$(ROOTUSBAUDHDRS)	\
 	$(ROOTUSBHUBDHDRS)	\
 	$(ROOTUSBHIDHDRS)	\

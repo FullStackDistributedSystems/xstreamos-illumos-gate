@@ -60,6 +60,7 @@ _MANFILES=	6to4relay.1m		\
 		busstat.1m		\
 		captoinfo.1m		\
 		catman.1m		\
+		ccidadm.1m		\
 		cfgadm.1m		\
 		cfgadm_cardbus.1m	\
 		cfgadm_fp.1m		\
@@ -169,6 +170,7 @@ _MANFILES=	6to4relay.1m		\
 		halt.1m			\
 		hextoalabel.1m		\
 		hostconfig.1m		\
+		hotplug.1m		\
 		id.1m			\
 		idmap.1m		\
 		idmapd.1m		\
@@ -545,6 +547,7 @@ i386_MANFILES=				\
 		acpidump.1m		\
 		acpixtract.1m		\
 		nvmeadm.1m		\
+		pptadm.1m		\
 		rdmsr.1m
 
 sparc_MANFILES=	dcs.1m			\

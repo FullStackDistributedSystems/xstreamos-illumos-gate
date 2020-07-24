@@ -35,6 +35,7 @@ _MANFILES=	aac.7d		\
 		bge.7d		\
 		blkdev.7d	\
 		bnxe.7d		\
+		ccid.7d		\
 		chxge.7d	\
 		console.7d	\
 		cpuid.7d	\
@@ -43,6 +44,7 @@ _MANFILES=	aac.7d		\
 		devinfo.7d	\
 		dmfe.7d		\
 		dtrace.7d	\
+		e1000g.7d	\
 		ehci.7d		\
 		fasttrap.7d	\
 		fbt.7d		\
@@ -76,6 +78,7 @@ _MANFILES=	aac.7d		\
 		ixgbe.7d	\
 		kmdb.7d		\
 		kstat.7d	\
+		ksensor.7d	\
 		ksyms.7d	\
 		llc1.7d		\
 		lockstat.7d	\
@@ -204,6 +207,8 @@ i386_MANFILES=	ahci.7d		\
 		ecpp.7d		\
 		elxl.7d		\
 		i40e.7d		\
+		imc.7d		\
+		imcstub.7d	\
 		ipmi.7d		\
 		iprb.7d		\
 		ipw.7d		\
@@ -211,6 +216,7 @@ i386_MANFILES=	ahci.7d		\
 		iwi.7d		\
 		iwn.7d		\
 		mega_sas.7d	\
+		mlxcx.7d	\
 		npe.7d		\
 		ntxn.7d		\
 		nv_sata.7d	\

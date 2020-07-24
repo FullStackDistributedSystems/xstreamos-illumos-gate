@@ -11,14 +11,16 @@
 
 #
 # Copyright (c) 2012, 2016 by Delphix. All rights reserved.
-# Copyright 2019 Joyent, Inc.
+# Copyright 2020 Joyent, Inc.
 #
 
-SUBDIRS_i386 = i386
+SUBDIRS_i386 = i386 imc
 
 SUBDIRS =       \
 		ddi_ufm \
 		file-locking \
+		ksensor \
+		libtopo \
 		pf_key \
 		poll \
 		sdevfs \
@@ -27,10 +29,13 @@ SUBDIRS =       \
 		sockfs \
 		spoof-ras \
 		stress \
+		timer \
+		uccid \
 		$(SUBDIRS_$(MACH))
 
 PROGS = \
-	odirectory
+	odirectory \
+	writev
 
 CPPFLAGS += -D_REENTRANT
 PROGS32 = $(PROGS:%=%.32)
@@ -43,6 +48,10 @@ ROOTOPTPROGS = $(PROGS32:%=$(ROOTOPTDIR)/%) \
 
 odirectory.32 :=	LDLIBS += -lsocket
 odirectory.64 :=	LDLIBS64 += -lsocket
+
+writev.32 :=		CPPFLAGS += -D_FILE_OFFSET_BITS=64
+writev.32 :=		CSTD = $(CSTD_GNU99)
+writev.64 :=		CSTD = $(CSTD_GNU99)
 
 include $(SRC)/cmd/Makefile.cmd
 

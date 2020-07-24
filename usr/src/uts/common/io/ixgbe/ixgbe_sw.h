@@ -28,6 +28,7 @@
  * Copyright (c) 2013 Saso Kiselkov. All rights reserved.
  * Copyright 2016 OmniTI Computer Consulting, Inc. All rights reserved.
  * Copyright 2019 Joyent, Inc.
+ * Copyright 2020 Oxide Computer Company
  */
 
 #ifndef	_IXGBE_SW_H
@@ -74,6 +75,7 @@ extern "C" {
 #include <sys/fm/util.h>
 #include <sys/disp.h>
 #include <sys/fm/io/ddi.h>
+#include <sys/ddi_ufm.h>
 #include "ixgbe_api.h"
 
 #define	MODULE_NAME			"ixgbe"	/* module name */
@@ -91,6 +93,8 @@ extern "C" {
 
 #define	MAX_NUM_UNICAST_ADDRESSES	0x80
 #define	MAX_NUM_MULTICAST_ADDRESSES	0x1000
+#define	MAX_NUM_VLAN_FILTERS		0x40
+
 #define	IXGBE_INTR_NONE			0
 #define	IXGBE_INTR_MSIX			1
 #define	IXGBE_INTR_MSI			2
@@ -212,6 +216,7 @@ extern "C" {
 #define	ATTACH_PROGRESS_LINK_TIMER	0x8000	/* link check timer */
 #define	ATTACH_PROGRESS_OVERTEMP_TASKQ	0x10000 /* Over-temp taskq created */
 #define	ATTACH_PROGRESS_PHY_TASKQ	0x20000 /* Ext. PHY taskq created */
+#define	ATTACH_PROGRESS_UFM		0x40000	/* UFM support */
 
 #define	PROP_DEFAULT_MTU		"default_mtu"
 #define	PROP_FLOW_CONTROL		"flow_control"
@@ -387,6 +392,15 @@ typedef union ixgbe_ether_addr {
 	} mac;
 } ixgbe_ether_addr_t;
 
+/*
+ * The list of VLANs an Rx group will accept.
+ */
+typedef struct ixgbe_vlan {
+	list_node_t		ixvl_link;
+	uint16_t		ixvl_vid;   /* The VLAN ID */
+	uint_t			ixvl_refs;  /* Number of users of this VLAN */
+} ixgbe_vlan_t;
+
 typedef enum {
 	USE_NONE,
 	USE_COPY,
@@ -397,6 +411,7 @@ typedef struct ixgbe_tx_context {
 	uint32_t		hcksum_flags;
 	uint32_t		ip_hdr_len;
 	uint32_t		mac_hdr_len;
+	uint32_t		l3_proto;
 	uint32_t		l4_proto;
 	uint32_t		mss;
 	uint32_t		l4_hdr_len;
@@ -589,6 +604,7 @@ typedef struct ixgbe_rx_ring {
 
 	struct ixgbe		*ixgbe;		/* Pointer to ixgbe struct */
 } ixgbe_rx_ring_t;
+
 /*
  * Software Receive Ring Group
  */
@@ -596,6 +612,8 @@ typedef struct ixgbe_rx_group {
 	uint32_t		index;		/* Group index */
 	mac_group_handle_t	group_handle;   /* call back group handle */
 	struct ixgbe		*ixgbe;		/* Pointer to ixgbe struct */
+	boolean_t		aupe;		/* AUPE bit */
+	list_t			vlans;		/* list of VLANs to allow */
 } ixgbe_rx_group_t;
 
 /*
@@ -662,6 +680,7 @@ typedef struct ixgbe {
 	 */
 	ixgbe_rx_group_t	*rx_groups;	/* Array of rx groups */
 	uint32_t		num_rx_groups;	/* Number of rx groups in use */
+	uint32_t		rx_def_group;	/* Default Rx group index */
 
 	/*
 	 * Transmit Rings
@@ -715,6 +734,9 @@ typedef struct ixgbe {
 	uint32_t		mcast_count;
 	struct ether_addr	mcast_table[MAX_NUM_MULTICAST_ADDRESSES];
 
+	boolean_t		vlft_enabled; /* VLAN filtering enabled? */
+	boolean_t		vlft_init;    /* VLAN filtering initialized? */
+
 	ulong_t			sys_page_size;
 
 	boolean_t		link_check_complete;
@@ -728,6 +750,11 @@ typedef struct ixgbe {
 	boolean_t		ixgbe_led_blink;
 	uint32_t		ixgbe_led_reg;
 	uint32_t		ixgbe_led_index;
+
+	/*
+	 * UFM state
+	 */
+	ddi_ufm_handle_t	*ixgbe_ufmh;
 
 	/*
 	 * Kstat definitions
