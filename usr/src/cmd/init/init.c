@@ -602,7 +602,9 @@ static int	startd_failure_rate_critical();
 static char	*audit_boot_msg();
 static int	audit_put_record(int, int, char *);
 static void	update_boot_archive(int new_state);
+#ifndef  LEGACY_BANNER
 static void	init_bootbanner_print(const char *, uint_t);
+#endif
 
 int
 main(int argc, char *argv[])
@@ -920,6 +922,7 @@ main(int argc, char *argv[])
 	/*NOTREACHED*/
 }
 
+#ifndef  LEGACY_BANNER
 static void
 init_bootbanner_print(const char *line, uint_t num)
 {
@@ -927,6 +930,7 @@ init_bootbanner_print(const char *line, uint_t num)
 
 	console(B_FALSE, "%s%s\r\n", pfx, line);
 }
+#endif
 
 static void
 update_boot_archive(int new_state)
