@@ -2082,6 +2082,10 @@ typedef struct {
 	uint8_t		mlxi_set_flow_table_root_rsvd3[4];
 	uint24be_t	mlxi_set_flow_table_root_table_id;
 	uint8_t		mlxi_set_flow_table_root_rsvd4[4];
+	uint8_t		mlxi_set_flow_table_root_esw_owner_vhca_id_valid;
+	uint8_t		mlxi_set_flow_table_root_rsvd5;
+	uint16be_t	mlxi_set_flow_table_root_esw_owner_vhca_id;
+	uint8_t		mlxi_set_flow_table_root_rsvd6[32];
 } mlxcx_cmd_set_flow_table_root_in_t;
 
 typedef struct {
@@ -2530,6 +2534,30 @@ typedef struct {
 	uint16be_t	mlrd_pplm_fec_override_admin_fdr10;
 } mlxcx_reg_pplm_t;
 
+typedef struct {
+	uint8_t		mlrd_mtcap_rsvd[3];
+	uint8_t		mlrd_mtcap_sensor_count;
+	uint8_t		mlrd_mtcap_rsvd1[4];
+	uint64be_t	mlrd_mtcap_sensor_map;
+} mlxcx_reg_mtcap_t;
+
+#define	MLXCX_MTMP_NAMELEN	8
+
+typedef struct {
+	uint8_t		mlrd_mtmp_rsvd[2];
+	uint16be_t	mlrd_mtmp_sensor_index;
+	uint8_t		mlrd_mtmp_rsvd1[2];
+	uint16be_t	mlrd_mtmp_temperature;
+	bits16_t	mlrd_mtmp_max_flags;
+	uint16be_t	mlrd_mtmp_max_temperature;
+	bits16_t	mlrd_mtmp_tee;
+	uint16be_t	mlrd_mtmp_temp_thresh_hi;
+	uint8_t		mlrd_mtmp_rsvd2[2];
+	uint16be_t	mlrd_mtmp_temp_thresh_lo;
+	uint8_t		mlrd_mtmp_rsvd3[4];
+	uint8_t		mlrd_mtmp_name[MLXCX_MTMP_NAMELEN];
+} mlxcx_reg_mtmp_t;
+
 typedef enum {
 	MLXCX_REG_PMTU		= 0x5003,
 	MLXCX_REG_PTYS		= 0x5004,
@@ -2540,6 +2568,8 @@ typedef enum {
 	MLXCX_REG_MCIA		= 0x9014,
 	MLXCX_REG_PPCNT		= 0x5008,
 	MLXCX_REG_PPLM		= 0x5023,
+	MLXCX_REG_MTCAP		= 0x9009,
+	MLXCX_REG_MTMP		= 0x900A
 } mlxcx_register_id_t;
 
 typedef union {
@@ -2551,6 +2581,8 @@ typedef union {
 	mlxcx_reg_mcia_t		mlrd_mcia;
 	mlxcx_reg_ppcnt_t		mlrd_ppcnt;
 	mlxcx_reg_pplm_t		mlrd_pplm;
+	mlxcx_reg_mtcap_t		mlrd_mtcap;
+	mlxcx_reg_mtmp_t		mlrd_mtmp;
 } mlxcx_register_data_t;
 
 typedef enum {

@@ -11,7 +11,9 @@
 
 #
 # Copyright 2014 Pluribus Networks Inc.
-# Copyright 2019 Joyent, Inc.
+# Copyright 2020 Joyent, Inc.
+# Copyright 2020 Oxide Computer Company
+# Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
 #
 
 PROG =		bhyve
@@ -34,8 +36,7 @@ SRCS =	acpi.c			\
 	block_if.c		\
 	bootrom.c		\
 	console.c		\
-	consport.c		\
-	dbgport.c		\
+	config.c		\
 	fwctl.c			\
 	gdb.c			\
 	inout.c			\
@@ -60,6 +61,7 @@ SRCS =	acpi.c			\
 	pci_virtio_rnd.c	\
 	pci_virtio_viona.c	\
 	pci_xhci.c		\
+	pctestdev.c		\
 	pm.c			\
 	post.c			\
 	ps2kbd.c		\
@@ -74,7 +76,6 @@ SRCS =	acpi.c			\
 	usb_mouse.c		\
 	vga.c			\
 	virtio.c		\
-	vmm_instruction_emul.c	\
 	vmgenc.c		\
 	xmsr.c			\
 	spinup_ap.c		\
@@ -97,7 +98,7 @@ SRCS =	acpi.c			\
 	#pci_hda.c		\
 
 # The bhyve generic net-backend stuff has been ignored by us at the moment
-# because SmartOS users prefer to use viona for its superior network perf.
+# because illumos users prefer to use viona for its superior network perf.
 	#net_backends.c		\
 
 
@@ -123,19 +124,31 @@ CPPFLAGS =	-I$(COMPAT)/bhyve -I$(CONTRIB)/bhyve \
 		-I$(SRC)/uts/i86pc \
 		-DWITHOUT_CAPSICUM
 
-# Disable the crypto code until it is wired up
-CPPFLAGS +=	-DNO_OPENSSL
-
 pci_nvme.o := CERRWARN += -_gcc=-Wno-pointer-sign
+pci_nvme.o := CERRWARN += -_gcc10=-Wno-address-of-packed-member
 pci_nvme.o := SMOFF += kmalloc_wrong_size
+
+pci_passthru.o := CERRWARN += -_gcc10=-Wno-address-of-packed-member
+
+pci_xhci.o := CERRWARN += -_gcc10=-Wno-address-of-packed-member
 
 SMOFF += all_func_returns,leaks,no_if_block
 
 # Force c99 for everything
 CSTD=		$(CSTD_GNU99)
-C99MODE=	-xc99=%all
 
-$(PROG) := LDLIBS += -lsocket -lnsl -ldlpi -ldladm -lmd -luuid -lvmmapi -lz
+$(PROG) := LDLIBS += \
+	-lsocket \
+	-lnsl \
+	-ldlpi \
+	-ldladm \
+	-lmd \
+	-lnvpair \
+	-lcrypto \
+	-luuid \
+	-lvmmapi \
+	-lz
+NATIVE_LIBS += libz.so libcrypto.so
 $(MEVENT_TEST_PROG) := LDLIBS += -lsocket
 
 .KEEP_STATE:
@@ -161,7 +174,3 @@ $(SUBDIRS): FRC
 	@cd $@; pwd; $(MAKE) $(TARGET)
 
 FRC:
-
-%.o: $(SRC)/uts/i86pc/io/vmm/%.c
-	$(COMPILE.c) $<
-	$(POST_PROCESS_O)

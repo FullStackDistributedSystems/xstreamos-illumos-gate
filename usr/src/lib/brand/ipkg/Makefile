@@ -22,12 +22,11 @@
 # Copyright 2010 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
 #
-# Copyright 2013 Nexenta Systems, Inc.  All rights reserved.
-#
 
 default: all
 
-include Makefile.ipkg
+# Build everything in parallel; use .WAIT for dependencies
+.PARALLEL:
 
 SUBDIRS =	zone
 
@@ -35,19 +34,6 @@ all :=		TARGET= all
 install :=	TARGET= install
 clean :=	TARGET= clean
 clobber :=	TARGET= clobber
-#lint :=		TARGET= lint
-#_msg :=		TARGET= _msg
-#
-#INSDIRS = $(ETCBRANDDIR) $(ROOTBRANDDIR)
-#
-#all clean clobber lint _msg: $(SUBDIRS)
-#
-#install: insdirs .WAIT $(SUBDIRS)
-#
-#insdirs: $(INSDIRS)
-#
-#$(ETCBRANDDIR) $(ROOTBRANDDIR) $(ROOTBRANDDIR64):
-#	$(INS.dir)
 
 all install clean clobber: $(SUBDIRS)
 

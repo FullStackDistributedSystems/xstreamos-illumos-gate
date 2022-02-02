@@ -20,8 +20,8 @@
  */
 /*
  * Copyright (c) 2008, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2019 Nexenta by DDN, Inc. All rights reserved.
  * Copyright 2020 RackTop Systems, Inc.
+ * Copyright 2020 Tintri by DDN, Inc. All rights reserved.
  */
 
 /*
@@ -601,6 +601,7 @@ typedef struct smb_oplock_grant {
 	uint32_t		og_state;	/* latest sent to client */
 	uint32_t		og_breaking;	/* BREAK_TO... flags */
 	uint16_t		og_dialect;	/* how to send breaks */
+	boolean_t		og_closing;
 	/* File-system level state */
 	uint8_t			onlist_II;
 	uint8_t			onlist_R;
@@ -1169,6 +1170,7 @@ typedef struct smb_tree {
 	time_t			t_connect_time;
 	volatile uint32_t	t_open_files;
 	smb_cfg_val_t		t_encrypt; /* Share.EncryptData */
+	timestruc_t		t_create_time;
 } smb_tree_t;
 
 #define	SMB_TREE_VFS(tree)	((tree)->t_snode->vp->v_vfsp)
@@ -1425,7 +1427,6 @@ typedef struct smb_ofile {
 	cred_t			*f_cr;
 	pid_t			f_pid;
 	smb_attr_t		f_pending_attr;
-	boolean_t		f_written;
 	smb_oplock_grant_t	f_oplock;
 	uint8_t			TargetOplockKey[SMB_LEASE_KEY_SZ];
 	uint8_t			ParentOplockKey[SMB_LEASE_KEY_SZ];

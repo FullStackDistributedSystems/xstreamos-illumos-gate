@@ -10,7 +10,7 @@
  */
 
 /*
- * Copyright 2020, The University of Queensland
+ * Copyright 2021, The University of Queensland
  * Copyright (c) 2018, Joyent, Inc.
  * Copyright 2020 RackTop Systems, Inc.
  */
@@ -1066,6 +1066,11 @@ mlxcx_teardown(mlxcx_t *mlxp)
 		mlxcx_intr_disable(mlxp);
 	}
 
+	if (mlxp->mlx_attach & MLXCX_ATTACH_SENSORS) {
+		mlxcx_teardown_sensors(mlxp);
+		mlxp->mlx_attach &= ~MLXCX_ATTACH_SENSORS;
+	}
+
 	if (mlxp->mlx_attach & MLXCX_ATTACH_CHKTIMERS) {
 		mlxcx_teardown_checktimers(mlxp);
 		mlxp->mlx_attach &= ~MLXCX_ATTACH_CHKTIMERS;
@@ -1800,7 +1805,7 @@ mlxcx_setup_ports(mlxcx_t *mlxp)
 		p->mlx_port_event.mla_mlx = mlxp;
 		p->mlx_port_event.mla_port = p;
 		mutex_init(&p->mlx_port_event.mla_mtx, NULL,
-		    MUTEX_DRIVER, DDI_INTR_PRI(mlxp->mlx_intr_pri));
+		    MUTEX_DRIVER, DDI_INTR_PRI(mlxp->mlx_async_intr_pri));
 		p->mlp_init |= MLXCX_PORT_INIT;
 		mutex_init(&p->mlp_mtx, NULL, MUTEX_DRIVER,
 		    DDI_INTR_PRI(mlxp->mlx_intr_pri));
@@ -2360,10 +2365,26 @@ mlxcx_setup_eq(mlxcx_t *mlxp, uint_t vec, uint64_t events)
 		return (B_FALSE);
 	}
 	mleq->mleq_state |= MLXCX_EQ_INTR_ENABLED;
+	mleq->mleq_state |= MLXCX_EQ_ATTACHING;
 	mlxcx_arm_eq(mlxp, mleq);
 	mutex_exit(&mleq->mleq_mtx);
 
 	return (B_TRUE);
+}
+
+static void
+mlxcx_eq_set_attached(mlxcx_t *mlxp)
+{
+	uint_t vec;
+	mlxcx_event_queue_t *mleq;
+
+	for (vec = 0; vec < mlxp->mlx_intr_count; ++vec) {
+		mleq = &mlxp->mlx_eqs[vec];
+
+		mutex_enter(&mleq->mleq_mtx);
+		mleq->mleq_state &= ~MLXCX_EQ_ATTACHING;
+		mutex_exit(&mleq->mleq_mtx);
+	}
 }
 
 static boolean_t
@@ -2716,7 +2737,7 @@ mlxcx_attach(dev_info_t *dip, ddi_attach_cmd_t cmd)
 	for (i = 0; i <= MLXCX_FUNC_ID_MAX; i++) {
 		mlxp->mlx_npages_req[i].mla_mlx = mlxp;
 		mutex_init(&mlxp->mlx_npages_req[i].mla_mtx, NULL,
-		    MUTEX_DRIVER, DDI_INTR_PRI(mlxp->mlx_intr_pri));
+		    MUTEX_DRIVER, DDI_INTR_PRI(mlxp->mlx_async_intr_pri));
 	}
 	mlxp->mlx_attach |= MLXCX_ATTACH_ASYNC_TQ;
 
@@ -2759,7 +2780,10 @@ mlxcx_attach(dev_info_t *dip, ddi_attach_cmd_t cmd)
 	 * Set up asynchronous event queue which handles control type events
 	 * like PAGE_REQUEST and CMD completion events.
 	 *
-	 * This will enable and arm the interrupt on EQ 0.
+	 * This will enable and arm the interrupt on EQ 0. Note that only page
+	 * reqs and cmd completions will be handled until we call
+	 * mlxcx_eq_set_attached further down (this way we don't need an extra
+	 * set of locks over the mlxcx_t sub-structs not allocated yet)
 	 */
 	if (!mlxcx_setup_async_eqs(mlxp)) {
 		goto err;
@@ -2870,12 +2894,27 @@ mlxcx_attach(dev_info_t *dip, ddi_attach_cmd_t cmd)
 	mlxp->mlx_attach |= MLXCX_ATTACH_CHKTIMERS;
 
 	/*
+	 * Some devices may not have a working temperature sensor; however,
+	 * there isn't a great way for us to know. We shouldn't fail attach if
+	 * this doesn't work.
+	 */
+	if (mlxcx_setup_sensors(mlxp)) {
+		mlxp->mlx_attach |= MLXCX_ATTACH_SENSORS;
+	}
+
+	/*
 	 * Finally, tell MAC that we exist!
 	 */
 	if (!mlxcx_register_mac(mlxp)) {
 		goto err;
 	}
 	mlxp->mlx_attach |= MLXCX_ATTACH_MAC_HDL;
+
+	/*
+	 * This tells the interrupt handlers they can start processing events
+	 * other than cmd completions and page requests.
+	 */
+	mlxcx_eq_set_attached(mlxp);
 
 	return (DDI_SUCCESS);
 
@@ -2913,7 +2952,6 @@ static struct dev_ops mlxcx_dev_ops = {
 	.devo_attach = mlxcx_attach,
 	.devo_detach = mlxcx_detach,
 	.devo_reset = nodev,
-	.devo_power = ddi_power,
 	.devo_quiesce = ddi_quiesce_not_supported,
 	.devo_cb_ops = &mlxcx_cb_ops
 };

@@ -46,7 +46,7 @@
 
 struct svm_softc;
 
-#define BIT(n)			(1ULL << n)
+#define	BIT(n)			(1ULL << n)
 
 /*
  * Secure Virtual Machine: AMD64 Programmer's Manual Vol2, Chapter 15
@@ -86,8 +86,8 @@ struct svm_softc;
 #define	VMCB_INTCPT_INVD		BIT(22)
 #define	VMCB_INTCPT_PAUSE		BIT(23)
 #define	VMCB_INTCPT_HLT			BIT(24)
-#define	VMCB_INTCPT_INVPG		BIT(25)
-#define	VMCB_INTCPT_INVPGA		BIT(26)
+#define	VMCB_INTCPT_INVLPG		BIT(25)
+#define	VMCB_INTCPT_INVLPGA		BIT(26)
 #define	VMCB_INTCPT_IO			BIT(27)
 #define	VMCB_INTCPT_MSR			BIT(28)
 #define	VMCB_INTCPT_TASK_SWITCH		BIT(29)
@@ -136,29 +136,50 @@ struct svm_softc;
 
 /* Event types that can be injected */
 #define	VMCB_EVENTINJ_TYPE_INTR		0
-#define	VMCB_EVENTINJ_TYPE_NMI		2
-#define	VMCB_EVENTINJ_TYPE_EXCEPTION	3
-#define	VMCB_EVENTINJ_TYPE_INTn		4
+#define	VMCB_EVENTINJ_TYPE_NMI		(2 << 8)
+#define	VMCB_EVENTINJ_TYPE_EXCEPTION	(3 << 8)
+#define	VMCB_EVENTINJ_TYPE_INTn		(4 << 8)
 
 /* VMCB exit code, APM vol2 Appendix C */
+#define	VMCB_EXIT_CR0_READ		0x00
+#define	VMCB_EXIT_CR15_READ		0x0f
+#define	VMCB_EXIT_CR0_WRITE		0x10
+#define	VMCB_EXIT_CR15_WRITE		0x1f
 #define	VMCB_EXIT_MC			0x52
 #define	VMCB_EXIT_INTR			0x60
 #define	VMCB_EXIT_NMI			0x61
 #define	VMCB_EXIT_VINTR			0x64
+#define	VMCB_EXIT_CR0_SEL_WRITE		0x65
 #define	VMCB_EXIT_PUSHF			0x70
 #define	VMCB_EXIT_POPF			0x71
 #define	VMCB_EXIT_CPUID			0x72
 #define	VMCB_EXIT_IRET			0x74
+#define	VMCB_EXIT_INVD			0x76
 #define	VMCB_EXIT_PAUSE			0x77
 #define	VMCB_EXIT_HLT			0x78
+#define	VMCB_EXIT_INVLPG		0x79
+#define	VMCB_EXIT_INVLPGA		0x7A
 #define	VMCB_EXIT_IO			0x7B
 #define	VMCB_EXIT_MSR			0x7C
 #define	VMCB_EXIT_SHUTDOWN		0x7F
+#define	VMCB_EXIT_VMRUN			0x80
+#define	VMCB_EXIT_VMMCALL		0x81
+#define	VMCB_EXIT_VMLOAD		0x82
 #define	VMCB_EXIT_VMSAVE		0x83
+#define	VMCB_EXIT_STGI			0x84
+#define	VMCB_EXIT_CLGI			0x85
+#define	VMCB_EXIT_SKINIT		0x86
 #define	VMCB_EXIT_MONITOR		0x8A
 #define	VMCB_EXIT_MWAIT			0x8B
 #define	VMCB_EXIT_NPF			0x400
 #define	VMCB_EXIT_INVALID		-1
+
+/*
+ * Move to/from CRx
+ * Bit definitions to decode EXITINFO1
+ */
+#define	VMCB_CRx_INFO1_GPR(x)		((x) & 0xf)
+#define	VMCB_CRx_INFO1_VALID(x)		((x) & (1UL << 63))
 
 /*
  * Nested page fault.
@@ -177,11 +198,11 @@ struct svm_softc;
  * EXITINTINFO, Interrupt exit info for all intrecepts.
  * Section 15.7.2, Intercepts during IDT Interrupt Delivery.
  */
-#define VMCB_EXITINTINFO_VECTOR(x)	((x) & 0xFF)
-#define VMCB_EXITINTINFO_TYPE(x)	(((x) >> 8) & 0x7)
-#define VMCB_EXITINTINFO_EC_VALID(x)	(((x) & BIT(11)) ? 1 : 0)
-#define VMCB_EXITINTINFO_VALID(x)	(((x) & BIT(31)) ? 1 : 0)
-#define VMCB_EXITINTINFO_EC(x)		(((x) >> 32) & 0xFFFFFFFF)
+#define	VMCB_EXITINTINFO_VECTOR(x)	((x) & 0xFF)
+#define	VMCB_EXITINTINFO_TYPE(x)	((x) & (0x7 << 8))
+#define	VMCB_EXITINTINFO_EC_VALID(x)	(((x) & BIT(11)) != 0)
+#define	VMCB_EXITINTINFO_VALID(x)	(((x) & BIT(31)) != 0)
+#define	VMCB_EXITINTINFO_EC(x)		(((x) >> 32) & 0xFFFFFFFF)
 
 /* Offset of various VMCB fields. */
 #define	VMCB_OFF_CTRL(x)		(x)
@@ -212,15 +233,6 @@ struct svm_softc;
 #define	VMCB_OFF_SYSENTER_EIP		VMCB_OFF_STATE(0x238)
 #define	VMCB_OFF_GUEST_PAT		VMCB_OFF_STATE(0x268)
 
-/*
- * Encode the VMCB offset and bytes that we want to read from VMCB.
- */
-#define	VMCB_ACCESS(o, w)		(0x80000000 | (((w) & 0xF) << 16) | \
-					((o) & 0xFFF))
-#define	VMCB_ACCESS_OK(v)               ((v) & 0x80000000 )
-#define	VMCB_ACCESS_BYTES(v)            (((v) >> 16) & 0xF)
-#define	VMCB_ACCESS_OFFSET(v)           ((v) & 0xFFF)
-
 #ifdef _KERNEL
 /* VMCB save state area segment format */
 struct vmcb_segment {
@@ -229,7 +241,11 @@ struct vmcb_segment {
 	uint32_t	limit;
 	uint64_t	base;
 };
-CTASSERT(sizeof(struct vmcb_segment) == 16);
+CTASSERT(sizeof (struct vmcb_segment) == 16);
+
+/* Convert to/from vmcb segment access to generic (VMX) access */
+#define	VMCB_ATTR2ACCESS(attr)	((((attr) & 0xf00) << 4) | ((attr) & 0xff))
+#define	VMCB_ACCESS2ATTR(acc)	((((acc) & 0xf000) >> 4) | ((acc) & 0xff))
 
 /* Code segment descriptor attribute in 12 bit format as saved by VMCB. */
 #define	VMCB_CS_ATTRIB_L		BIT(9)	/* Long mode. */
@@ -309,7 +325,7 @@ struct vmcb_ctrl {
 	uint64_t vmsa_pa;	/* 0x108: VMSA pointer */
 	uint64_t _pad8[94];	/* 0x110-0x3FF: Reserved */
 };
-CTASSERT(sizeof(struct vmcb_ctrl) == 1024);
+CTASSERT(sizeof (struct vmcb_ctrl) == 1024);
 CTASSERT(offsetof(struct vmcb_ctrl, vmsa_pa) == 0x108);
 
 struct vmcb_state {
@@ -357,21 +373,27 @@ struct vmcb_state {
 	uint64_t int_to;		/* 0x290 */
 	uint64_t _pad7[301];		/* Reserved up to end of VMCB */
 };
-CTASSERT(sizeof(struct vmcb_state) == 0xC00);
+CTASSERT(sizeof (struct vmcb_state) == 0xC00);
 CTASSERT(offsetof(struct vmcb_state, int_to) == 0x290);
 
+/*
+ * The VMCB aka Virtual Machine Control Block is a 4KB aligned page
+ * in memory that describes the virtual machine.
+ *
+ * The VMCB contains:
+ * - instructions or events in the guest to intercept
+ * - control bits that modify execution environment of the guest
+ * - guest processor state (e.g. general purpose registers)
+ */
 struct vmcb {
 	struct vmcb_ctrl ctrl;
 	struct vmcb_state state;
 };
-CTASSERT(sizeof(struct vmcb) == PAGE_SIZE);
+CTASSERT(sizeof (struct vmcb) == PAGE_SIZE);
 CTASSERT(offsetof(struct vmcb, state) == 0x400);
 
-int	vmcb_read(struct svm_softc *sc, int vcpu, int ident, uint64_t *retval);
-int	vmcb_write(struct svm_softc *sc, int vcpu, int ident, uint64_t val);
-int	vmcb_setdesc(void *arg, int vcpu, int ident, struct seg_desc *desc);
-int	vmcb_getdesc(void *arg, int vcpu, int ident, struct seg_desc *desc);
-int	vmcb_seg(struct vmcb *vmcb, int ident, struct vmcb_segment *seg);
+struct vmcb_segment *vmcb_segptr(struct vmcb *vmcb, int type);
+uint64_t *vmcb_regptr(struct vmcb *vmcb, int ident, uint32_t *dirtyp);
 
 #endif /* _KERNEL */
 #endif /* _VMCB_H_ */

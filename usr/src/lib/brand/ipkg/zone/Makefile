@@ -23,45 +23,19 @@
 # Copyright 2010 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
 #
-# Copyright 2013 Nexenta Systems, Inc.  All rights reserved.
-#
 
-PROGS=		attach clone detach fmri_compare image_install p2v \
-		pkgcreatezone poststate prestate support uninstall
-XMLDOCS=	config.xml platform.xml smf_disable.lst pkgrm.lst common.ksh
-USERFILES=	smf_disable.conf pkgrm.conf
-TEMPLATES=	SUNWipkg.xml
+TEMPLATES=	SUNWdefault.xml SUNWblank.xml
+XMLDOCS=	config.xml platform.xml
+CLOBBERFILES=	$(ROOTXMLDOCS) $(ROOTTEMPLATES)
 
-CLOBBERFILES=	$(ROOTPROGS) $(ROOTXMLDOCS) $(ROOTTEMPLATES) $(ETCUSER)
+all:
 
 include $(SRC)/cmd/Makefile.cmd
 include ../Makefile.ipkg
 
-.KEEP_STATE:
-
-all:	$(PROGS)
-
-# Our one .py file produces an empty .po file.
-# This is the easiest way to deal with it.
-GNUXGETFLAGS += --force-po
-
-POFILES =	$(PROGS:%=%.po) common.po
-POFILE =	ipkg_zone.po
-
-$(POFILE): $(POFILES)
-	$(RM) $@
-	$(CAT) $(POFILES) > $@
-
-install: $(PROGS) $(ROOTPROGS) $(ROOTXMLDOCS) $(ROOTTEMPLATES) $(ETCUSER)
-
+install: $(ROOTXMLDOCS) $(ROOTTEMPLATES)
 
 clean:
-	-$(RM) $(PROGS) $(POFILES) $(POFILE)
 
-support := LDLIBS += -lzonecfg
-
-support: support.c
-	$(LINK.c) -o $@ $@.c $(LDLIBS)
-	$(POST_PROCESS)
 
 include $(SRC)/cmd/Makefile.targ

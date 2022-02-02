@@ -10,8 +10,9 @@
  */
 
 /*
- * Copyright (c) 2020, the University of Queensland
+ * Copyright (c) 2021, the University of Queensland
  * Copyright 2020 RackTop Systems, Inc.
+ * Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
  */
 
 /*
@@ -421,7 +422,9 @@ mlxcx_update_link_state(mlxcx_t *mlxp, mlxcx_port_t *port)
 	default:
 		ls = LINK_STATE_UNKNOWN;
 	}
-	mac_link_update(mlxp->mlx_mac_hdl, ls);
+
+	if (mlxp->mlx_mac_hdl != NULL)
+		mac_link_update(mlxp->mlx_mac_hdl, ls);
 
 	mutex_exit(&port->mlp_mtx);
 }
@@ -761,10 +764,16 @@ mlxcx_intr_async(caddr_t arg, caddr_t arg2)
 		DTRACE_PROBE2(event, mlxcx_t *, mlxp, mlxcx_eventq_ent_t *,
 		    ent);
 
+		/*
+		 * Handle events which can be processed while we're still in
+		 * mlxcx_attach(). Everything on the mlxcx_t which these events
+		 * use must be allocated and set up prior to the call to
+		 * mlxcx_setup_async_eqs().
+		 */
 		switch (ent->mleqe_event_type) {
 		case MLXCX_EVENT_CMD_COMPLETION:
 			mlxcx_cmd_completion(mlxp, ent);
-			break;
+			continue;
 		case MLXCX_EVENT_PAGE_REQUEST:
 			func = from_be16(ent->mleqe_page_request.
 			    mled_page_request_function_id);
@@ -782,7 +791,7 @@ mlxcx_intr_async(caddr_t arg, caddr_t arg2)
 				mutex_exit(&param->mla_mtx);
 				mlxcx_warn(mlxp, "Unexpected page request "
 				    "whilst another is pending");
-				break;
+				continue;
 			}
 			param->mla_pages.mlp_npages =
 			    (int32_t)from_be32(ent->mleqe_page_request.
@@ -794,7 +803,20 @@ mlxcx_intr_async(caddr_t arg, caddr_t arg2)
 
 			taskq_dispatch_ent(mlxp->mlx_async_tq, mlxcx_pages_task,
 			    param, 0, &param->mla_tqe);
-			break;
+			continue;
+		}
+
+		/*
+		 * All other events should be ignored while in attach.
+		 */
+		mutex_enter(&mleq->mleq_mtx);
+		if (mleq->mleq_state & MLXCX_EQ_ATTACHING) {
+			mutex_exit(&mleq->mleq_mtx);
+			continue;
+		}
+		mutex_exit(&mleq->mleq_mtx);
+
+		switch (ent->mleqe_event_type) {
 		case MLXCX_EVENT_PORT_STATE:
 			portn = get_bits8(
 			    ent->mleqe_port_state.mled_port_state_port_num,
@@ -922,6 +944,20 @@ lookagain:
 			if (added)
 				goto lookagain;
 
+			/*
+			 * This check could go just after the lookagain
+			 * label, but it is a hot code path so we don't
+			 * want to unnecessarily grab a lock and check
+			 * a flag for a relatively rare event (the ring
+			 * being stopped).
+			 */
+			mutex_enter(&wq->mlwq_mtx);
+			if ((wq->mlwq_state & MLXCX_WQ_STARTED) == 0) {
+				mutex_exit(&wq->mlwq_mtx);
+				goto nextcq;
+			}
+			mutex_exit(&wq->mlwq_mtx);
+
 			buf = list_head(&mlcq->mlcq_buffers);
 			mlxcx_warn(mlxp, "got completion on CQ %x but "
 			    "no buffer matching wqe found: %x (first "
@@ -1040,17 +1076,30 @@ mlxcx_intr_n(caddr_t arg, caddr_t arg2)
 	}
 	mleq->mleq_badintrs = 0;
 
+	mutex_enter(&mleq->mleq_mtx);
 	ASSERT(mleq->mleq_state & MLXCX_EQ_ARMED);
 	mleq->mleq_state &= ~MLXCX_EQ_ARMED;
+#if defined(DEBUG)
+	/*
+	 * If we're still in mlxcx_attach and an intr_n fired, something really
+	 * weird is going on. This shouldn't happen in the absence of a driver
+	 * or firmware bug, so in the interests of minimizing branches in this
+	 * function this check is under DEBUG.
+	 */
+	if (mleq->mleq_state & MLXCX_EQ_ATTACHING) {
+		mutex_exit(&mleq->mleq_mtx);
+		mlxcx_warn(mlxp, "intr_n (%u) fired during attach, disabling "
+		    "vector", mleq->mleq_intr_index);
+		mlxcx_fm_ereport(mlxp, DDI_FM_DEVICE_INVAL_STATE);
+		ddi_fm_service_impact(mlxp->mlx_dip, DDI_SERVICE_LOST);
+		(void) ddi_intr_disable(mlxp->mlx_intr_handles[
+		    mleq->mleq_intr_index]);
+		goto done;
+	}
+#endif
+	mutex_exit(&mleq->mleq_mtx);
 
 	for (; ent != NULL; ent = mlxcx_eq_next(mleq)) {
-		if (ent->mleqe_event_type != MLXCX_EVENT_COMPLETION) {
-			mlxcx_fm_ereport(mlxp, DDI_FM_DEVICE_INVAL_STATE);
-			ddi_fm_service_impact(mlxp->mlx_dip, DDI_SERVICE_LOST);
-			(void) ddi_intr_disable(mlxp->mlx_intr_handles[
-			    mleq->mleq_intr_index]);
-			goto done;
-		}
 		ASSERT3U(ent->mleqe_event_type, ==, MLXCX_EVENT_COMPLETION);
 
 		probe.mlcq_num =
@@ -1060,7 +1109,7 @@ mlxcx_intr_n(caddr_t arg, caddr_t arg2)
 		mutex_exit(&mleq->mleq_mtx);
 
 		if (mlcq == NULL)
-			continue;
+			goto update_eq;
 
 		mlwq = mlcq->mlcq_wq;
 
@@ -1165,6 +1214,7 @@ mlxcx_intr_setup(mlxcx_t *mlxp)
 
 	ret = ddi_intr_get_supported_types(dip, &types);
 	if (ret != DDI_SUCCESS) {
+		mlxcx_warn(mlxp, "Failed to get supported interrupt types");
 		return (B_FALSE);
 	}
 
@@ -1176,15 +1226,21 @@ mlxcx_intr_setup(mlxcx_t *mlxp)
 
 	ret = ddi_intr_get_nintrs(dip, DDI_INTR_TYPE_MSIX, &nintrs);
 	if (ret != DDI_SUCCESS) {
+		mlxcx_warn(mlxp, "Failed to get number of interrupts");
 		return (B_FALSE);
 	}
 	if (nintrs < 2) {
-		mlxcx_warn(mlxp, "%d MSI-X interrupts available, but mlxcx "
+		mlxcx_warn(mlxp, "%d MSI-X interrupts supported, but mlxcx "
 		    "requires 2", nintrs);
 		return (B_FALSE);
 	}
 
 	ret = ddi_intr_get_navail(dip, DDI_INTR_TYPE_MSIX, &navail);
+	if (ret != DDI_SUCCESS) {
+		mlxcx_warn(mlxp,
+		    "Failed to get number of available interrupts");
+		return (B_FALSE);
+	}
 	if (navail < 2) {
 		mlxcx_warn(mlxp, "%d MSI-X interrupts available, but mlxcx "
 		    "requires 2", navail);
@@ -1203,10 +1259,14 @@ mlxcx_intr_setup(mlxcx_t *mlxp)
 	ret = ddi_intr_alloc(dip, mlxp->mlx_intr_handles, DDI_INTR_TYPE_MSIX,
 	    0, navail, &mlxp->mlx_intr_count, DDI_INTR_ALLOC_NORMAL);
 	if (ret != DDI_SUCCESS) {
+		mlxcx_warn(mlxp, "Failed to allocate %d interrupts", navail);
 		mlxcx_intr_teardown(mlxp);
 		return (B_FALSE);
 	}
 	if (mlxp->mlx_intr_count < mlxp->mlx_intr_cq0 + 1) {
+		mlxcx_warn(mlxp, "%d MSI-X interrupts allocated, but mlxcx "
+		    "requires %d", mlxp->mlx_intr_count,
+		    mlxp->mlx_intr_cq0 + 1);
 		mlxcx_intr_teardown(mlxp);
 		return (B_FALSE);
 	}
@@ -1214,8 +1274,27 @@ mlxcx_intr_setup(mlxcx_t *mlxp)
 
 	ret = ddi_intr_get_pri(mlxp->mlx_intr_handles[0], &mlxp->mlx_intr_pri);
 	if (ret != DDI_SUCCESS) {
+		mlxcx_warn(mlxp, "Failed to get interrupt priority");
 		mlxcx_intr_teardown(mlxp);
 		return (B_FALSE);
+	}
+
+	/*
+	 * Set the interrupt priority for the asynchronous handler higher
+	 * than the ring handlers. Some operations which issue commands,
+	 * and thus rely on the async interrupt handler for posting
+	 * completion, do so with a CQ mutex held. The CQ mutex is also
+	 * acquired during ring processing, so if the ring processing vector
+	 * happens to be assigned to the same CPU as the async vector
+	 * it can hold off the async interrupt thread and lead to a deadlock.
+	 * By assigning a higher priority to the async vector, it will
+	 * always be dispatched.
+	 */
+	mlxp->mlx_async_intr_pri = mlxp->mlx_intr_pri;
+	if (mlxp->mlx_async_intr_pri < LOCK_LEVEL) {
+		mlxp->mlx_async_intr_pri++;
+	} else {
+		mlxp->mlx_intr_pri--;
 	}
 
 	mlxp->mlx_eqs_size = mlxp->mlx_intr_count *
@@ -1227,8 +1306,11 @@ mlxcx_intr_setup(mlxcx_t *mlxp)
 	 * mutex and avl tree to be init'ed - so do it now.
 	 */
 	for (i = 0; i < mlxp->mlx_intr_count; ++i) {
+		uint_t pri = (i == 0) ? mlxp->mlx_async_intr_pri :
+		    mlxp->mlx_intr_pri;
+
 		mutex_init(&mlxp->mlx_eqs[i].mleq_mtx, NULL, MUTEX_DRIVER,
-		    DDI_INTR_PRI(mlxp->mlx_intr_pri));
+		    DDI_INTR_PRI(pri));
 		cv_init(&mlxp->mlx_eqs[i].mleq_cv, NULL, CV_DRIVER, NULL);
 
 		if (i < mlxp->mlx_intr_cq0)
@@ -1239,9 +1321,38 @@ mlxcx_intr_setup(mlxcx_t *mlxp)
 		    offsetof(mlxcx_completion_queue_t, mlcq_eq_entry));
 	}
 
+	while (mlxp->mlx_async_intr_pri > DDI_INTR_PRI_MIN) {
+		ret = ddi_intr_set_pri(mlxp->mlx_intr_handles[0],
+		    mlxp->mlx_async_intr_pri);
+		if (ret == DDI_SUCCESS)
+			break;
+		mlxcx_note(mlxp,
+		    "!Failed to set interrupt priority to %u for "
+		    "async interrupt vector", mlxp->mlx_async_intr_pri);
+		/*
+		 * If it was not possible to set the IPL for the async
+		 * interrupt to the desired value, then try a lower priority.
+		 * Some PSMs can only accommodate a limited number of vectors
+		 * at eatch priority level (or group of priority levels). Since
+		 * the async priority must be set higher than the ring
+		 * handlers, lower both. The ring handler priority is set
+		 * below.
+		 */
+		mlxp->mlx_async_intr_pri--;
+		mlxp->mlx_intr_pri--;
+	}
+
+	if (mlxp->mlx_async_intr_pri == DDI_INTR_PRI_MIN) {
+		mlxcx_warn(mlxp, "Failed to find an interrupt priority for "
+		    "async interrupt vector");
+		mlxcx_intr_teardown(mlxp);
+		return (B_FALSE);
+	}
+
 	ret = ddi_intr_add_handler(mlxp->mlx_intr_handles[0], mlxcx_intr_async,
 	    (caddr_t)mlxp, (caddr_t)&mlxp->mlx_eqs[0]);
 	if (ret != DDI_SUCCESS) {
+		mlxcx_warn(mlxp, "Failed to add async interrupt handler");
 		mlxcx_intr_teardown(mlxp);
 		return (B_FALSE);
 	}
@@ -1268,9 +1379,29 @@ mlxcx_intr_setup(mlxcx_t *mlxp)
 			eqt = MLXCX_EQ_TYPE_RX;
 		}
 
+		while (mlxp->mlx_intr_pri >= DDI_INTR_PRI_MIN) {
+			ret = ddi_intr_set_pri(mlxp->mlx_intr_handles[i],
+			    mlxp->mlx_intr_pri);
+			if (ret == DDI_SUCCESS)
+				break;
+			mlxcx_note(mlxp, "!Failed to set interrupt priority to "
+			    "%u for interrupt vector %d",
+			    mlxp->mlx_intr_pri, i);
+			mlxp->mlx_intr_pri--;
+		}
+		if (mlxp->mlx_intr_pri < DDI_INTR_PRI_MIN) {
+			mlxcx_warn(mlxp,
+			    "Failed to find an interrupt priority for "
+			    "interrupt vector %d", i);
+			mlxcx_intr_teardown(mlxp);
+			return (B_FALSE);
+		}
+
 		ret = ddi_intr_add_handler(mlxp->mlx_intr_handles[i],
 		    mlxcx_intr_n, (caddr_t)mlxp, (caddr_t)&mlxp->mlx_eqs[i]);
 		if (ret != DDI_SUCCESS) {
+			mlxcx_warn(mlxp, "Failed to add interrupt handler %d",
+			    i);
 			mlxcx_intr_teardown(mlxp);
 			return (B_FALSE);
 		}

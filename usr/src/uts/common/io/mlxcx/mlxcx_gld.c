@@ -10,7 +10,7 @@
  */
 
 /*
- * Copyright (c) 2020, the University of Queensland
+ * Copyright (c) 2021, the University of Queensland
  * Copyright 2020 RackTop Systems, Inc.
  */
 
@@ -809,19 +809,32 @@ mlxcx_mac_ring_stop(mac_ring_driver_t rh)
 
 
 	if (wq->mlwq_state & MLXCX_WQ_BUFFERS) {
+		list_t cq_buffers;
+
+		/*
+		 * Take the buffers away from the CQ. If the CQ is being
+		 * processed and the WQ has been stopped, a completion
+		 * which does not match to a buffer will be ignored.
+		 */
+		list_create(&cq_buffers, sizeof (mlxcx_buffer_t),
+		    offsetof(mlxcx_buffer_t, mlb_cq_entry));
+
+		list_move_tail(&cq_buffers, &cq->mlcq_buffers);
+
+		mutex_enter(&cq->mlcq_bufbmtx);
+		list_move_tail(&cq_buffers, &cq->mlcq_buffers_b);
+		mutex_exit(&cq->mlcq_bufbmtx);
+
+		cq->mlcq_bufcnt = 0;
+
 		mutex_exit(&wq->mlwq_mtx);
 		mutex_exit(&cq->mlcq_mtx);
 
 		/* Return any outstanding buffers to the free pool. */
-		while ((buf = list_remove_head(&cq->mlcq_buffers)) != NULL) {
+		while ((buf = list_remove_head(&cq_buffers)) != NULL) {
 			mlxcx_buf_return_chain(mlxp, buf, B_FALSE);
 		}
-		mutex_enter(&cq->mlcq_bufbmtx);
-		while ((buf = list_remove_head(&cq->mlcq_buffers_b)) != NULL) {
-			mlxcx_buf_return_chain(mlxp, buf, B_FALSE);
-		}
-		mutex_exit(&cq->mlcq_bufbmtx);
-		cq->mlcq_bufcnt = 0;
+		list_destroy(&cq_buffers);
 
 		s = wq->mlwq_bufs;
 		mutex_enter(&s->mlbs_mtx);
@@ -1480,6 +1493,8 @@ mlxcx_register_mac(mlxcx_t *mlxp)
 	VERIFY3U(mlxp->mlx_nports, ==, 1);
 	port = &mlxp->mlx_ports[0];
 
+	mutex_enter(&port->mlp_mtx);
+
 	mac->m_type_ident = MAC_PLUGIN_IDENT_ETHER;
 	mac->m_driver = mlxp;
 	mac->m_dip = mlxp->mlx_dip;
@@ -1496,6 +1511,8 @@ mlxcx_register_mac(mlxcx_t *mlxp)
 		mlxcx_warn(mlxp, "mac_register() returned %d", ret);
 	}
 	mac_free(mac);
+
+	mutex_exit(&port->mlp_mtx);
 
 	mlxcx_update_link_state(mlxp, port);
 
