@@ -140,6 +140,7 @@ SUBDIRS +=				\
 	libgss		\
 	libhotplug	\
 	libidmap	\
+	libidspace	\
 	libilb		\
 	libima		\
 	libinetsvc	\
@@ -188,6 +189,7 @@ SUBDIRS +=				\
 	libpthread	\
 	libraidcfg	\
 	librcm		\
+	librename	\
 	libreparse	\
 	libresolv	\
 	libresolv2	\
@@ -274,6 +276,7 @@ SUBDIRS +=				\
 	$($(MACH)_SUBDIRS)
 
 i386_SUBDIRS=		\
+	lib9p		\
 	libfdisk	\
 	libppt		\
 	libsaveargs	\
@@ -401,6 +404,7 @@ HDRSUBDIRS=				\
 	libgen		\
 	libgrubmgmt	\
 	libidmap	\
+	libidspace	\
 	libilb		\
 	libima		\
 	libinetsvc	\
@@ -436,6 +440,7 @@ HDRSUBDIRS=				\
 	libproc		\
 	libraidcfg	\
 	librcm		\
+	librename	\
 	libreparse	\
 	librestart	\
 	librpcsvc	\
@@ -489,6 +494,7 @@ HDRSUBDIRS=				\
 	$($(MACH)_HDRSUBDIRS)
 
 i386_HDRSUBDIRS=	\
+	lib9p		\
 	libfdisk	\
 	libppt		\
 	libsaveargs	\
@@ -581,6 +587,7 @@ gss_mechs/mech_krb5: libgss libresolv2 pkcs11 libkstat
 gss_mechs/mech_spnego: gss_mechs/mech_krb5
 hal:		dbusdeps
 krb5:		gss_mechs/mech_krb5 libtecla libldap5
+lib9p:		libsec libcustr
 libads:		libnsl
 libadt_jni:	libbsm
 libadutils:	libldap5 libresolv2
@@ -620,10 +627,12 @@ libfsmgt:	libkstat
 libgrubmgmt:	libdevinfo libzfs libfstyp libefi
 $(INTEL_BLD)libgrubmgmt: libfdisk
 libidmap:	libavl libuutil
+libidspace:	libumem
 libinetsvc:	libscf
 libinetutil:	libsocket
 libinstzones:	libzonecfg libcontract
-libipadm:	libinetutil libdlpi libdhcpagent libdladm libsecdb libdhcputil
+libipadm:	libinetutil libdlpi libdhcpagent libdladm libsecdb libdhcputil \
+		libcmdutils libipmp
 libipmi:	libm libnvpair libsocket libnsl
 libipmp:	libinetutil
 libipsecutil:	libtecla libtsol libkmf

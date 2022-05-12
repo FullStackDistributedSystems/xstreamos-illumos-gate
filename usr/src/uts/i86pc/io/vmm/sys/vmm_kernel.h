@@ -39,7 +39,7 @@
  *
  * Copyright 2015 Pluribus Networks Inc.
  * Copyright 2019 Joyent, Inc.
- * Copyright 2020 Oxide Computer Company
+ * Copyright 2021 Oxide Computer Company
  * Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
  */
 
@@ -48,6 +48,7 @@
 
 #include <sys/sdt.h>
 #include <x86/segments.h>
+#include <sys/vmm.h>
 
 SDT_PROVIDER_DECLARE(vmm);
 
@@ -61,16 +62,15 @@ struct vhpet;
 struct vioapic;
 struct vlapic;
 struct vmspace;
+struct vm_client;
 struct vm_object;
 struct vm_guest_paging;
-struct pmap;
 
-typedef int	(*vmm_init_func_t)(int ipinum);
+typedef int	(*vmm_init_func_t)(void);
 typedef int	(*vmm_cleanup_func_t)(void);
 typedef void	(*vmm_resume_func_t)(void);
-typedef void *	(*vmi_init_func_t)(struct vm *vm, struct pmap *pmap);
-typedef int	(*vmi_run_func_t)(void *vmi, int vcpu, uint64_t rip,
-    struct pmap *pmap);
+typedef void *	(*vmi_init_func_t)(struct vm *vm);
+typedef int	(*vmi_run_func_t)(void *vmi, int vcpu, uint64_t rip);
 typedef void	(*vmi_cleanup_func_t)(void *vmi);
 typedef int	(*vmi_get_register_t)(void *vmi, int vcpu, int num,
     uint64_t *retval);
@@ -82,14 +82,10 @@ typedef int	(*vmi_set_desc_t)(void *vmi, int vcpu, int num,
     const struct seg_desc *desc);
 typedef int	(*vmi_get_cap_t)(void *vmi, int vcpu, int num, int *retval);
 typedef int	(*vmi_set_cap_t)(void *vmi, int vcpu, int num, int val);
-typedef struct vmspace *(*vmi_vmspace_alloc)(vm_offset_t min, vm_offset_t max);
-typedef void	(*vmi_vmspace_free)(struct vmspace *vmspace);
 typedef struct vlapic *(*vmi_vlapic_init)(void *vmi, int vcpu);
 typedef void	(*vmi_vlapic_cleanup)(void *vmi, struct vlapic *vlapic);
-#ifndef __FreeBSD__
 typedef void	(*vmi_savectx)(void *vmi, int vcpu);
 typedef void	(*vmi_restorectx)(void *vmi, int vcpu);
-#endif
 
 struct vmm_ops {
 	vmm_init_func_t		init;		/* module wide initialization */
@@ -105,29 +101,30 @@ struct vmm_ops {
 	vmi_set_desc_t		vmsetdesc;
 	vmi_get_cap_t		vmgetcap;
 	vmi_set_cap_t		vmsetcap;
-	vmi_vmspace_alloc	vmspace_alloc;
-	vmi_vmspace_free	vmspace_free;
 	vmi_vlapic_init		vlapic_init;
 	vmi_vlapic_cleanup	vlapic_cleanup;
 
-#ifndef __FreeBSD__
 	vmi_savectx		vmsavectx;
 	vmi_restorectx		vmrestorectx;
-#endif
 };
 
 extern struct vmm_ops vmm_ops_intel;
 extern struct vmm_ops vmm_ops_amd;
 
-int vm_create(const char *name, struct vm **retvm);
+int vm_create(const char *name, uint64_t flags, struct vm **retvm);
 void vm_destroy(struct vm *vm);
-int vm_reinit(struct vm *vm);
+int vm_reinit(struct vm *vm, uint64_t);
 const char *vm_name(struct vm *vm);
 uint16_t vm_get_maxcpus(struct vm *vm);
 void vm_get_topology(struct vm *vm, uint16_t *sockets, uint16_t *cores,
     uint16_t *threads, uint16_t *maxcpus);
 int vm_set_topology(struct vm *vm, uint16_t sockets, uint16_t cores,
     uint16_t threads, uint16_t maxcpus);
+
+/*
+ * APIs that race against hardware.
+ */
+void vm_track_dirty_pages(struct vm *, uint64_t, size_t, uint8_t *);
 
 /*
  * APIs that modify the guest memory map require all vcpus to be frozen.
@@ -139,13 +136,8 @@ int vm_alloc_memseg(struct vm *vm, int ident, size_t len, bool sysmem);
 void vm_free_memseg(struct vm *vm, int ident);
 int vm_map_mmio(struct vm *vm, vm_paddr_t gpa, size_t len, vm_paddr_t hpa);
 int vm_unmap_mmio(struct vm *vm, vm_paddr_t gpa, size_t len);
-#ifdef __FreeBSD__
-int vm_assign_pptdev(struct vm *vm, int bus, int slot, int func);
-int vm_unassign_pptdev(struct vm *vm, int bus, int slot, int func);
-#else
 int vm_assign_pptdev(struct vm *vm, int pptfd);
 int vm_unassign_pptdev(struct vm *vm, int pptfd);
-#endif /* __FreeBSD__ */
 
 /*
  * APIs that inspect the guest memory map require only a *single* vcpu to
@@ -157,9 +149,6 @@ int vm_mmap_getnext(struct vm *vm, vm_paddr_t *gpa, int *segid,
 int vm_get_memseg(struct vm *vm, int ident, size_t *len, bool *sysmem,
     struct vm_object **objptr);
 vm_paddr_t vmm_sysmem_maxaddr(struct vm *vm);
-void *vm_gpa_hold(struct vm *, int vcpuid, vm_paddr_t gpa, size_t len,
-    int prot, void **cookie);
-void vm_gpa_release(void *cookie);
 bool vm_mem_allocated(struct vm *vm, int vcpuid, vm_paddr_t gpa);
 
 int vm_get_register(struct vm *vm, int vcpu, int reg, uint64_t *retval);
@@ -270,6 +259,7 @@ void *vcpu_stats(struct vm *vm, int vcpu);
 void vcpu_notify_event(struct vm *vm, int vcpuid);
 void vcpu_notify_event_type(struct vm *vm, int vcpuid, vcpu_notify_t);
 struct vmspace *vm_get_vmspace(struct vm *vm);
+struct vm_client *vm_get_vmclient(struct vm *vm, int vcpuid);
 struct vatpic *vm_atpic(struct vm *vm);
 struct vatpit *vm_atpit(struct vm *vm);
 struct vpmtmr *vm_pmtmr(struct vm *vm);
@@ -321,6 +311,7 @@ enum vm_reg_name vm_segment_name(int seg_encoding);
 struct vm_copyinfo {
 	uint64_t	gpa;
 	size_t		len;
+	int		prot;
 	void		*hva;
 	void		*cookie;
 };
@@ -341,9 +332,9 @@ struct vm_copyinfo {
  */
 int vm_copy_setup(struct vm *vm, int vcpuid, struct vm_guest_paging *paging,
     uint64_t gla, size_t len, int prot, struct vm_copyinfo *copyinfo,
-    int num_copyinfo, int *is_fault);
+    uint_t num_copyinfo, int *is_fault);
 void vm_copy_teardown(struct vm *vm, int vcpuid, struct vm_copyinfo *copyinfo,
-    int num_copyinfo);
+    uint_t num_copyinfo);
 void vm_copyin(struct vm *vm, int vcpuid, struct vm_copyinfo *copyinfo,
     void *kaddr, size_t len);
 void vm_copyout(struct vm *vm, int vcpuid, const void *kaddr,
@@ -380,8 +371,6 @@ enum event_inject_state {
 	EIS_REQ_EXIT	= (1 << 15),
 };
 
-#ifndef	__FreeBSD__
-
 void vmm_sol_glue_init(void);
 void vmm_sol_glue_cleanup(void);
 
@@ -407,6 +396,34 @@ int vm_ioport_detach(struct vm *vm, void **cookie, ioport_handler_t *old_func,
 int vm_ioport_hook(struct vm *, uint16_t, ioport_handler_t, void *, void **);
 void vm_ioport_unhook(struct vm *, void **);
 
-#endif /* __FreeBSD */
+enum vcpu_ustate {
+	VU_INIT = 0,	/* initialized but has not yet attempted to run */
+	VU_RUN,		/* running in guest context */
+	VU_IDLE,	/* idle (HLTed, wait-for-SIPI, etc) */
+	VU_EMU_KERN,	/* emulation performed in-kernel */
+	VU_EMU_USER,	/* emulation performed in userspace */
+	VU_SCHED,	/* off-cpu for interrupt, preempt, lock contention */
+	VU_MAX
+};
+
+void vcpu_ustate_change(struct vm *, int, enum vcpu_ustate);
+
+typedef struct vmm_kstats {
+	kstat_named_t	vk_name;
+} vmm_kstats_t;
+
+typedef struct vmm_vcpu_kstats {
+	kstat_named_t	vvk_vcpu;
+	kstat_named_t	vvk_time_init;
+	kstat_named_t	vvk_time_run;
+	kstat_named_t	vvk_time_idle;
+	kstat_named_t	vvk_time_emu_kern;
+	kstat_named_t	vvk_time_emu_user;
+	kstat_named_t	vvk_time_sched;
+} vmm_vcpu_kstats_t;
+
+#define	VMM_KSTAT_CLASS	"misc"
+
+int vmm_kstat_update_vcpu(struct kstat *, int);
 
 #endif /* _VMM_KERNEL_H_ */

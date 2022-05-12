@@ -51,6 +51,7 @@ ROOTBIN=		$(ROOT)/usr/bin
 ROOTLIB=		$(ROOT)/usr/lib
 ROOTLIBSVCBIN=		$(ROOT)/lib/svc/bin
 ROOTLIBSVCMETHOD=	$(ROOT)/lib/svc/method
+ROOTLIBHYPERV=		$(ROOT)/usr/lib/hyperv
 ROOTLIBXEN=		$(ROOT)/usr/lib/xen/bin
 ROOTLIBZONES=		$(ROOT)/lib/zones
 
@@ -271,10 +272,6 @@ ROOTSVCBIN=		$(SVCBIN:%=$(ROOTSVCBINDIR)/%)
 
 #
 
-# For programs that are installed in the root filesystem,
-# build $(ROOTFS_PROG) rather than $(PROG)
-$(ROOTFS_PROG) := LDFLAGS += -Wl,-I/lib/ld.so.1
-
 $(KRB5BIN)/%: %
 	$(INS.file)
 
@@ -345,6 +342,9 @@ $(ROOTETCZONES)/%: %
 	$(INS.file)
 
 $(ROOTLIBZONES)/%: %
+	$(INS.file)
+
+$(ROOTLIBHYPERV)/%: %
 	$(INS.file)
 
 $(ROOTLIBXEN)/%: %
@@ -492,3 +492,7 @@ CLOBBERFILES += $(XPG4) $(XPG6) $(DCFILE)
 # This flag is for programs which should not build a 32-bit binary
 sparc_64ONLY= $(POUND_SIGN)
 64ONLY=	 $($(MACH)_64ONLY)
+
+# For programs that are installed in the root filesystem,
+# build $(ROOTFS_PROG) rather than $(PROG)
+$(64ONLY)$(ROOTFS_PROG) := LDFLAGS += -Wl,-I/lib/ld.so.1

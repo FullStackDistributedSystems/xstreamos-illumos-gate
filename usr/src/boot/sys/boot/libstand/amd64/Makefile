@@ -14,25 +14,36 @@
 # Copyright 2016 RackTop Systems.
 #
 
-MACHINE=	$(MACH64)
-LIBRARY=	libstand.a
+include $(SRC)/Makefile.master
 
-all install:    $(LIBRARY)
+MACHINE=	$(MACH64)
+DYNLIB=		libstand_pics.a
+
+all install:    $(DYNLIB)
 
 include ../Makefile.com
 
+ASFLAGS =	$(amd64_AS_XARCH) -I$(SRC)/uts/common -D_ASM
 CFLAGS +=	-m64 $(CFLAGS64)
 CCASFLAGS +=	-m64
 
-CLEANFILES += x86
-
 # _setjmp/_longjmp
 SRCS += $(SASRC)/amd64/_setjmp.S
-OBJS += _setjmp.o
+OBJECTS += _setjmp.o
+SRCS += sha1-x86_64.s
+OBJECTS += sha1-x86_64.o
 
-$(LIBRARY): $(SRCS) $(OBJS)
+SRCS += $(SASRC)/x86/hypervisor.c
+OBJECTS += hypervisor.o
 
-$(OBJS): machine x86
+CLEANFILES += sha1-x86_64.s
 
-%.o: $(SASRC)/amd64/%.S
-	$(COMPILE.S) $<
+pics/%.o: $(SASRC)/amd64/%.S
+	$(COMPILE.S) -o $@ $<
+
+pics/%.o: $(SASRC)/x86/%.c
+	$(COMPILE.c) -o $@ $<
+
+include $(SRC)/boot/sys/boot/Makefile.lib
+
+FRC:

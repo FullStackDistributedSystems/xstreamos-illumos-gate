@@ -36,12 +36,11 @@ __FBSDID("$FreeBSD$");
 #include <sys/systm.h>
 #include <sys/malloc.h>
 
-#include <vm/vm.h>
-#include <vm/pmap.h>
-
 #include <dev/pci/pcireg.h>
 
 #include <machine/vmparam.h>
+#include <sys/vmm_vm.h>
+
 #include <contrib/dev/acpica/include/acpi.h>
 
 #include <sys/sunndi.h>
@@ -255,7 +254,7 @@ vtd_wbflush(struct vtdmap *vtdmap)
 {
 
 	if (VTD_ECAP_COHERENCY(vtdmap->ext_cap) == 0)
-		pmap_invalidate_cache();
+		invalidate_cache_all();
 
 	if (VTD_CAP_RWBF(vtdmap->cap)) {
 		vtdmap->gcr = VTD_GCR_WBF;
@@ -863,16 +862,16 @@ vtd_destroy_domain(void *arg)
 	free(dom, M_VTD);
 }
 
-struct iommu_ops iommu_ops_intel = {
-	vtd_init,
-	vtd_cleanup,
-	vtd_enable,
-	vtd_disable,
-	vtd_create_domain,
-	vtd_destroy_domain,
-	vtd_create_mapping,
-	vtd_remove_mapping,
-	vtd_add_device,
-	vtd_remove_device,
-	vtd_invalidate_tlb,
+const struct iommu_ops iommu_ops_intel = {
+	.init = vtd_init,
+	.cleanup = vtd_cleanup,
+	.enable = vtd_enable,
+	.disable = vtd_disable,
+	.create_domain = vtd_create_domain,
+	.destroy_domain = vtd_destroy_domain,
+	.create_mapping = vtd_create_mapping,
+	.remove_mapping = vtd_remove_mapping,
+	.add_device = vtd_add_device,
+	.remove_device = vtd_remove_device,
+	.invalidate_tlb = vtd_invalidate_tlb,
 };

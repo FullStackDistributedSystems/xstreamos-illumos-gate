@@ -65,10 +65,6 @@ __FBSDID("$FreeBSD$");
 #include "x86.h"
 
 SYSCTL_DECL(_hw_vmm);
-#ifdef __FreeBSD__
-static SYSCTL_NODE(_hw_vmm, OID_AUTO, topology, CTLFLAG_RD | CTLFLAG_MPSAFE, 0,
-    NULL);
-#endif
 
 #define	CPUID_VM_HIGH		0x40000000
 
@@ -467,10 +463,12 @@ x86_emulate_cpuid(struct vm *vm, int vcpu_id, uint64_t *rax, uint64_t *rbx,
 				 */
 				regs[1] &= (CPUID_STDEXT_FSGSBASE |
 				    CPUID_STDEXT_BMI1 | CPUID_STDEXT_HLE |
-				    CPUID_STDEXT_AVX2 | CPUID_STDEXT_BMI2 |
+				    CPUID_STDEXT_AVX2 | CPUID_STDEXT_SMEP |
+				    CPUID_STDEXT_BMI2 |
 				    CPUID_STDEXT_ERMS | CPUID_STDEXT_RTM |
 				    CPUID_STDEXT_AVX512F |
 				    CPUID_STDEXT_RDSEED |
+				    CPUID_STDEXT_SMAP |
 				    CPUID_STDEXT_AVX512PF |
 				    CPUID_STDEXT_AVX512ER |
 				    CPUID_STDEXT_AVX512CD | CPUID_STDEXT_SHA);

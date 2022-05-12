@@ -39,12 +39,26 @@
  *
  * Copyright 2015 Pluribus Networks Inc.
  * Copyright 2019 Joyent, Inc.
+ * Copyright 2021 Oxide Computer Company
  */
 
 #ifndef	_VMM_DEV_H_
 #define	_VMM_DEV_H_
 
 #include <machine/vmm.h>
+
+#include <sys/param.h>
+#include <sys/cpuset.h>
+
+struct vm_create_req {
+	char		name[VM_MAX_NAMELEN];
+	uint64_t	flags;
+};
+
+
+struct vm_destroy_req {
+	char		name[VM_MAX_NAMELEN];
+};
 
 struct vm_memmap {
 	vm_paddr_t	gpa;
@@ -66,7 +80,7 @@ struct vm_munmap {
 struct vm_memseg {
 	int		segid;
 	size_t		len;
-	char		name[SPECNAMELEN + 1];
+	char		name[VM_MAX_SEG_NAMELEN];
 };
 
 struct vm_register {
@@ -165,11 +179,7 @@ struct vm_nmi {
 	int		cpuid;
 };
 
-#ifdef __FreeBSD__
-#define	MAX_VM_STATS	64
-#else
 #define	MAX_VM_STATS	(64 + VM_MAXCPU)
-#endif
 
 struct vm_stats {
 	int		cpuid;				/* in */
@@ -200,6 +210,12 @@ struct vm_hpet_cap {
 
 struct vm_suspend {
 	enum vm_suspend_how how;
+};
+
+#define	VM_REINIT_F_FORCE_SUSPEND	(1 << 0)
+
+struct vm_reinit {
+	uint64_t	flags;
 };
 
 struct vm_gla2gpa {
@@ -286,6 +302,35 @@ struct vm_run_state {
 	uint8_t		_pad[3];
 };
 
+struct vmm_resv_query {
+	size_t	vrq_free_sz;
+	size_t	vrq_alloc_sz;
+	size_t	vrq_alloc_transient_sz;
+	size_t	vrq_limit;
+};
+
+/*
+ * struct vmm_dirty_tracker is used for tracking dirty guest pages during
+ * e.g. live migration.
+ *
+ * - The `vdt_start_gpa` field specifies the offset from the beginning of
+ *   guest physical memory to track;
+ * - `vdt_pfns` points to a bit vector indexed by guest PFN relative to the
+ *   given start address.  Each bit indicates whether the given guest page
+ *   is dirty or not.
+ * - `vdt_pfns_len` specifies the length of the of the guest physical memory
+ *   region in bytes.  It also de facto bounds the range of guest addresses
+ *   we will examine on any one `VM_TRACK_DIRTY_PAGES` ioctl().  If the
+ *   range of the bit vector spans an unallocated region (or extends beyond
+ *   the end of the guest physical address space) the corresponding bits in
+ *   `vdt_pfns` will be zeroed.
+ */
+struct vmm_dirty_tracker {
+	uint64_t	vdt_start_gpa;
+	size_t		vdt_len;	/* length of region */
+	void		*vdt_pfns;	/* bit vector of dirty bits */
+};
+
 #define	VMMCTL_IOC_BASE		(('V' << 16) | ('M' << 8))
 #define	VMM_IOC_BASE		(('v' << 16) | ('m' << 8))
 #define	VMM_LOCK_IOC_BASE	(('v' << 16) | ('l' << 8))
@@ -295,6 +340,10 @@ struct vm_run_state {
 #define	VMM_CREATE_VM		(VMMCTL_IOC_BASE | 0x01)
 #define	VMM_DESTROY_VM		(VMMCTL_IOC_BASE | 0x02)
 #define	VMM_VM_SUPPORTED	(VMMCTL_IOC_BASE | 0x03)
+
+#define	VMM_RESV_QUERY		(VMMCTL_IOC_BASE | 0x10)
+#define	VMM_RESV_ADD		(VMMCTL_IOC_BASE | 0x11)
+#define	VMM_RESV_REMOVE		(VMMCTL_IOC_BASE | 0x12)
 
 /* Operations performed in the context of a given vCPU */
 #define	VM_RUN				(VMM_CPU_IOC_BASE | 0x01)
@@ -376,6 +425,9 @@ struct vm_run_state {
 #define	VM_RESUME_CPU			(VMM_IOC_BASE | 0x1e)
 
 #define	VM_PPTDEV_DISABLE_MSIX		(VMM_IOC_BASE | 0x1f)
+
+/* Note: forces a barrier on a flush operation before returning. */
+#define	VM_TRACK_DIRTY_PAGES		(VMM_IOC_BASE | 0x20)
 
 #define	VM_DEVMEM_GETOFFSET		(VMM_IOC_BASE | 0xff)
 

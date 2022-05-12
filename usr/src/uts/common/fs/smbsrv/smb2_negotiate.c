@@ -11,7 +11,7 @@
 
 /*
  * Copyright 2019 Nexenta Systems, Inc.  All rights reserved.
- * Copyright 2020 RackTop Systems, Inc.
+ * Copyright 2021 RackTop Systems, Inc.
  */
 
 /*
@@ -219,11 +219,13 @@ typedef struct smb2_negotiate_ctx {
 #define	SMB31_PREAUTH_CTX_SALT_LEN	32
 
 /*
- * SMB 3.1.1 specifies the only hashing algorithm - SHA-512 and
+ * SMB 3.1.1 originally specified a single hashing algorithm - SHA-512 - and
  * two encryption ones - AES-128-CCM and AES-128-GCM.
+ * Windows Server 2022 and Windows 11 introduced two further encryption
+ * algorithms - AES-256-CCM and AES-256-GCM.
  */
 #define	MAX_HASHID_NUM	(1)
-#define	MAX_CIPHER_NUM	(2)
+#define	MAX_CIPHER_NUM	(4)
 
 typedef struct smb2_preauth_integrity_caps {
 	uint16_t	picap_hash_count;
@@ -267,6 +269,9 @@ typedef struct smb2_neg_ctxs {
 #define	STATUS_PREAUTH_HASH_OVERLAP \
     STATUS_SMB_NO_PREAUTH_INEGRITY_HASH_OVERLAP
 
+#define	SMB3_CIPHER_ENABLED(c, f)	((c) <= SMB3_CIPHER_MAX && \
+    SMB3_CIPHER_BIT(c) & (f))
+
 /*
  * This function should be called only for dialect >= 0x311
  * Negotiate context list should contain exactly one
@@ -281,10 +286,9 @@ smb31_decode_neg_ctxs(smb_request_t *sr, smb2_neg_ctxs_t *neg_ctxs)
 	smb_session_t *s = sr->session;
 	smb2_preauth_caps_t *picap = &neg_ctxs->preauth_ctx.preauth_caps;
 	smb2_encrypt_caps_t *encap = &neg_ctxs->encrypt_ctx.encrypt_caps;
-	boolean_t preauth_sha512_enabled = B_FALSE;
-	boolean_t encrypt_ccm_enabled = B_FALSE;
-	boolean_t encrypt_gcm_enabled = B_FALSE;
-	uint16_t cipher = sr->sr_server->sv_cfg.skc_encrypt_cipher;
+	boolean_t found_sha512 = B_FALSE;
+	boolean_t found_cipher = B_FALSE;
+	uint16_t ciphers = sr->sr_server->sv_cfg.skc_encrypt_cipher;
 	uint32_t status = 0;
 	int32_t skip;
 	int found_preauth_ctx = 0;
@@ -418,7 +422,7 @@ smb31_decode_neg_ctxs(smb_request_t *sr, smb2_neg_ctxs_t *neg_ctxs)
 			}
 
 			if (picap->picap_hash_id == SMB3_HASH_SHA512)
-				preauth_sha512_enabled = B_TRUE;
+				found_sha512 = B_TRUE;
 			break;
 		case SMB2_ENCRYPTION_CAPS:
 			memcpy(&neg_ctxs->preauth_ctx.neg_ctx, &neg_ctx,
@@ -450,16 +454,17 @@ smb31_decode_neg_ctxs(smb_request_t *sr, smb2_neg_ctxs_t *neg_ctxs)
 				goto errout;
 			}
 
+			/*
+			 * Select the first enabled cipher.
+			 * Client should list more prioritized ciphers first.
+			 */
 			for (int k = 0; k < encap->encap_cipher_count; k++) {
-				switch (encap->encap_cipher_ids[k]) {
-				case SMB3_CIPHER_AES128_CCM:
-					encrypt_ccm_enabled = B_TRUE;
+				uint16_t c = encap->encap_cipher_ids[k];
+
+				if (SMB3_CIPHER_ENABLED(c, ciphers)) {
+					s->smb31_enc_cipherid = c;
+					found_cipher = B_TRUE;
 					break;
-				case SMB3_CIPHER_AES128_GCM:
-					encrypt_gcm_enabled = B_TRUE;
-					break;
-				default:
-					;
 				}
 			}
 			break;
@@ -477,29 +482,15 @@ smb31_decode_neg_ctxs(smb_request_t *sr, smb2_neg_ctxs_t *neg_ctxs)
 		goto errout;
 	}
 
-	if (!preauth_sha512_enabled) {
+	if (!found_sha512) {
 		status = STATUS_PREAUTH_HASH_OVERLAP;
 		goto errout;
 	}
 
 	s->smb31_preauth_hashid = SMB3_HASH_SHA512;
 
-	switch (cipher) {
-	case SMB3_CIPHER_AES128_GCM:
-		if (encrypt_gcm_enabled) {
-			s->smb31_enc_cipherid = cipher;
-			break;
-		}
-		/* FALLTHROUGH */
-	case SMB3_CIPHER_AES128_CCM:
-		if (encrypt_ccm_enabled) {
-			s->smb31_enc_cipherid = cipher;
-			break;
-		}
-		/* FALLTHROUGH */
-	default:
+	if (!found_cipher)
 		s->smb31_enc_cipherid = 0;
-	}
 
 errout:
 	return (status);
@@ -884,7 +875,6 @@ smb2_nego_validate(smb_request_t *sr, smb_fsctl_t *fsctl)
 	/*
 	 * The spec. says to parse the VALIDATE_NEGOTIATE_INFO here
 	 * and verify that the original negotiate was not modified.
-	 * The request MUST be signed, and we MUST validate the signature.
 	 *
 	 * One interesting requirement here is that we MUST reply
 	 * with exactly the same information as we returned in our
@@ -901,7 +891,13 @@ smb2_nego_validate(smb_request_t *sr, smb_fsctl_t *fsctl)
 	if (s->dialect >= SMB_VERS_3_11)
 		goto drop;
 
-	if ((sr->smb2_hdr_flags & SMB2_FLAGS_SIGNED) == 0)
+	/*
+	 * [MS-SMB2] 3.3.5.2.4 Verifying the Signature
+	 *
+	 * If the dialect is SMB3 and the message was successfully
+	 * decrypted we MUST skip processing of the signature.
+	 */
+	if (!sr->encrypted && (sr->smb2_hdr_flags & SMB2_FLAGS_SIGNED) == 0)
 		goto drop;
 
 	if (fsctl->InputCount < 24)

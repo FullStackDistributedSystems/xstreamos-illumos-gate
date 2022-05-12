@@ -37,7 +37,7 @@
  * http://www.illumos.org/license/CDDL.
  *
  * Copyright 2018 Joyent, Inc.
- * Copyright 2020 Oxide Computer Company
+ * Copyright 2021 Oxide Computer Company
  */
 
 #include <sys/cdefs.h>
@@ -45,30 +45,24 @@ __FBSDID("$FreeBSD$");
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/smp.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/pcpu.h>
 #include <sys/proc.h>
 #include <sys/sysctl.h>
 
-#ifndef __FreeBSD__
 #include <sys/x86_archext.h>
 #include <sys/trap.h>
-#endif
-
-#include <vm/vm.h>
-#include <vm/pmap.h>
 
 #include <machine/cpufunc.h>
 #include <machine/psl.h>
 #include <machine/md_var.h>
 #include <machine/reg.h>
 #include <machine/specialreg.h>
-#include <machine/smp.h>
 #include <machine/vmm.h>
 #include <machine/vmm_dev.h>
 #include <sys/vmm_instruction_emul.h>
+#include <sys/vmm_vm.h>
 
 #include "vmm_lapic.h"
 #include "vmm_stat.h"
@@ -83,7 +77,6 @@ __FBSDID("$FreeBSD$");
 #include "svm.h"
 #include "svm_softc.h"
 #include "svm_msr.h"
-#include "npt.h"
 
 SYSCTL_DECL(_hw_vmm);
 SYSCTL_NODE(_hw_vmm, OID_AUTO, svm, CTLFLAG_RW | CTLFLAG_MPSAFE, NULL,
@@ -147,150 +140,6 @@ decode_assist(void)
 	return ((svm_feature & AMD_CPUID_SVM_DECODE_ASSIST) != 0);
 }
 
-#ifdef __FreeBSD__
-static void
-svm_disable(void *arg __unused)
-{
-	uint64_t efer;
-
-	efer = rdmsr(MSR_EFER);
-	efer &= ~EFER_SVM;
-	wrmsr(MSR_EFER, efer);
-}
-
-/*
- * Disable SVM on all CPUs.
- */
-static int
-svm_cleanup(void)
-{
-
-	smp_rendezvous(NULL, svm_disable, NULL, NULL);
-	return (0);
-}
-
-/*
- * Verify that all the features required by bhyve are available.
- */
-static int
-check_svm_features(void)
-{
-	uint_t regs[4];
-
-	/* CPUID Fn8000_000A is for SVM */
-	do_cpuid(0x8000000A, regs);
-	svm_feature &= regs[3];
-
-	/*
-	 * The number of ASIDs can be configured to be less than what is
-	 * supported by the hardware but not more.
-	 */
-	if (nasid == 0 || nasid > regs[1])
-		nasid = regs[1];
-	KASSERT(nasid > 1, ("Insufficient ASIDs for guests: %x", nasid));
-
-	/* bhyve requires the Nested Paging feature */
-	if (!(svm_feature & AMD_CPUID_SVM_NP)) {
-		printf("SVM: Nested Paging feature not available.\n");
-		return (ENXIO);
-	}
-
-	/* bhyve requires the NRIP Save feature */
-	if (!(svm_feature & AMD_CPUID_SVM_NRIP_SAVE)) {
-		printf("SVM: NRIP Save feature not available.\n");
-		return (ENXIO);
-	}
-
-	return (0);
-}
-
-static void
-svm_enable(void *arg __unused)
-{
-	uint64_t efer;
-
-	efer = rdmsr(MSR_EFER);
-	efer |= EFER_SVM;
-	wrmsr(MSR_EFER, efer);
-
-	wrmsr(MSR_VM_HSAVE_PA, vtophys(hsave[curcpu]));
-}
-
-/*
- * Return 1 if SVM is enabled on this processor and 0 otherwise.
- */
-static int
-svm_available(void)
-{
-	uint64_t msr;
-
-#ifdef __FreeBSD__
-	/* Section 15.4 Enabling SVM from APM2. */
-	if ((amd_feature2 & AMDID2_SVM) == 0) {
-		printf("SVM: not available.\n");
-		return (0);
-	}
-#else
-	if (!is_x86_feature(x86_featureset, X86FSET_SVM)) {
-		cmn_err(CE_WARN, "processor does not support SVM operation\n");
-		return (0);
-	}
-#endif
-
-	msr = rdmsr(MSR_VM_CR);
-	if ((msr & VM_CR_SVMDIS) != 0) {
-#ifdef __FreeBSD__
-		printf("SVM: disabled by BIOS.\n");
-#else
-		cmn_err(CE_WARN, "SVM disabled by BIOS.\n");
-#endif
-		return (0);
-	}
-
-	return (1);
-}
-
-static int
-svm_init(int ipinum)
-{
-	int error, cpu;
-
-	if (!svm_available())
-		return (ENXIO);
-
-	error = check_svm_features();
-	if (error)
-		return (error);
-
-	vmcb_clean &= VMCB_CACHE_DEFAULT;
-
-	for (cpu = 0; cpu < MAXCPU; cpu++) {
-		/*
-		 * Initialize the host ASIDs to their "highest" valid values.
-		 *
-		 * The next ASID allocation will rollover both 'gen' and 'num'
-		 * and start off the sequence at {1,1}.
-		 */
-		asid[cpu].gen = ~0UL;
-		asid[cpu].num = nasid - 1;
-	}
-
-	svm_msr_init();
-	svm_npt_init(ipinum);
-
-	/* Enable SVM on all CPUs */
-	smp_rendezvous(NULL, svm_enable, NULL, NULL);
-
-	return (0);
-}
-
-static void
-svm_restore(void)
-{
-
-	svm_enable(NULL);
-}
-#else /* __FreeBSD__ */
 static int
 svm_cleanup(void)
 {
@@ -299,12 +148,11 @@ svm_cleanup(void)
 }
 
 static int
-svm_init(int ipinum)
+svm_init(void)
 {
 	vmcb_clean &= VMCB_CACHE_DEFAULT;
 
 	svm_msr_init();
-	svm_npt_init(ipinum);
 
 	return (0);
 }
@@ -314,7 +162,6 @@ svm_restore(void)
 {
 	/* No-op on illumos */
 }
-#endif /* __FreeBSD__ */
 
 /* Pentium compatible MSRs */
 #define	MSR_PENTIUM_START	0
@@ -574,7 +421,7 @@ vmcb_init(struct svm_softc *sc, int vcpu, uint64_t iopm_base_pa,
  * Initialize a virtual machine.
  */
 static void *
-svm_vminit(struct vm *vm, pmap_t pmap)
+svm_vminit(struct vm *vm)
 {
 	struct svm_softc *svm_sc;
 	struct svm_vcpu *vcpu;
@@ -596,7 +443,7 @@ svm_vminit(struct vm *vm, pmap_t pmap)
 		panic("contigmalloc of SVM IO bitmap failed");
 
 	svm_sc->vm = vm;
-	svm_sc->nptp = (vm_offset_t)vtophys(pmap->pm_pml4);
+	svm_sc->nptp = vmspace_table_root(vm_get_vmspace(vm));
 
 	/*
 	 * Intercept read and write accesses to all MSRs.
@@ -814,11 +661,11 @@ npf_fault_type(uint64_t exitinfo1)
 {
 
 	if (exitinfo1 & VMCB_NPF_INFO1_W)
-		return (VM_PROT_WRITE);
+		return (PROT_WRITE);
 	else if (exitinfo1 & VMCB_NPF_INFO1_ID)
-		return (VM_PROT_EXECUTE);
+		return (PROT_EXEC);
 	else
-		return (VM_PROT_READ);
+		return (PROT_READ);
 }
 
 static bool
@@ -1408,11 +1255,7 @@ svm_vmexit(struct svm_softc *svm_sc, int vcpu, struct vm_exit *vmexit)
 	struct svm_regctx *ctx;
 	uint64_t code, info1, info2, val;
 	uint32_t eax, ecx, edx;
-#ifdef __FreeBSD__
-	int error, errcode_valid, handled, idtvec, reflect;
-#else
 	int error, errcode_valid = 0, handled, idtvec, reflect;
-#endif
 
 	ctx = svm_get_guest_regctx(svm_sc, vcpu);
 	vmcb = svm_get_vmcb(svm_sc, vcpu);
@@ -1503,7 +1346,14 @@ svm_vmexit(struct svm_softc *svm_sc, int vcpu, struct vm_exit *vmexit)
 		vmm_stat_incr(svm_sc->vm, vcpu, VMEXIT_EXTINT, 1);
 		handled = 1;
 		break;
-	case VMCB_EXIT_NMI:	/* external NMI */
+	case VMCB_EXIT_NMI:
+	case VMCB_EXIT_SMI:
+	case VMCB_EXIT_INIT:
+		/*
+		 * For external NMI/SMI and physical INIT interrupts, simply
+		 * continue execution, as those host events will be handled by
+		 * the physical CPU.
+		 */
 		handled = 1;
 		break;
 	case 0x40 ... 0x5F:
@@ -1518,11 +1368,7 @@ svm_vmexit(struct svm_softc *svm_sc, int vcpu, struct vm_exit *vmexit)
 			 */
 			reflect = 0;
 			VCPU_CTR0(svm_sc->vm, vcpu, "Vectoring to MCE handler");
-#ifdef __FreeBSD__
-			__asm __volatile("int $18");
-#else
 			vmm_call_trap(T_MCE);
-#endif
 			break;
 		case IDT_PF:
 			error = svm_setreg(svm_sc, vcpu, VM_REG_GUEST_CR2,
@@ -1925,128 +1771,22 @@ svm_inject_recheck(struct svm_softc *sc, int vcpu,
 }
 
 
-#ifdef __FreeBSD__
 static void
-check_asid(struct svm_softc *sc, int vcpuid, pmap_t pmap, uint_t thiscpu)
-{
-	struct svm_vcpu *vcpustate;
-	struct vmcb_ctrl *ctrl;
-	long eptgen;
-	bool alloc_asid;
-
-	KASSERT(CPU_ISSET(thiscpu, &pmap->pm_active), ("%s: nested pmap not "
-	    "active on cpu %u", __func__, thiscpu));
-
-	vcpustate = svm_get_vcpu(sc, vcpuid);
-	ctrl = svm_get_vmcb_ctrl(sc, vcpuid);
-
-	/*
-	 * The TLB entries associated with the vcpu's ASID are not valid
-	 * if either of the following conditions is true:
-	 *
-	 * 1. The vcpu's ASID generation is different than the host cpu's
-	 *    ASID generation. This happens when the vcpu migrates to a new
-	 *    host cpu. It can also happen when the number of vcpus executing
-	 *    on a host cpu is greater than the number of ASIDs available.
-	 *
-	 * 2. The pmap generation number is different than the value cached in
-	 *    the 'vcpustate'. This happens when the host invalidates pages
-	 *    belonging to the guest.
-	 *
-	 *	asidgen		eptgen		Action
-	 *	mismatch	mismatch
-	 *	0		0		(a)
-	 *	0		1		(b1) or (b2)
-	 *	1		0		(c)
-	 *	1		1		(d)
-	 *
-	 * (a)	There is no mismatch in eptgen or ASID generation and therefore
-	 *	no further action is needed.
-	 *
-	 * (b1)	If the cpu supports FlushByAsid then the vcpu's ASID is
-	 *	retained and the TLB entries associated with this ASID
-	 *	are flushed by VMRUN.
-	 *
-	 * (b2)	If the cpu does not support FlushByAsid then a new ASID is
-	 *	allocated.
-	 *
-	 * (c)	A new ASID is allocated.
-	 *
-	 * (d)	A new ASID is allocated.
-	 */
-
-	alloc_asid = false;
-	eptgen = pmap->pm_eptgen;
-	ctrl->tlb_ctrl = VMCB_TLB_FLUSH_NOTHING;
-
-	if (vcpustate->asid.gen != asid[thiscpu].gen) {
-		alloc_asid = true;	/* (c) and (d) */
-	} else if (vcpustate->eptgen != eptgen) {
-		if (flush_by_asid())
-			ctrl->tlb_ctrl = VMCB_TLB_FLUSH_GUEST;	/* (b1) */
-		else
-			alloc_asid = true;			/* (b2) */
-	} else {
-		/*
-		 * This is the common case (a).
-		 */
-		KASSERT(!alloc_asid, ("ASID allocation not necessary"));
-		KASSERT(ctrl->tlb_ctrl == VMCB_TLB_FLUSH_NOTHING,
-		    ("Invalid VMCB tlb_ctrl: %x", ctrl->tlb_ctrl));
-	}
-
-	if (alloc_asid) {
-		if (++asid[thiscpu].num >= nasid) {
-			asid[thiscpu].num = 1;
-			if (++asid[thiscpu].gen == 0)
-				asid[thiscpu].gen = 1;
-			/*
-			 * If this cpu does not support "flush-by-asid"
-			 * then flush the entire TLB on a generation
-			 * bump. Subsequent ASID allocation in this
-			 * generation can be done without a TLB flush.
-			 */
-			if (!flush_by_asid())
-				ctrl->tlb_ctrl = VMCB_TLB_FLUSH_ALL;
-		}
-		vcpustate->asid.gen = asid[thiscpu].gen;
-		vcpustate->asid.num = asid[thiscpu].num;
-
-		ctrl->asid = vcpustate->asid.num;
-		svm_set_dirty(sc, vcpuid, VMCB_CACHE_ASID);
-		/*
-		 * If this cpu supports "flush-by-asid" then the TLB
-		 * was not flushed after the generation bump. The TLB
-		 * is flushed selectively after every new ASID allocation.
-		 */
-		if (flush_by_asid())
-			ctrl->tlb_ctrl = VMCB_TLB_FLUSH_GUEST;
-	}
-	vcpustate->eptgen = eptgen;
-
-	KASSERT(ctrl->asid != 0, ("Guest ASID must be non-zero"));
-	KASSERT(ctrl->asid == vcpustate->asid.num,
-	    ("ASID mismatch: %u/%u", ctrl->asid, vcpustate->asid.num));
-}
-#else /* __FreeBSD__ */
-static void
-check_asid(struct svm_softc *sc, int vcpuid, pmap_t pmap, uint_t thiscpu)
+check_asid(struct svm_softc *sc, int vcpuid, uint_t thiscpu, uint64_t nptgen)
 {
 	struct svm_vcpu *vcpustate = svm_get_vcpu(sc, vcpuid);
 	struct vmcb_ctrl *ctrl = svm_get_vmcb_ctrl(sc, vcpuid);
-	long eptgen;
 	uint8_t flush;
 
-	eptgen = pmap->pm_eptgen;
 	flush = hma_svm_asid_update(&vcpustate->hma_asid, flush_by_asid(),
-	    vcpustate->eptgen != eptgen);
+	    vcpustate->nptgen != nptgen);
 
 	if (flush != VMCB_TLB_FLUSH_NOTHING) {
 		ctrl->asid = vcpustate->hma_asid.hsa_asid;
 		svm_set_dirty(sc, vcpuid, VMCB_CACHE_ASID);
 	}
 	ctrl->tlb_ctrl = flush;
-	vcpustate->eptgen = eptgen;
+	vcpustate->nptgen = nptgen;
 }
 
 static void
@@ -2064,12 +1804,11 @@ flush_asid(struct svm_softc *sc, int vcpuid)
 	ctrl->tlb_ctrl = flush;
 	svm_set_dirty(sc, vcpuid, VMCB_CACHE_ASID);
 	/*
-	 * A potential future optimization: We could choose to update the eptgen
-	 * associated with the vCPU, since any pending eptgen change requiring a
+	 * A potential future optimization: We could choose to update the nptgen
+	 * associated with the vCPU, since any pending nptgen change requiring a
 	 * flush will be satisfied by the one which has just now been queued.
 	 */
 }
-#endif /* __FreeBSD__ */
 
 static __inline void
 disable_gintr(void)
@@ -2154,7 +1893,7 @@ svm_apply_tsc_adjust(struct svm_softc *svm_sc, int vcpuid)
  * Start vcpu with specified RIP.
  */
 static int
-svm_vmrun(void *arg, int vcpu, uint64_t rip, pmap_t pmap)
+svm_vmrun(void *arg, int vcpu, uint64_t rip)
 {
 	struct svm_regctx *gctx;
 	struct svm_softc *svm_sc;
@@ -2163,6 +1902,7 @@ svm_vmrun(void *arg, int vcpu, uint64_t rip, pmap_t pmap)
 	struct vmcb_ctrl *ctrl;
 	struct vm_exit *vmexit;
 	struct vlapic *vlapic;
+	vm_client_t *vmc;
 	struct vm *vm;
 	uint64_t vmcb_pa;
 	int handled;
@@ -2176,6 +1916,7 @@ svm_vmrun(void *arg, int vcpu, uint64_t rip, pmap_t pmap)
 	ctrl = svm_get_vmcb_ctrl(svm_sc, vcpu);
 	vmexit = vm_exitinfo(vm, vcpu);
 	vlapic = vm_lapic(vm, vcpu);
+	vmc = vm_get_vmclient(vm, vcpu);
 
 	gctx = svm_get_guest_regctx(svm_sc, vcpu);
 	vmcb_pa = svm_sc->vcpu[vcpu].vmcb_pa;
@@ -2184,11 +1925,7 @@ svm_vmrun(void *arg, int vcpu, uint64_t rip, pmap_t pmap)
 		/*
 		 * Force new ASID allocation by invalidating the generation.
 		 */
-#ifdef __FreeBSD__
-		vcpustate->asid.gen = 0;
-#else
 		vcpustate->hma_asid.hsa_gen = 0;
-#endif
 
 		/*
 		 * Invalidate the VMCB state cache by marking all fields dirty.
@@ -2213,16 +1950,15 @@ svm_vmrun(void *arg, int vcpu, uint64_t rip, pmap_t pmap)
 
 	svm_msr_guest_enter(svm_sc, vcpu);
 
-#ifndef __FreeBSD__
 	VERIFY(!vcpustate->loaded && curthread->t_preempt != 0);
 	vcpustate->loaded = B_TRUE;
-#endif
 
 	/* Update Guest RIP */
 	state->rip = rip;
 
 	do {
 		enum event_inject_state inject_state;
+		uint64_t nptgen;
 
 		/*
 		 * Initial event injection is complex and may involve mutex
@@ -2282,32 +2018,32 @@ svm_vmrun(void *arg, int vcpu, uint64_t rip, pmap_t pmap)
 		 */
 		ldt_sel = sldt();
 
-		/* Activate the nested pmap on 'curcpu' */
-		CPU_SET_ATOMIC_ACQ(curcpu, &pmap->pm_active);
-
 		/*
-		 * Check the pmap generation and the ASID generation to
-		 * ensure that the vcpu does not use stale TLB mappings.
+		 * Check the vmspace and ASID generations to ensure that the
+		 * vcpu does not use stale TLB mappings.
 		 */
-		check_asid(svm_sc, vcpu, pmap, curcpu);
+		nptgen = vmc_table_enter(vmc);
+		check_asid(svm_sc, vcpu, curcpu, nptgen);
 
 		ctrl->vmcb_clean = vmcb_clean & ~vcpustate->dirty;
 		vcpustate->dirty = 0;
 		VCPU_CTR1(vm, vcpu, "vmcb clean %x", ctrl->vmcb_clean);
 
 		/* Launch Virtual Machine. */
+		vcpu_ustate_change(vm, vcpu, VU_RUN);
 		VCPU_CTR1(vm, vcpu, "Resume execution at %lx", state->rip);
 		svm_dr_enter_guest(gctx);
 		svm_launch(vmcb_pa, gctx, get_pcpu());
 		svm_dr_leave_guest(gctx);
-
-		CPU_CLR_ATOMIC(curcpu, &pmap->pm_active);
+		vcpu_ustate_change(vm, vcpu, VU_EMU_KERN);
 
 		/* Restore host LDTR. */
 		lldt(ldt_sel);
 
 		/* #VMEXIT disables interrupts so re-enable them here. */
 		enable_gintr();
+
+		vmc_table_exit(vmc);
 
 		/* Update 'nextrip' */
 		vcpustate->nextrip = state->rip;
@@ -2318,10 +2054,8 @@ svm_vmrun(void *arg, int vcpu, uint64_t rip, pmap_t pmap)
 
 	svm_msr_guest_exit(svm_sc, vcpu);
 
-#ifndef __FreeBSD__
 	VERIFY(vcpustate->loaded && curthread->t_preempt != 0);
 	vcpustate->loaded = B_FALSE;
-#endif
 
 	return (0);
 }
@@ -2714,7 +2448,6 @@ svm_vlapic_cleanup(void *arg, struct vlapic *vlapic)
 	free(vlapic, M_SVM_VLAPIC);
 }
 
-#ifndef __FreeBSD__
 static void
 svm_savectx(void *arg, int vcpu)
 {
@@ -2734,12 +2467,12 @@ svm_restorectx(void *arg, int vcpu)
 		svm_msr_guest_enter(sc, vcpu);
 	}
 }
-#endif /* __FreeBSD__ */
 
 struct vmm_ops vmm_ops_amd = {
 	.init		= svm_init,
 	.cleanup	= svm_cleanup,
 	.resume		= svm_restore,
+
 	.vminit		= svm_vminit,
 	.vmrun		= svm_vmrun,
 	.vmcleanup	= svm_vmcleanup,
@@ -2749,12 +2482,9 @@ struct vmm_ops vmm_ops_amd = {
 	.vmsetdesc	= svm_setdesc,
 	.vmgetcap	= svm_getcap,
 	.vmsetcap	= svm_setcap,
-	.vmspace_alloc	= svm_npt_alloc,
-	.vmspace_free	= svm_npt_free,
 	.vlapic_init	= svm_vlapic_init,
 	.vlapic_cleanup	= svm_vlapic_cleanup,
-#ifndef __FreeBSD__
+
 	.vmsavectx	= svm_savectx,
 	.vmrestorectx	= svm_restorectx,
-#endif
 };

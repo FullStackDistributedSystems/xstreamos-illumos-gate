@@ -13,12 +13,15 @@
 # Copyright (c) 2012, 2016 by Delphix. All rights reserved.
 # Copyright 2020 Joyent, Inc.
 # Copyright 2021 Tintri by DDN, Inc. All rights reserved.
+# Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
 #
 
 SUBDIRS_i386 = i386 imc
 
 SUBDIRS =       \
+		cores \
 		ddi_ufm \
+		definit \
 		file-locking \
 		ksensor \
 		libtopo \
@@ -37,6 +40,8 @@ SUBDIRS =       \
 		$(SUBDIRS_$(MACH))
 
 PROGS = \
+	clock_gettime \
+	eventfd \
 	odirectory \
 	writev
 
@@ -51,6 +56,11 @@ ROOTOPTPROGS = $(PROGS32:%=$(ROOTOPTDIR)/%) \
 
 odirectory.32 :=	LDLIBS += -lsocket
 odirectory.64 :=	LDLIBS64 += -lsocket
+
+clock_gettime.32 :=	LDLIBS += -lproc
+clock_gettime.32 :=	CSTD = $(CSTD_GNU99)
+clock_gettime.64 :=	LDLIBS64 += -lproc
+clock_gettime.64 :=	CSTD = $(CSTD_GNU99)
 
 writev.32 :=		CPPFLAGS += -D_FILE_OFFSET_BITS=64
 writev.32 :=		CSTD = $(CSTD_GNU99)

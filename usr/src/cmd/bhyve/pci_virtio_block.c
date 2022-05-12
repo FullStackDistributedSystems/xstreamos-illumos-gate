@@ -3,7 +3,7 @@
  *
  * Copyright (c) 2011 NetApp, Inc.
  * All rights reserved.
- * Copyright 2020 Joyent, Inc.
+ * Copyright 2020-2021 Joyent, Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -289,11 +289,11 @@ pci_vtblk_proc(struct pci_vtblk_softc *sc, struct vqueue_info *vq)
 	int err;
 	ssize_t iolen;
 	int writeop, type;
+	struct vi_req req;
 	struct iovec iov[BLOCKIF_IOV_MAX + 2];
-	uint16_t idx, flags[BLOCKIF_IOV_MAX + 2];
 	struct virtio_blk_discard_write_zeroes *discard;
 
-	n = vq_getchain(vq, &idx, iov, BLOCKIF_IOV_MAX + 2, flags);
+	n = vq_getchain(vq, iov, BLOCKIF_IOV_MAX + 2, &req);
 
 	/*
 	 * The first descriptor will be the read-only fixed header,
@@ -305,16 +305,16 @@ pci_vtblk_proc(struct pci_vtblk_softc *sc, struct vqueue_info *vq)
 	 */
 	assert(n >= 2 && n <= BLOCKIF_IOV_MAX + 2);
 
-	io = &sc->vbsc_ios[idx];
-	assert((flags[0] & VRING_DESC_F_WRITE) == 0);
+	io = &sc->vbsc_ios[req.idx];
+	assert(req.readable != 0);
 	assert(iov[0].iov_len == sizeof(struct virtio_blk_hdr));
 	vbh = (struct virtio_blk_hdr *)iov[0].iov_base;
 	memcpy(&io->io_req.br_iov, &iov[1], sizeof(struct iovec) * (n - 2));
 	io->io_req.br_iovcnt = n - 2;
 	io->io_req.br_offset = vbh->vbh_sector * VTBLK_BSIZE;
 	io->io_status = (uint8_t *)iov[--n].iov_base;
+	assert(req.writable != 0);
 	assert(iov[n].iov_len == 1);
-	assert(flags[n] & VRING_DESC_F_WRITE);
 
 	/*
 	 * XXX
@@ -323,16 +323,17 @@ pci_vtblk_proc(struct pci_vtblk_softc *sc, struct vqueue_info *vq)
 	 */
 	type = vbh->vbh_type & ~VBH_FLAG_BARRIER;
 	writeop = (type == VBH_OP_WRITE || type == VBH_OP_DISCARD);
+	/*
+	 * - Write op implies read-only descriptor
+	 * - Read/ident op implies write-only descriptor
+	 *
+	 * By taking away either the read-only fixed header or the write-only
+	 * status iovec, the following condition should hold true.
+	 */
+	assert(n == (writeop ? req.readable : req.writable));
 
 	iolen = 0;
 	for (i = 1; i < n; i++) {
-		/*
-		 * - write op implies read-only descriptor,
-		 * - read/ident op implies write-only descriptor,
-		 * therefore test the inverse of the descriptor bit
-		 * to the op.
-		 */
-		assert(((flags[i] & VRING_DESC_F_WRITE) == 0) == writeop);
 		iolen += iov[i].iov_len;
 	}
 	io->io_req.br_resid = iolen;
@@ -416,6 +417,18 @@ pci_vtblk_notify(void *vsc, struct vqueue_info *vq)
 		pci_vtblk_proc(sc, vq);
 }
 
+static void
+pci_vtblk_resized(struct blockif_ctxt *bctxt, void *arg, size_t new_size)
+{
+	struct pci_vtblk_softc *sc;
+
+	sc = arg;
+
+	sc->vbsc_cfg.vbc_capacity = new_size / VTBLK_BSIZE; /* 512-byte units */
+	vi_interrupt(&sc->vbsc_vs, VIRTIO_PCI_ISR_CONFIG,
+	    sc->vbsc_vs.vs_msix_cfg_idx);
+}
+
 static int
 pci_vtblk_init(struct vmctx *ctx, struct pci_devinst *pi, nvlist_t *nvl)
 {
@@ -483,6 +496,16 @@ pci_vtblk_init(struct vmctx *ctx, struct pci_devinst *pi, nvlist_t *nvl)
 	    "BHYVE-%02X%02X-%02X%02X-%02X%02X",
 	    digest[0], digest[1], digest[2], digest[3], digest[4], digest[5]);
 
+#ifndef __FreeBSD__
+	const char *serial;
+
+	if ((serial = get_config_value_node(nvl, "serial")) != NULL ||
+	    (serial = get_config_value_node(nvl, "ser")) != NULL) {
+		bzero(sc->vbsc_ident, VTBLK_BLK_ID_BYTES);
+		strlcpy(sc->vbsc_ident, serial, VTBLK_BLK_ID_BYTES);
+	}
+#endif
+
 	/* setup virtio block config space */
 	sc->vbsc_cfg.vbc_capacity = size / VTBLK_BSIZE; /* 512-byte units */
 	sc->vbsc_cfg.vbc_size_max = 0;	/* not negotiated */
@@ -527,6 +550,7 @@ pci_vtblk_init(struct vmctx *ctx, struct pci_devinst *pi, nvlist_t *nvl)
 		return (1);
 	}
 	vi_set_io_bar(&sc->vbsc_vs, 0);
+	blockif_register_resize_callback(sc->bc, pci_vtblk_resized, sc);
 	return (0);
 }
 

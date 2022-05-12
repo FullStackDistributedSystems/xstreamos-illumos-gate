@@ -319,6 +319,55 @@ VMXNET3S_OBJS =	vmxnet3_main.o \
 		vmxnet3_utils.o
 
 #
+# Hyper-V VMBUS virtual bus
+#
+HV_VMBUS_OBJS =        \
+	vmbus_ic.o \
+	vmbus.o \
+	vmbus_xact.o \
+	vmbus_br.o \
+	vmbus_chan.o
+
+#
+# Hyper-V HYPERV misc driver
+#
+HV_HYPERV_OBJS = \
+	hyperv_busdma.o \
+	hyperv.o \
+	hyperv_machdep.o
+
+#
+# Hyper-V NETVSC driver
+#
+HV_NETVSC_OBJS = \
+	hn_nvs.o \
+	hn_rndis.o \
+	if_hn.o \
+	hn_gld.o \
+	subr_bufring.o
+
+#
+# Hyper-V STORVSC driver
+#
+HV_STORVSC_OBJS = \
+	hv_storvsc_drv_illumos.o
+
+#
+# Hyper-V Utility drivers
+#
+HV_HEARTBEAT_OBJS = \
+	vmbus_heartbeat.o
+
+HV_KVP_OBJS = \
+	hv_kvp.o
+
+HV_SHUTDOWN_OBJS = \
+	vmbus_shutdown.o
+
+HV_TIMESYNC_OBJS = \
+	vmbus_timesync.o
+
+#
 # VMware PVSCSI SCSI Controller
 #
 PVSCSI_OBJS =	pvscsi.o
@@ -351,3 +400,10 @@ AMDZEN_STUB_OBJS = amdzen_stub.o
 SMNTEMP_OBJS = smntemp.o
 USMN_OBJS = usmn.o
 ZEN_UDF_OBJS = zen_udf.o
+
+#
+# Intel Integrated Memory Controller
+# (Sandy Bridge - Cascade Lake)
+#
+IMC_OBJS =	imc.o imc_decode.o imc_dump.o
+IMCSTUB_OBJS =	imcstub.o

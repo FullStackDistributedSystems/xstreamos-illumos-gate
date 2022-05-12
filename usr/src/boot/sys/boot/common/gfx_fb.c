@@ -111,8 +111,10 @@ static int gfx_inverse_screen = 0;
 static uint8_t gfx_fg = DEFAULT_ANSI_FOREGROUND;
 static uint8_t gfx_bg = DEFAULT_ANSI_BACKGROUND;
 #if defined(EFI)
+EFI_GRAPHICS_OUTPUT_BLT_PIXEL *shadow_fb;
 static EFI_GRAPHICS_OUTPUT_BLT_PIXEL *GlyphBuffer;
 #else
+struct paletteentry *shadow_fb;
 static struct paletteentry *GlyphBuffer;
 #endif
 static size_t GlyphBufferSize;
@@ -203,39 +205,10 @@ gfx_parse_mode_str(char *str, int *x, int *y, int *depth)
 	return (true);
 }
 
-/*
- * Support for color mapping.
- * For 8, 24 and 32 bit depth, use mask size 8.
- * 15/16 bit depth needs to use mask size from mode,
- * or we will lose color information from 32-bit to 15/16 bit translation.
- */
 uint32_t
 gfx_fb_color_map(uint8_t index)
 {
-	rgb_t rgb;
-	int bpp;
-
-	bpp = roundup2(gfx_fb.framebuffer_common.framebuffer_bpp, 8) >> 3;
-
-	rgb.red.pos = 16;
-	if (bpp == 2)
-		rgb.red.size = gfx_fb.u.fb2.framebuffer_red_mask_size;
-	else
-		rgb.red.size = 8;
-
-	rgb.green.pos = 8;
-	if (bpp == 2)
-		rgb.green.size = gfx_fb.u.fb2.framebuffer_green_mask_size;
-	else
-		rgb.green.size = 8;
-
-	rgb.blue.pos = 0;
-	if (bpp == 2)
-		rgb.blue.size = gfx_fb.u.fb2.framebuffer_blue_mask_size;
-	else
-		rgb.blue.size = 8;
-
-	return (rgb_color_map(&rgb, index));
+	return (rgb_color_map(&rgb_info, index, 0xff));
 }
 
 static bool
@@ -856,6 +829,38 @@ gfxfb_blt_video_to_video(uint32_t SourceX, uint32_t SourceY,
 	return (0);
 }
 
+static void
+gfxfb_shadow_fill(uint32_t *BltBuffer,
+    uint32_t DestinationX, uint32_t DestinationY,
+    uint32_t Width, uint32_t Height)
+{
+	uint32_t fbX, fbY;
+
+	if (shadow_fb == NULL)
+		return;
+
+	fbX = gfx_fb.framebuffer_common.framebuffer_width;
+	fbY = gfx_fb.framebuffer_common.framebuffer_height;
+
+	if (BltBuffer == NULL)
+		return;
+
+	if (DestinationX + Width > fbX)
+		Width = fbX - DestinationX;
+
+	if (DestinationY + Height > fbY)
+		Height = fbY - DestinationY;
+
+	uint32_t y2 = Height + DestinationY;
+	for (uint32_t y1 = DestinationY; y1 < y2; y1++) {
+		uint32_t off = y1 * fbX + DestinationX;
+
+		for (uint32_t x = 0; x < Width; x++) {
+			*(uint32_t *)&shadow_fb[off + x] = *BltBuffer;
+		}
+	}
+}
+
 int
 gfxfb_blt(void *BltBuffer, GFXFB_BLT_OPERATION BltOperation,
     uint32_t SourceX, uint32_t SourceY,
@@ -865,15 +870,20 @@ gfxfb_blt(void *BltBuffer, GFXFB_BLT_OPERATION BltOperation,
 	int rv;
 #if defined(EFI)
 	EFI_STATUS status;
+	EFI_TPL tpl;
 	extern EFI_GRAPHICS_OUTPUT *gop;
 
 	/*
 	 * We assume Blt() does work, if not, we will need to build
 	 * exception list case by case.
+	 * Once boot services are off, we can not use GOP Blt().
 	 */
-	if (gop != NULL) {
+	if (gop != NULL && has_boot_services) {
+		tpl = BS->RaiseTPL(TPL_NOTIFY);
 		switch (BltOperation) {
 		case GfxFbBltVideoFill:
+			gfxfb_shadow_fill(BltBuffer, DestinationX,
+			    DestinationY, Width, Height);
 			status = gop->Blt(gop, BltBuffer, EfiBltVideoFill,
 			    SourceX, SourceY, DestinationX, DestinationY,
 			    Width, Height, Delta);
@@ -918,12 +928,15 @@ gfxfb_blt(void *BltBuffer, GFXFB_BLT_OPERATION BltOperation,
 			break;
 		}
 
+		BS->RestoreTPL(tpl);
 		return (rv);
 	}
 #endif
 
 	switch (BltOperation) {
 	case GfxFbBltVideoFill:
+		gfxfb_shadow_fill(BltBuffer, DestinationX, DestinationY,
+		    Width, Height);
 		rv = gfxfb_blt_fill(BltBuffer, DestinationX, DestinationY,
 		    Width, Height);
 		break;
@@ -957,23 +970,13 @@ int
 gfx_fb_cons_clear(struct vis_consclear *ca)
 {
 	int rv;
-	uint32_t data, width, height;
-#if defined(EFI)
-	EFI_TPL tpl;
-#endif
+	uint32_t width, height;
 
-	data = gfx_fb_color_map(ca->bg_color);
 	width = gfx_fb.framebuffer_common.framebuffer_width;
 	height = gfx_fb.framebuffer_common.framebuffer_height;
 
-#if defined(EFI)
-	tpl = BS->RaiseTPL(TPL_NOTIFY);
-#endif
-	rv = gfxfb_blt(&data, GfxFbBltVideoFill, 0, 0,
+	rv = gfxfb_blt(&ca->bg_color, GfxFbBltVideoFill, 0, 0,
 	    0, 0, width, height, 0);
-#if defined(EFI)
-	BS->RestoreTPL(tpl);
-#endif
 
 	return (rv);
 }
@@ -981,21 +984,77 @@ gfx_fb_cons_clear(struct vis_consclear *ca)
 void
 gfx_fb_cons_copy(struct vis_conscopy *ma)
 {
-	uint32_t width, height;
 #if defined(EFI)
-	EFI_TPL tpl;
-
-	tpl = BS->RaiseTPL(TPL_NOTIFY);
+	EFI_GRAPHICS_OUTPUT_BLT_PIXEL *source, *destination;
+#else
+	struct paletteentry *source, *destination;
 #endif
+	uint32_t width, height, bytes;
+	uint32_t sx, sy, dx, dy;
+	uint32_t pitch;
+	int step;
 
 	width = ma->e_col - ma->s_col + 1;
 	height = ma->e_row - ma->s_row + 1;
 
-	(void) gfxfb_blt(NULL, GfxFbBltVideoToVideo, ma->s_col, ma->s_row,
-	    ma->t_col, ma->t_row, width, height, 0);
-#if defined(EFI)
-	BS->RestoreTPL(tpl);
-#endif
+	sx = ma->s_col;
+	sy = ma->s_row;
+	dx = ma->t_col;
+	dy = ma->t_row;
+
+	if (sx + width > gfx_fb.framebuffer_common.framebuffer_width)
+		width = gfx_fb.framebuffer_common.framebuffer_width - sx;
+
+	if (sy + height > gfx_fb.framebuffer_common.framebuffer_height)
+		height = gfx_fb.framebuffer_common.framebuffer_height - sy;
+
+	if (dx + width > gfx_fb.framebuffer_common.framebuffer_width)
+		width = gfx_fb.framebuffer_common.framebuffer_width - dx;
+
+	if (dy + height > gfx_fb.framebuffer_common.framebuffer_height)
+		height = gfx_fb.framebuffer_common.framebuffer_height - dy;
+
+	if (width == 0 || height == 0)
+		return;
+
+	/*
+	 * With no shadow fb, use video to video copy.
+	 */
+	if (shadow_fb == NULL) {
+		(void) gfxfb_blt(NULL, GfxFbBltVideoToVideo,
+		    sx, sy, dx, dy, width, height, 0);
+		return;
+	}
+
+	/*
+	 * With shadow fb, we need to copy data on both shadow and video,
+	 * to preserve the consistency. We only read data from shadow fb.
+	 */
+
+	step = 1;
+	pitch = gfx_fb.framebuffer_common.framebuffer_width;
+	bytes = width * sizeof (*shadow_fb);
+
+	/*
+	 * To handle overlapping areas, set up reverse copy here.
+	 */
+	if (dy * pitch + dx > sy * pitch + sx) {
+		sy += height;
+		dy += height;
+		step = -step;
+	}
+
+	while (height-- > 0) {
+		source = &shadow_fb[sy * pitch + sx];
+		destination = &shadow_fb[dy * pitch + dx];
+
+		bcopy(source, destination, bytes);
+		(void) gfxfb_blt(destination, GfxFbBltBufferToVideo,
+		    0, 0, dx, dy, width, 1, 0);
+
+		sy += step;
+		dy += step;
+	}
 }
 
 /*
@@ -1009,17 +1068,22 @@ static uint8_t
 alpha_blend(uint8_t fg, uint8_t bg, uint8_t alpha)
 {
 	uint16_t blend, h, l;
+	uint8_t max_alpha;
+
+	/* 15/16 bit depths have alpha channel size less than 8 */
+	max_alpha = (1 << (rgb_info.red.size + rgb_info.green.size +
+	    rgb_info.blue.size) / 3) - 1;
 
 	/* trivial corner cases */
 	if (alpha == 0)
 		return (bg);
-	if (alpha == 0xFF)
+	if (alpha >= max_alpha)
 		return (fg);
-	blend = (alpha * fg + (0xFF - alpha) * bg);
-	/* Division by 0xFF */
+	blend = (alpha * fg + (max_alpha - alpha) * bg);
+	/* Division by max_alpha */
 	h = blend >> 8;
-	l = blend & 0xFF;
-	if (h + l >= 0xFF)
+	l = blend & max_alpha;
+	if (h + l >= max_alpha)
 		h++;
 	return (h);
 }
@@ -1039,9 +1103,6 @@ bitmap_cpy(void *dst, void *src, size_t size)
 	ps = src;
 	pd = dst;
 
-	/*
-	 * we only implement alpha blending for depth 32.
-	 */
 	for (i = 0; i < size; i++) {
 		a = ps[i].Reserved;
 		pd[i].Red = alpha_blend(ps[i].Red, pd[i].Red, a);
@@ -1071,10 +1132,9 @@ void
 gfx_fb_cons_display(struct vis_consdisplay *da)
 {
 #if defined(EFI)
-	EFI_GRAPHICS_OUTPUT_BLT_PIXEL *BltBuffer;
-	EFI_TPL tpl;
+	EFI_GRAPHICS_OUTPUT_BLT_PIXEL *BltBuffer, *data;
 #else
-	struct paletteentry *BltBuffer;
+	struct paletteentry *BltBuffer, *data;
 #endif
 	uint32_t size;
 
@@ -1087,7 +1147,30 @@ gfx_fb_cons_display(struct vis_consdisplay *da)
 	    gfx_fb.framebuffer_common.framebuffer_height)
 		return;
 
-	size = sizeof (*BltBuffer) * da->width * da->height;
+	/*
+	 * If we do have shadow fb, we will use shadow to render data,
+	 * and copy shadow to video.
+	 */
+	if (shadow_fb != NULL) {
+		uint32_t pitch = gfx_fb.framebuffer_common.framebuffer_width;
+		uint32_t dx, dy, width, height;
+
+		dx = da->col;
+		dy = da->row;
+		height = da->height;
+		width = da->width;
+
+		data = (void *)da->data;
+		/* Copy rectangle line by line. */
+		for (uint32_t y = 0; y < height; y++) {
+			BltBuffer = shadow_fb + dy * pitch + dx;
+			bitmap_cpy(BltBuffer, &data[y * width], width);
+			(void) gfxfb_blt(BltBuffer, GfxFbBltBufferToVideo,
+			    0, 0, dx, dy, width, 1, 0);
+			dy++;
+		}
+		return;
+	}
 
 	/*
 	 * Common data to display is glyph, use preallocated
@@ -1096,6 +1179,7 @@ gfx_fb_cons_display(struct vis_consdisplay *da)
 	if (tems.ts_pix_data_size != GlyphBufferSize)
 		(void) allocate_glyphbuffer(da->width, da->height);
 
+	size = sizeof (*BltBuffer) * da->width * da->height;
 	if (size == GlyphBufferSize) {
 		BltBuffer = GlyphBuffer;
 	} else {
@@ -1104,9 +1188,6 @@ gfx_fb_cons_display(struct vis_consdisplay *da)
 	if (BltBuffer == NULL)
 		return;
 
-#if defined(EFI)
-	tpl = BS->RaiseTPL(TPL_NOTIFY);
-#endif
 	if (gfxfb_blt(BltBuffer, GfxFbBltVideoToBltBuffer,
 	    da->col, da->row, 0, 0, da->width, da->height, 0) == 0) {
 		bitmap_cpy(BltBuffer, da->data, da->width * da->height);
@@ -1114,16 +1195,19 @@ gfx_fb_cons_display(struct vis_consdisplay *da)
 		    0, 0, da->col, da->row, da->width, da->height, 0);
 	}
 
-#if defined(EFI)
-	BS->RestoreTPL(tpl);
-#endif
 	if (BltBuffer != GlyphBuffer)
 		free(BltBuffer);
 }
 
 static void
-gfx_fb_cursor_impl(uint32_t fg, uint32_t bg, struct vis_conscursor *ca)
+gfx_fb_cursor_impl(void *buf, uint32_t stride, uint32_t fg, uint32_t bg,
+    struct vis_conscursor *ca)
 {
+#if defined(EFI)
+	EFI_GRAPHICS_OUTPUT_BLT_PIXEL *p;
+#else
+	struct paletteentry *p;
+#endif
 	union pixel {
 #if defined(EFI)
 		EFI_GRAPHICS_OUTPUT_BLT_PIXEL p;
@@ -1133,13 +1217,15 @@ gfx_fb_cursor_impl(uint32_t fg, uint32_t bg, struct vis_conscursor *ca)
 		uint32_t p32;
 	} *row;
 
+	p = buf;
+
 	/*
 	 * Build inverse image of the glyph.
 	 * Since xor has self-inverse property, drawing cursor
 	 * second time on the same spot, will restore the original content.
 	 */
 	for (screen_size_t i = 0; i < ca->height; i++) {
-		row = (union pixel *)(GlyphBuffer + i * ca->width);
+		row = (union pixel *)(p + i * stride);
 		for (screen_size_t j = 0; j < ca->width; j++) {
 			row[j].p32 = (row[j].p32 ^ fg) ^ bg;
 		}
@@ -1157,33 +1243,38 @@ gfx_fb_display_cursor(struct vis_conscursor *ca)
 #endif
 		uint32_t p32;
 	} fg, bg;
-#if defined(EFI)
-	EFI_TPL tpl;
 
-	tpl = BS->RaiseTPL(TPL_NOTIFY);
-#endif
+	bcopy(&ca->fg_color, &fg.p32, sizeof (fg.p32));
+	bcopy(&ca->bg_color, &bg.p32, sizeof (bg.p32));
 
-	fg.p.Reserved = 0;
-	fg.p.Red = ca->fg_color.twentyfour[0];
-	fg.p.Green = ca->fg_color.twentyfour[1];
-	fg.p.Blue = ca->fg_color.twentyfour[2];
-	bg.p.Reserved = 0;
-	bg.p.Red = ca->bg_color.twentyfour[0];
-	bg.p.Green = ca->bg_color.twentyfour[1];
-	bg.p.Blue = ca->bg_color.twentyfour[2];
-
-	if (allocate_glyphbuffer(ca->width, ca->height) != NULL) {
+	if (shadow_fb == NULL &&
+	    allocate_glyphbuffer(ca->width, ca->height) != NULL) {
 		if (gfxfb_blt(GlyphBuffer, GfxFbBltVideoToBltBuffer,
 		    ca->col, ca->row, 0, 0, ca->width, ca->height, 0) == 0)
-			gfx_fb_cursor_impl(fg.p32, bg.p32, ca);
+			gfx_fb_cursor_impl(GlyphBuffer, ca->width,
+			    fg.p32, bg.p32, ca);
 
 		(void) gfxfb_blt(GlyphBuffer, GfxFbBltBufferToVideo, 0, 0,
 		    ca->col, ca->row, ca->width, ca->height, 0);
+		return;
 	}
 
-#if defined(EFI)
-	BS->RestoreTPL(tpl);
-#endif
+	uint32_t pitch = gfx_fb.framebuffer_common.framebuffer_width;
+	uint32_t dx, dy, width, height;
+
+	dx = ca->col;
+	dy = ca->row;
+	width = ca->width;
+	height = ca->height;
+
+	gfx_fb_cursor_impl(shadow_fb + dy * pitch + dx, pitch,
+	    fg.p32, bg.p32, ca);
+	/* Copy rectangle line by line. */
+	for (uint32_t y = 0; y < height; y++) {
+		(void) gfxfb_blt(shadow_fb + dy * pitch + dx,
+		    GfxFbBltBufferToVideo, 0, 0, dx, dy, width, 1, 0);
+		dy++;
+	}
 }
 
 /*
@@ -1215,43 +1306,46 @@ isqrt(int num)
 void
 gfx_fb_setpixel(uint32_t x, uint32_t y)
 {
-	uint32_t c;
 	text_color_t fg, bg;
 
 	if (plat_stdout_is_framebuffer() == 0)
 		return;
 
 	tem_get_colors((tem_vt_state_t)tems.ts_active, &fg, &bg);
-	c = gfx_fb_color_map(fg);
 
 	if (x >= gfx_fb.framebuffer_common.framebuffer_width ||
 	    y >= gfx_fb.framebuffer_common.framebuffer_height)
 		return;
 
-	gfxfb_blt(&c, GfxFbBltVideoFill, 0, 0, x, y, 1, 1, 0);
+	gfxfb_blt(&fg.n, GfxFbBltVideoFill, 0, 0, x, y, 1, 1, 0);
 }
 
 /*
  * draw rectangle in framebuffer using gfx coordinates.
- * The function is borrowed from fbsd vt_fb.c
  */
 void
 gfx_fb_drawrect(uint32_t x1, uint32_t y1, uint32_t x2, uint32_t y2,
     uint32_t fill)
 {
-	uint32_t x, y;
+	text_color_t fg, bg;
 
 	if (plat_stdout_is_framebuffer() == 0)
 		return;
 
-	for (y = y1; y <= y2; y++) {
-		if (fill || (y == y1) || (y == y2)) {
-			for (x = x1; x <= x2; x++)
-				gfx_fb_setpixel(x, y);
-		} else {
-			gfx_fb_setpixel(x1, y);
-			gfx_fb_setpixel(x2, y);
-		}
+	tem_get_colors((tem_vt_state_t)tems.ts_active, &fg, &bg);
+
+	if (fill != 0) {
+		gfxfb_blt(&fg.n, GfxFbBltVideoFill,
+		    0, 0, x1, y1, x2 - x1, y2 - y1, 0);
+	} else {
+		gfxfb_blt(&fg.n, GfxFbBltVideoFill,
+		    0, 0, x1, y1, x2 - x1, 1, 0);
+		gfxfb_blt(&fg.n, GfxFbBltVideoFill,
+		    0, 0, x1, y2, x2 - x1, 1, 0);
+		gfxfb_blt(&fg.n, GfxFbBltVideoFill,
+		    0, 0, x1, y1, 1, y2 - y1, 0);
+		gfxfb_blt(&fg.n, GfxFbBltVideoFill,
+		    0, 0, x2, y1, 1, y2 - y1, 0);
 	}
 }
 

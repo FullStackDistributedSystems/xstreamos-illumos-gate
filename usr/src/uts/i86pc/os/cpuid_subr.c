@@ -34,7 +34,7 @@
  * Copyright 2012 Jens Elkner <jel+illumos@cs.uni-magdeburg.de>
  * Copyright 2012 Hans Rosenfeld <rosenfeld@grumpf.hope-2000.org>
  * Copyright 2019 Joyent, Inc.
- * Copyright 2020 Oxide Computer Company
+ * Copyright 2021 Oxide Computer Company
  */
 
 /*
@@ -91,10 +91,11 @@
  *		18 for family 0x18, models 00 - 0f
  *		19 for family 0x19, models 00 - 0f
  *		20 for family 0x19, models 20 - 2f
+ *		21 for family 0x19, models 50 - 5f
  * Second index by (model & 0x3) for family 0fh,
  * CPUID pkg bits (Fn8000_0001_EBX[31:28]) for later families.
  */
-static uint32_t amd_skts[21][8] = {
+static uint32_t amd_skts[22][8] = {
 	/*
 	 * Family 0xf revisions B through E
 	 */
@@ -408,7 +409,22 @@ static uint32_t amd_skts[21][8] = {
 		X86_SOCKET_UNKNOWN,	/* 0b101 */
 		X86_SOCKET_UNKNOWN,	/* 0b110 */
 		X86_SOCKET_UNKNOWN	/* 0b111 */
-	}
+	},
+
+	/*
+	 * Family 0x19 models 50-5f	(Zen 3 - Cezanne)
+	 */
+#define	A_SKTS_21			21
+	{
+		X86_SOCKET_FP6,		/* 0b000 */
+		X86_SOCKET_UNKNOWN,	/* 0b001 */
+		X86_SOCKET_AM4,		/* 0b010 */
+		X86_SOCKET_UNKNOWN,	/* 0b011 */
+		X86_SOCKET_UNKNOWN,	/* 0b100 */
+		X86_SOCKET_UNKNOWN,	/* 0b101 */
+		X86_SOCKET_UNKNOWN,	/* 0b110 */
+		X86_SOCKET_UNKNOWN	/* 0b111 */
+	},
 };
 
 struct amd_sktmap_s {
@@ -480,7 +496,8 @@ static const struct amd_skt_mapent {
 	{ 0x17, 0x70, 0x7f, A_SKTS_17 },
 	{ 0x18, 0x00, 0x0f, A_SKTS_18 },
 	{ 0x19, 0x00, 0x0f, A_SKTS_19 },
-	{ 0x19, 0x20, 0x2f, A_SKTS_20 }
+	{ 0x19, 0x20, 0x2f, A_SKTS_20 },
+	{ 0x19, 0x50, 0x5f, A_SKTS_21 }
 };
 
 /*
@@ -656,6 +673,21 @@ static const struct amd_rev_mapent {
 	 */
 	{ 0x18, 0x00, 0x00, 0x1, 0x1, X86_CHIPREV_HYGON_18_DN_A1, "DN_A1",
 	    A_SKTS_18 },
+
+	/*
+	 * =============== AuthenticAMD Family 0x19 ===============
+	 */
+	{ 0x19, 0x00, 0x00, 0x0, 0x0, X86_CHIPREV_AMD_19_GN_A0, "GN-A0",
+	    A_SKTS_19 },
+	{ 0x19, 0x01, 0x01, 0x0, 0x0, X86_CHIPREV_AMD_19_GN_B0, "GN-B0",
+	    A_SKTS_19 },
+	{ 0x19, 0x01, 0x01, 0x1, 0x1, X86_CHIPREV_AMD_19_GN_B1, "GN-B1",
+	    A_SKTS_19 },
+
+	{ 0x19, 0x21, 0x21, 0x0, 0x0, X86_CHIPREV_AMD_19_VMR_B0, "VMR-B0",
+	    A_SKTS_20 },
+	{ 0x19, 0x21, 0x21, 0x2, 0x2, X86_CHIPREV_AMD_19_VMR_B1, "VMR-B1",
+	    A_SKTS_20 },
 };
 
 /*
