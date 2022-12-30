@@ -20,6 +20,7 @@
  */
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright 2015, Joyent Inc.
  * Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
  */
 
@@ -146,6 +147,8 @@ i_dladm_vnic_create_sys(dladm_handle_t handle, dladm_vnic_attr_t *attr)
 	case VNIC_MAC_ADDR_TYPE_RANDOM:
 		bcopy(ioc.vc_mac_addr, attr->va_mac_addr, MAXMACADDRLEN);
 		attr->va_mac_len = ioc.vc_mac_len;
+		break;
+	default:
 		break;
 	}
 	return (status);
@@ -400,11 +403,11 @@ dladm_vnic_create(dladm_handle_t handle, const char *vnic, datalink_id_t linkid,
     vnic_mac_addr_type_t mac_addr_type, uchar_t *mac_addr, uint_t mac_len,
     int *mac_slot, uint_t mac_prefix_len, uint16_t vid, vrid_t vrid,
     int af, datalink_id_t *vnic_id_out, dladm_arg_list_t *proplist,
-    uint32_t flags)
+    dladm_errlist_t *errs, uint32_t flags)
 {
 	dladm_vnic_attr_t attr;
 	datalink_id_t vnic_id;
-	datalink_class_t class;
+	datalink_class_t class, pclass;
 	uint32_t media = DL_ETHER;
 	uint32_t link_flags;
 	char name[MAXLINKNAMELEN];
@@ -442,7 +445,7 @@ dladm_vnic_create(dladm_handle_t handle, const char *vnic, datalink_id_t linkid,
 
 	if (!is_etherstub) {
 		if ((status = dladm_datalink_id2info(handle, linkid,
-		    &link_flags, &class, &media, NULL, 0)) != DLADM_STATUS_OK)
+		    &link_flags, &pclass, &media, NULL, 0)) != DLADM_STATUS_OK)
 			return (status);
 
 		/* Disallow persistent objects on top of temporary ones */
@@ -451,8 +454,8 @@ dladm_vnic_create(dladm_handle_t handle, const char *vnic, datalink_id_t linkid,
 			return (DLADM_STATUS_PERSIST_ON_TEMP);
 
 		/* Links cannot be created on top of these object types */
-		if (class == DATALINK_CLASS_VNIC ||
-		    class == DATALINK_CLASS_VLAN)
+		if (pclass == DATALINK_CLASS_VNIC ||
+		    pclass == DATALINK_CLASS_VLAN)
 			return (DLADM_STATUS_BADARG);
 	}
 
@@ -547,8 +550,17 @@ dladm_vnic_create(dladm_handle_t handle, const char *vnic, datalink_id_t linkid,
 	attr.va_force = (flags & DLADM_OPT_FORCE) != 0;
 
 	status = i_dladm_vnic_create_sys(handle, &attr);
-	if (status != DLADM_STATUS_OK)
+	if (status != DLADM_STATUS_OK) {
+		if (!is_etherstub && pclass == DATALINK_CLASS_OVERLAY &&
+		    status == DLADM_STATUS_ADDRNOTAVAIL) {
+			char errmsg[DLADM_STRSIZE];
+			(void) dladm_errlist_append(errs,
+			    "failed to start overlay device; "
+			    "could not open underlay socket: %s",
+			    dladm_status2str(status, errmsg));
+		}
 		goto done;
+	}
 	vnic_created = B_TRUE;
 
 	/* Save vnic configuration and its properties */
@@ -567,8 +579,14 @@ dladm_vnic_create(dladm_handle_t handle, const char *vnic, datalink_id_t linkid,
 			status = dladm_set_linkprop(handle, vnic_id,
 			    aip->ai_name, aip->ai_val, aip->ai_count,
 			    DLADM_OPT_PERSIST);
-			if (status != DLADM_STATUS_OK)
+			if (status != DLADM_STATUS_OK) {
+				char	errmsg[DLADM_STRSIZE];
+				(void) dladm_errlist_append(errs,
+				    "failed to set property %s: %s",
+				    aip->ai_name,
+				    dladm_status2str(status, errmsg));
 				break;
+			}
 		}
 	}
 

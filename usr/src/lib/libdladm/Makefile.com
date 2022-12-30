@@ -28,7 +28,8 @@ VERS    = .1
 OBJECTS = libdladm.o secobj.o linkprop.o libdllink.o libdlaggr.o \
 	libdlwlan.o libdlvnic.o libdlmgmt.o libdlvlan.o	libdlib.o\
 	flowattr.o flowprop.o propfuncs.o libdlflow.o libdlstat.o \
-	usage.o libdlether.o libdlsim.o libdlbridge.o libdliptun.o
+	usage.o libdlether.o libdlsim.o libdlbridge.o libdliptun.o \
+	libdloverlay.o
 
 include ../../Makefile.lib
 
@@ -37,23 +38,20 @@ include ../../Makefile.rootfs
 
 LIBS =		$(DYNLIB)
 LDLIBS +=	-ldevinfo -lc -linetutil -lsocket -lscf -lrcm -lnvpair \
-		-lexacct -lkstat -lpool
+		-lexacct -lkstat -lpool -lvarpd
 
 SRCDIR =	../common
 
 CFLAGS +=	$(CCVERBOSE)
-CERRWARN +=	-_gcc=-Wno-parentheses
-CERRWARN +=	-_gcc=-Wno-switch
-CERRWARN +=	-_gcc=-Wno-unused-label
-CERRWARN +=	$(CNOWARN_UNINIT)
 CPPFLAGS +=	-I$(SRCDIR) -D_REENTRANT
 
 # not linted
 SMATCH=off
 
+CSTD=		$(CSTD_GNU99)
+
 .KEEP_STATE:
 
 all:		$(LIBS)
-
 
 include $(SRC)/lib/Makefile.targ

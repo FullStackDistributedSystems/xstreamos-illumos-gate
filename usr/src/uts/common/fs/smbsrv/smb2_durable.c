@@ -10,7 +10,8 @@
  */
 
 /*
- * Copyright 2020 Tintri by DDN, Inc. All rights reserved.
+ * Copyright 2017-2022 Tintri by DDN, Inc. All rights reserved.
+ * Copyright 2022 RackTop Systems, Inc.
  */
 
 /*
@@ -350,8 +351,8 @@ smb2_dh_import_share(void *arg)
 	 * Open the ext. attr dir under the share root and
 	 * import CA handles for this share.
 	 */
-	if (smb_odir_openat(sr, snode, &od) != 0) {
-		cmn_err(CE_NOTE, "Share [%s] CA import, no xattr dir?",
+	if (smb_odir_openat(sr, snode, &od, B_FALSE) != 0) {
+		cmn_err(CE_NOTE, "!Share [%s] CA import, no xattr dir?",
 		    shr->shr_name);
 		goto out;
 	}
@@ -1426,7 +1427,7 @@ smb2_dh_reconnect(smb_request_t *sr)
 	/*
 	 * The ofile is now in the caller's session & tree.
 	 *
-	 * In case smb_ofile_hold or smb_oplock_send_brk() are
+	 * In case smb_ofile_hold or smb_oplock_send_break() are
 	 * waiting for state RECONNECT to complete, wakeup.
 	 */
 	mutex_enter(&of->f_mutex);

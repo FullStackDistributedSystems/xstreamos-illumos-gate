@@ -14,9 +14,10 @@
 # Copyright 2020 Joyent, Inc.
 # Copyright 2021 Tintri by DDN, Inc. All rights reserved.
 # Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
+# Copyright 2022 Oxide Computer Company
 #
 
-SUBDIRS_i386 = i386 imc
+SUBDIRS_i386 = i386 imc zen_umc
 
 SUBDIRS =       \
 		cores \
@@ -27,6 +28,8 @@ SUBDIRS =       \
 		libtopo \
 		pf_key \
 		poll \
+		portfs \
+		regression \
 		sdevfs \
 		secflags \
 		sigqueue \
@@ -43,6 +46,7 @@ PROGS = \
 	clock_gettime \
 	eventfd \
 	odirectory \
+	ucontext \
 	writev
 
 CPPFLAGS += -D_REENTRANT
@@ -61,6 +65,9 @@ clock_gettime.32 :=	LDLIBS += -lproc
 clock_gettime.32 :=	CSTD = $(CSTD_GNU99)
 clock_gettime.64 :=	LDLIBS64 += -lproc
 clock_gettime.64 :=	CSTD = $(CSTD_GNU99)
+
+ucontext.32 :=		SMOFF += unreachable
+ucontext.64 :=		SMOFF += unreachable
 
 writev.32 :=		CPPFLAGS += -D_FILE_OFFSET_BITS=64
 writev.32 :=		CSTD = $(CSTD_GNU99)

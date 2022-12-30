@@ -343,7 +343,6 @@ COMMON_SUBDIRS=		\
 	pwck		\
 	pwconv		\
 	pwd		\
-	pyzfs		\
 	raidctl		\
 	raidz_test	\
 	ramdiskadm	\
@@ -379,7 +378,6 @@ COMMON_SUBDIRS=		\
 	setfacl		\
 	setmnt		\
 	setpgrp		\
-	setuname	\
 	sgs		\
 	sh		\
 	sleep		\
@@ -422,7 +420,6 @@ COMMON_SUBDIRS=		\
 	tic		\
 	time		\
 	tip		\
-	tnf		\
 	touch		\
 	tput		\
 	tr		\
@@ -446,6 +443,7 @@ COMMON_SUBDIRS=		\
 	utmpd		\
 	uuidgen		\
 	valtools	\
+	varpd		\
 	vgrind		\
 	vi		\
 	volcheck	\
@@ -676,7 +674,6 @@ MSGSUBDIRS=		\
 	ptools		\
 	pwconv		\
 	pwd		\
-	pyzfs		\
 	raidctl		\
 	ramdiskadm	\
 	rcap		\
@@ -717,7 +714,6 @@ MSGSUBDIRS=		\
 	tar		\
 	tbl		\
 	time		\
-	tnf		\
 	touch		\
 	tput		\
 	troff		\

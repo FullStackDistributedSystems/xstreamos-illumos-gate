@@ -12,8 +12,10 @@
 #
 # Copyright (c) 2012 by Delphix. All rights reserved.
 # Copyright 2020 Joyent, Inc.
-# Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
+# Copyright 2022 OmniOS Community Edition (OmniOSce) Association.
 # Copyright 2021 Tintri by DDN, Inc. All rights reserved.
+# Copyright 2022 Oxide Computer Company
+# Copyright 2022 MNX Cloud, Inc.
 #
 
 [DEFAULT]
@@ -36,6 +38,9 @@ tests = ['poll_test', 'epoll_test']
 
 [/opt/os-tests/tests/clock_gettime.32]
 [/opt/os-tests/tests/clock_gettime.64]
+
+[/opt/os-tests/tests/ucontext.32]
+[/opt/os-tests/tests/ucontext.64]
 
 [/opt/os-tests/tests/secflags]
 user = root
@@ -81,7 +86,7 @@ tests = ['fchmodat.32', 'fchmodat.64', 'open.32', 'open.64']
 [/opt/os-tests/tests/pf_key]
 user = root
 timeout = 180
-tests = ['acquire-compare', 'kmc-update']
+tests = ['acquire-compare', 'kmc-update', '15146']
 
 [/opt/os-tests/tests/ddi_ufm]
 user = root
@@ -133,3 +138,14 @@ tests = ['stackalign.32', 'stackalign.64']
 user = root
 pre = core_prereqs
 tests = ['coretests']
+
+[/opt/os-tests/tests/zen_umc_test]
+
+[/opt/os-tests/tests/portfs]
+tests = ['file_assoc.32', 'file_assoc.64']
+
+[/opt/os-tests/tests/regression]
+tests = [
+	'illumos-15031',
+	'illumos-15036'
+	]

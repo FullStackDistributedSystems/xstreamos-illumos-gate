@@ -20,8 +20,58 @@ post =
 outputdir = /var/tmp/test_results
 
 [/opt/bhyve-tests/tests/vmm]
-tests = ['mem_partial', 'mem_seg_map']
+user = root
+tests = [
+	'auto_destruct',
+	'cpuid_ioctl',
+	'datarw_constraints',
+	'default_capabs',
+	'drv_hold',
+	'fpu_getset',
+	'interface_version',
+	'legacy_destruct',
+	'mem_devmem',
+	'mem_partial',
+	'mem_seg_map',
+	'pause_resume',
+	'self_destruct'
+	]
+
+[/opt/bhyve-tests/tests/kdev]
+user = root
+tests = [
+	'vatpit_freq',
+	'vhpet_freq',
+	'vlapic_freq',
+	'vlapic_freq_periodic',
+	'vlapic_mmio_access',
+	'vlapic_msr_access',
+	'vpmtmr_freq'
+	]
+
+[/opt/bhyve-tests/tests/inst_emul]
+user = root
+tests = [
+	'cpuid',
+	'imul',
+	'rdmsr',
+	'wrmsr',
+	'triple_fault',
+	'exit_paging',
+	'page_dirty'
+	]
+
+[/opt/bhyve-tests/tests/viona]
+user = root
+tests = [
+	'interface_version'
+	]
 
 # Tests of userspace mevent system, built from cmd/bhyve
 [/opt/bhyve-tests/tests/mevent]
-tests = ['lists_delete', 'read_disable', 'read_pause', 'read_requeue']
+tests = ['lists_delete', 'read_disable', 'read_pause', 'read_requeue',
+	'vnode_file']
+
+[/opt/bhyve-tests/tests/mevent/vnode_zvol]
+user = root
+

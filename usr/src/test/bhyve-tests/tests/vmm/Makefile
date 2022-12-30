@@ -16,7 +16,19 @@ include $(SRC)/cmd/Makefile.cmd.64
 include $(SRC)/test/Makefile.com
 
 PROG =	mem_partial \
-	mem_seg_map
+	mem_seg_map \
+	mem_devmem \
+	fpu_getset \
+	interface_version \
+	check_iommu \
+	auto_destruct \
+	legacy_destruct \
+	self_destruct \
+	drv_hold \
+	cpuid_ioctl \
+	default_capabs \
+	datarw_constraints \
+	pause_resume
 
 COMMON_OBJS =	common.o
 CLEAN_OBJS =	$(PROG:%=%.o)
@@ -31,8 +43,9 @@ CSTD=		$(CSTD_GNU99)
 CPPFLAGS =	-I$(COMPAT)/bhyve -I$(CONTRIB)/bhyve \
 		-I$(COMPAT)/bhyve/amd64 -I$(CONTRIB)/bhyve/amd64 \
 		$(CPPFLAGS.master) \
-		-I$(SRC)/uts/i86pc/io/vmm \
-		-I$(SRC)/uts/i86pc
+		-I$(SRC)/uts/intel/io/vmm \
+		-I$(SRC)/uts/intel \
+		-I../common
 $(PROG) :=	LDLIBS += -lvmmapi
 
 all: $(PROG)
@@ -53,6 +66,10 @@ $(TESTDIR):
 
 $(TESTDIR)/%: %
 	$(INS.file)
+
+%.o: ../common/%.c
+	$(COMPILE.c) -o $@ $^
+	$(POST_PROCESS)
 
 %: %.o
 	$(LINK.c) -o $@ $< $(COMMON_OBJS) $(LDLIBS)

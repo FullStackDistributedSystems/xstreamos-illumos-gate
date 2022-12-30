@@ -21,12 +21,13 @@
 
 #
 # Copyright (c) 1991, 2010, Oracle and/or its affiliates. All rights reserved.
-# Copyright 2016 Garrett D'Amore <garrett@damore.org>
+# Copyright 2022 Garrett D'Amore <garrett@damore.org>
 # Copyright 2013 Saso Kiselkov. All rights reserved.
 # Copyright 2019 Joyent, Inc.
 # Copyright 2018 Nexenta Systems, Inc.
 # Copyright (c) 2017 by Delphix. All rights reserved.
-# Copyright 2021 Oxide Computer Company
+# Copyright 2022 Oxide Computer Company
+# Copyright 2022 RackTop Systems, Inc.
 #
 
 #
@@ -93,6 +94,10 @@ $(OBJS_DIR)/%.o:		$(COMMONBASE)/bignum/%.c
 	$(CTFCONVERT_O)
 
 $(OBJS_DIR)/%.o:		$(UTSBASE)/common/bignum/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
+$(OBJS_DIR)/%.o:		$(COMMONBASE)/bitext/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
 
@@ -394,6 +399,10 @@ $(OBJS_DIR)/%.o:	$(UTSBASE)/common/io/scsi/adapters/pmcs/%.c
 $(OBJS_DIR)/%.o:	$(UTSBASE)/common/io/scsi/adapters/pmcs/%.bin
 	$(COMPILE.b) -o $@ $<
 
+$(OBJS_DIR)/%.o:	$(UTSBASE)/common/io/scsi/adapters/pvscsi/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
 $(OBJS_DIR)/%.o:		$(COMMONBASE)/fsreparse/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
@@ -497,10 +506,6 @@ $(OBJS_DIR)/%.o:                $(UTSBASE)/common/inet/iptun/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
 
-$(OBJS_DIR)/%.o:		$(UTSBASE)/common/inet/kssl/%.c
-	$(COMPILE.c) -o $@ $<
-	$(CTFCONVERT_O)
-
 $(OBJS_DIR)/%.o:		$(UTSBASE)/common/inet/sctp/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
@@ -526,10 +531,6 @@ $(OBJS_DIR)/%.o:		$(COMMONBASE)/net/patricia/%.c
 	$(CTFCONVERT_O)
 
 $(OBJS_DIR)/%.o:		$(UTSBASE)/common/inet/udp/%.c
-	$(COMPILE.c) -o $@ $<
-	$(CTFCONVERT_O)
-
-$(OBJS_DIR)/%.o:		$(UTSBASE)/common/inet/nca/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
 
@@ -1004,6 +1005,14 @@ $(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/nxge/npi/%.c
 $(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/nxge/%.s
 	$(COMPILE.s) -o $@ $<
 
+$(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/overlay/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
+$(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/overlay/plugins/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
 $(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/pci-ide/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
@@ -1105,6 +1114,10 @@ $(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/scsi/adapters/scsi_vhci/%.c
 	$(CTFCONVERT_O)
 
 $(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/scsi/adapters/scsi_vhci/fops/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
+$(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/scsi/adapters/smrt/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
 
@@ -1520,6 +1533,14 @@ $(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/vioif/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
 
+$(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/vioscsi/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
+$(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/vio9p/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
 $(OBJS_DIR)/%.o:		$(COMMONBASE)/idspace/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
@@ -1632,10 +1653,6 @@ $(OBJS_DIR)/%.o:		$(COMMONBASE)/crypto/skein/%.c
 	$(CTFCONVERT_O)
 
 $(OBJS_DIR)/%.o:		$(UTSBASE)/common/syscall/%.c
-	$(COMPILE.c) -o $@ $<
-	$(CTFCONVERT_O)
-
-$(OBJS_DIR)/%.o:		$(UTSBASE)/common/tnf/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
 

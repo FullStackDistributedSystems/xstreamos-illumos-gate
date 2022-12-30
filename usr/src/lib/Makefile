@@ -24,8 +24,8 @@
 # Copyright (c) 2012 by Delphix. All rights reserved.
 # Copyright 2020 Joyent, Inc.
 # Copyright (c) 2013 Gary Mills
-# Copyright 2014 Garrett D'Amore <garrett@damore.org>
 # Copyright (c) 2015 Gary Mills
+# Copyright 2022 Garrett D'Amore
 # Copyright 2016 Toomas Soome <tsoome@me.com>
 # Copyright 2018 Nexenta Systems, Inc.
 # Copyright (c) 2016, Chris Fraire <cfraire@me.com>.
@@ -222,9 +222,6 @@ SUBDIRS +=				\
 	libtecla	\
 	libtermcap	\
 	libthread	\
-	libtnf		\
-	libtnfctl	\
-	libtnfprobe	\
 	libtsnet	\
 	libtsol		\
 	libumem		\
@@ -252,7 +249,6 @@ SUBDIRS +=				\
 	mpapi		\
 	mpss		\
 	nametoaddr	\
-	ncad_addr	\
 	nsswitch	\
 	pam_modules	\
 	passwdutil	\
@@ -272,6 +268,7 @@ SUBDIRS +=				\
 	sun_fc		\
 	sun_sas		\
 	udapl		\
+	varpd		\
 	watchmalloc	\
 	$($(MACH)_SUBDIRS)
 
@@ -465,9 +462,6 @@ HDRSUBDIRS=				\
 	libsysevent	\
 	libtecla	\
 	libtermcap	\
-	libtnf		\
-	libtnfctl	\
-	libtnfprobe	\
 	libtsnet	\
 	libtsol		\
 	libumem		\
@@ -491,6 +485,7 @@ HDRSUBDIRS=				\
 	smbsrv		\
 	smhba		\
 	udapl		\
+	varpd		\
 	$($(MACH)_HDRSUBDIRS)
 
 i386_HDRSUBDIRS=	\
@@ -599,7 +594,7 @@ libcontract:	libnvpair
 libcmdutils:	libavl libnvpair
 libcpc:		libpctx
 libcrypt:	libgen
-libctf:		libdwarf
+libctf:		libavl libdwarf
 libdemangle:	libcustr
 libdevice:	libnvpair
 libdevid:	libdevinfo
@@ -609,7 +604,7 @@ libdhcputil:	libgen libinetutil libdlpi
 libdiskmgt:	libdevid libdevinfo libadm libefi libkstat libsysevent
 $(INTEL_BLD)libdiskmgt: libfdisk
 libdladm:	libdevinfo libinetutil libscf librcm libexacct libkstat \
-		libpool
+		libpool varpd
 libdlpi:	libinetutil libdladm
 libds:		libsysevent
 libdtrace:	libproc libgen libctf libmapmalloc
@@ -677,7 +672,6 @@ libsun_ima:	libdevinfo libsysevent
 libsysevent:	libsecdb
 libtecla:	libcurses
 libtermcap:	libcurses
-libtnfctl:	../cmd/sgs/libelf
 libtsalarm:	libpcp
 libtsnet:	libtsol libsecdb
 libtsol:	libsecdb
@@ -721,6 +715,8 @@ storage:	libdevice libdevinfo libdevid
 sun_fc:		libdevinfo libsysevent
 sun_sas:	libdevinfo libsysevent libkstat libdevid
 udapl:		libdevinfo libdladm
+varpd:		libavl libidspace libumem libnsl libnvpair libmd5 librename \
+		libcustr
 
 #
 # The reason this rule checks for the existence of the

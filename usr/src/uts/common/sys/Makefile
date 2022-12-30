@@ -22,13 +22,14 @@
 #
 # Copyright (c) 1989, 2010, Oracle and/or its affiliates. All rights reserved.
 # Copyright 2019 Joyent, Inc.
-# Copyright 2013 Garrett D'Amore <garrett@damore.org>
+# Copyright 2022 Garrett D'Amore
 # Copyright 2013 Saso Kiselkov. All rights reserved.
 # Copyright 2015 Igor Kozhukhov <ikozhukhov@gmail.com>
 # Copyright 2017 Nexenta Systems, Inc.
 # Copyright 2016 Hans Rosenfeld <rosenfeld@grumpf.hope-2000.org>
 # Copyright 2019 Peter Tribble.
 # Copyright 2015, Joyent, Inc. All rights reserved.
+# Copyright 2022 Oxide Computer Company
 #
 
 include $(SRC)/uts/Makefile.uts
@@ -89,6 +90,7 @@ CHKHDRS=			\
 	auxv_SPARC.h		\
 	avl.h			\
 	avl_impl.h		\
+	bitext.h		\
 	bitmap.h		\
 	bitset.h		\
 	bl.h			\
@@ -411,8 +413,6 @@ CHKHDRS=			\
 	msio.h			\
 	msreg.h			\
 	mtio.h			\
-	multidata.h		\
-	multidata_impl.h	\
 	mutex.h			\
 	nbmlock.h		\
 	ndifm.h			\
@@ -436,6 +436,9 @@ CHKHDRS=			\
 	ontrap.h		\
 	open.h			\
 	openpromio.h		\
+	overlay.h		\
+	overlay_common.h	\
+	overlay_target.h	\
 	panic.h			\
 	param.h			\
 	pathconf.h		\
@@ -613,10 +616,6 @@ CHKHDRS=			\
 	tirdwr.h		\
 	tiuser.h		\
 	tl.h			\
-	tnf.h			\
-	tnf_com.h		\
-	tnf_probe.h		\
-	tnf_writer.h		\
 	todio.h			\
 	tpicommon.h		\
 	ts.h			\
@@ -654,6 +653,7 @@ CHKHDRS=			\
 	vfstab.h		\
 	vgareg.h		\
 	videodev2.h		\
+	vio9p.h			\
 	visual_io.h		\
 	vlan.h			\
 	vm.h			\
@@ -979,7 +979,6 @@ SATAGENHDRS=		\
 	sata_cfgadm.h
 
 SYSEVENTHDRS=		\
-	ap_driver.h     \
 	datalink.h	\
 	dev.h		\
 	domain.h        \
@@ -1125,6 +1124,9 @@ NXGEHDRS=			\
 	nxge_virtual.h		\
 	nxge_espc.h
 
+PLATHDRS=		\
+	pci_prd.h
+
 include Makefile.syshdrs
 
 dcam/%.check:	dcam/%.h
@@ -1192,7 +1194,8 @@ CHECKHDRS=						\
 	$(I1394HDRS:%.h=1394/%.check)			\
 	$(RSMHDRS:%.h=rsm/%.check)			\
 	$(TSOLHDRS:%.h=tsol/%.check)			\
-	$(NXGEHDRS:%.h=nxge/%.check)
+	$(NXGEHDRS:%.h=nxge/%.check)			\
+	$(PLATHDRS:%.h=plat/%.check)
 
 
 .KEEP_STATE:
@@ -1204,6 +1207,7 @@ CHECKHDRS=						\
 	$(ROOTAVHDRS)		\
 	$(ROOTCRYPTOHDRS)	\
 	$(ROOTDCAMHDRS)		\
+	$(ROOTDKTPHDRS)		\
 	$(ROOTISOHDRS)		\
 	$(ROOTIDMHDRS)		\
 	$(ROOTISCSIHDRS)	\
@@ -1225,6 +1229,7 @@ CHECKHDRS=						\
 	$(ROOTIBMFHDRS)		\
 	$(ROOTOFHDRS)		\
 	$(ROOTRDMAHDRS)		\
+	$(ROOTSATAGENHDRS)	\
 	$(ROOTSOL_OFSHDRS)	\
 	$(ROOTSOL_UMADHDRS)	\
 	$(ROOTSOL_UVERBSHDRS)	\
@@ -1232,6 +1237,7 @@ CHECKHDRS=						\
 	$(ROOTTAVORHDRS)	\
 	$(ROOTHERMONHDRS)	\
 	$(ROOTMLNXHDRS)		\
+	$(ROOTPLATHDRS)		\
 	$(ROOTSCSIHDRS)		\
 	$(ROOTSCSIADHDRS)	\
 	$(ROOTSCSICONFHDRS)	\
@@ -1239,6 +1245,7 @@ CHECKHDRS=						\
 	$(ROOTSCSIGENHDRS)	\
 	$(ROOTSCSIIMPLHDRS)	\
 	$(ROOTSCSIVHCIHDRS)	\
+	$(ROOTSCSITARGETSHDRS)	\
 	$(ROOTSDCARDHDRS)	\
 	$(ROOTSYSEVENTHDRS)     \
 	$(ROOTCONTRACTHDRS)     \
@@ -1272,6 +1279,7 @@ install_h:			\
 	$(ROOTAVHDRS)		\
 	$(ROOTCRYPTOHDRS)	\
 	$(ROOTDCAMHDRS)		\
+	$(ROOTDKTPHDRS)		\
 	$(ROOTISOHDRS)		\
 	$(ROOTIDMHDRS)		\
 	$(ROOTISCSIHDRS)	\
@@ -1293,6 +1301,7 @@ install_h:			\
 	$(ROOTIBMFHDRS)		\
 	$(ROOTOFHDRS)		\
 	$(ROOTRDMAHDRS)		\
+	$(ROOTSATAGENHDRS)	\
 	$(ROOTSOL_OFSHDRS)	\
 	$(ROOTSOL_UMADHDRS)	\
 	$(ROOTSOL_UVERBSHDRS)	\
@@ -1300,6 +1309,7 @@ install_h:			\
 	$(ROOTTAVORHDRS)	\
 	$(ROOTHERMONHDRS)	\
 	$(ROOTMLNXHDRS)		\
+	$(ROOTPLATHDRS)		\
 	$(ROOTSCSIHDRS)		\
 	$(ROOTSCSIADHDRS)	\
 	$(ROOTSCSIISCSIHDRS)	\
@@ -1307,6 +1317,7 @@ install_h:			\
 	$(ROOTSCSIGENHDRS)	\
 	$(ROOTSCSIIMPLHDRS)	\
 	$(ROOTSCSIVHCIHDRS)     \
+	$(ROOTSCSITARGETSHDRS)	\
 	$(ROOTSDCARDHDRS)	\
 	$(ROOTSYSEVENTHDRS)     \
 	$(ROOTCONTRACTHDRS)     \
