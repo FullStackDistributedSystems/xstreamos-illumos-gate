@@ -39,6 +39,7 @@
 
 /*
  * Copyright (c) 2017 by Delphix. All rights reserved.
+ * Copyright 2022 RackTop Systems, Inc.
  */
 
 /*
@@ -101,7 +102,10 @@ static void			vmbus_xcall(vmbus_xcall_func_t, void *);
 static void			*vmbus_state = NULL;
 static struct vmbus_softc	*vmbus_sc;
 
+uint32_t			vmbus_current_version;
+
 static const uint32_t		vmbus_version[] = {
+	VMBUS_VERSION_WIN10,
 	VMBUS_VERSION_WIN8_1,
 	VMBUS_VERSION_WIN8,
 	VMBUS_VERSION_WIN7,
@@ -337,6 +341,7 @@ vmbus_init(struct vmbus_softc *sc)
 		if (!error) {
 			char version[16];
 
+			vmbus_current_version = vmbus_version[i];
 			sc->vmbus_version = vmbus_version[i];
 			(void) snprintf(version, sizeof (version),
 			    "%u.%u", VMBUS_VERSION_MAJOR(sc->vmbus_version),
@@ -982,8 +987,6 @@ vmbus_add_child(struct vmbus_channel *chan)
 	ddi_set_parent_data(chan->ch_dev, chan);
 	int err = ndi_devi_online(chan->ch_dev, 0);
 	if (err != NDI_SUCCESS) {
-		(void) ndi_devi_free(chan->ch_dev);
-		chan->ch_dev = NULL;
 		mutex_exit(&vmbus_lock);
 		dev_err(parent, CE_CONT, "?failed to online: classid %s, "
 		    "devname %s for chan%u, err %d\n", classid, devname,

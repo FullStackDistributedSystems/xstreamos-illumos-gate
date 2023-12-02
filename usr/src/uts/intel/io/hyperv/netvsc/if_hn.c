@@ -946,16 +946,19 @@ hn_txdesc_dmamap_load(struct hn_tx_ring *txr, struct hn_txdesc *txd,
 			return (ENOMEM);
 		}
 		ASSERT(cookie_count > 0);
-		for (int i = 0; i < cookie_count; i++) {
+
+		const ddi_dma_cookie_t *c;
+
+		for (c = ddi_dma_cookie_iter(txr->hn_data_dmah, NULL);
+		    c != NULL; c = ddi_dma_cookie_iter(txr->hn_data_dmah, c)) {
 			if (nsegs == HN_GPACNT_MAX) {
 				(void) ddi_dma_unbind_handle(txr->hn_data_dmah);
 				return (EAGAIN);
 			}
 			struct vmbus_gpa *gpa = &txr->hn_gpa[nsegs];
-			gpa->gpa_page = btop(cookie.dmac_laddress);
-			gpa->gpa_ofs = cookie.dmac_laddress & PAGEOFFSET;
-			gpa->gpa_len = cookie.dmac_size;
-			ddi_dma_nextcookie(txr->hn_data_dmah, &cookie);
+			gpa->gpa_page = btop(c->dmac_laddress);
+			gpa->gpa_ofs = c->dmac_laddress & PAGEOFFSET;
+			gpa->gpa_len = c->dmac_size;
 			nsegs++;
 		}
 		/*
@@ -1135,8 +1138,7 @@ hn_tx_prepare_rndis_pkt(struct hn_softc *sc, struct rndis_packet_msg *pkt,
 	/*
 	 * Get hardware checksum and lso info for mblk
 	 */
-	hcksum_retrieve(mp, NULL, NULL, &hck_start, NULL, NULL, NULL,
-	    &hck_flags);
+	mac_hcksum_get(mp, &hck_start, NULL, NULL, NULL, &hck_flags);
 	mac_lso_get(mp, &mss, &lso_flag);
 
 	unsigned char *ptr = mp->b_rptr;
@@ -2468,6 +2470,41 @@ hn_synth_detach(struct hn_softc *sc)
 
 	/* Detach all of the channels. */
 	hn_detach_allchans(sc);
+
+	if (vmbus_current_version >= VMBUS_VERSION_WIN10 &&
+	    sc->hn_rxbuf_gpadl != 0) {
+		/*
+		 * Host is post-Win2016, disconnect RXBUF from primary channel
+		 * here.
+		 */
+		int error;
+
+		error = vmbus_chan_gpadl_disconnect(sc->hn_prichan,
+		    sc->hn_rxbuf_gpadl);
+		if (error) {
+			HN_WARN(sc, "rxbuf gpadl disconn failed: %d",
+			    error);
+			sc->hn_flags |= HN_FLAG_RXBUF_REF;
+		}
+		sc->hn_rxbuf_gpadl = 0;
+	}
+
+	if (vmbus_current_version >= VMBUS_VERSION_WIN10 &&
+	    sc->hn_chim_gpadl != 0) {
+		/*
+		 * Host is post-Win2016, disconnect chimney sending buffer from
+		 * primary channel here.
+		 */
+		int error;
+
+		error = vmbus_chan_gpadl_disconnect(sc->hn_prichan,
+		    sc->hn_chim_gpadl);
+		if (error) {
+			HN_WARN(sc, "chim gpadl disconn failed: %d", error);
+			sc->hn_flags |= HN_FLAG_CHIM_REF;
+		}
+		sc->hn_chim_gpadl = 0;
+	}
 
 	sc->hn_flags &= ~HN_FLAG_SYNTH_ATTACHED;
 }
