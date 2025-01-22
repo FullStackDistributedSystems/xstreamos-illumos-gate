@@ -63,9 +63,9 @@ $(LIBPROG):	$(OBJS)
 	$(COMPILE.c) $< $(CTFCONVERT_HOOK)
 
 clean:
-	$(RM) $(FSCKOBJS) $(UFSOBJS)
+	$(RM) $(FSCKOBJS) $(UFSOBJS) $(FSLIB)
 
-cscope.out tags: FRC
-	$(XREF) -f -x $@
+include ../../../../Makefile.xref
 
-FRC:
+XREFFLAGS=	-f -x
+

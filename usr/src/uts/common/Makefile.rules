@@ -26,8 +26,8 @@
 # Copyright 2019 Joyent, Inc.
 # Copyright 2018 Nexenta Systems, Inc.
 # Copyright (c) 2017 by Delphix. All rights reserved.
-# Copyright 2022 Oxide Computer Company
-# Copyright 2022 RackTop Systems, Inc.
+# Copyright 2023 Oxide Computer Company
+# Copyright 2023 RackTop Systems, Inc.
 #
 
 #
@@ -970,6 +970,14 @@ $(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/scsi/adapters/mpt_sas/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
 
+$(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/scsi/adapters/lmrc/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
+$(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/scsi/adapters/smartpqi/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
 $(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/mxfe/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
@@ -1002,7 +1010,7 @@ $(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/nxge/npi/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
 
-$(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/nxge/%.s
+$(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/nxge/%.S
 	$(COMPILE.s) -o $@ $<
 
 $(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/overlay/%.c
@@ -1569,6 +1577,10 @@ $(OBJS_DIR)/%.o:		$(COMMONBASE)/bootbanner/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
 
+$(OBJS_DIR)/%.o:		$(COMMONBASE)/ilstr/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
 $(OBJS_DIR)/%.o:		$(COMMONBASE)/list/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
@@ -1693,7 +1705,7 @@ $(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/tpm/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
 
-$(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/tpm/%.s
+$(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/tpm/%.S
 	$(COMPILE.s) -o $@ $<
 
 $(OBJS_DIR)/bz2%.o:		$(COMMONBASE)/bzip2/%.c

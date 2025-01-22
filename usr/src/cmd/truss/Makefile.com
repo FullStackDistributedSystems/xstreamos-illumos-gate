@@ -24,6 +24,7 @@
 # Copyright 2010 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
 # Copyright 2019 Joyent, Inc.
+# Copyright 2023 Oxide Computer Co.
 #
 
 PROG=	truss
@@ -34,6 +35,9 @@ OBJS=	main.o listopts.o ipc.o actions.o expound.o codes.o print.o \
 SRCS=	$(OBJS:%.o=../%.c)
 
 include ../../Makefile.cmd
+include ../../Makefile.ctf
+
+CTF_MODE	= link
 
 CFLAGS		+= $(CCVERBOSE)
 CFLAGS64	+= $(CCVERBOSE)
@@ -51,15 +55,11 @@ CPPFLAGS += -D_REENTRANT -D_LARGEFILE64_SOURCE=1
 CPPFLAGS += -I$(SRC)/uts/common/fs/zfs
 CPPFLAGS += -I$(SRC)/uts/common
 
-LINTFLAGS += -erroff=E_STATIC_UNUSED
-LINTFLAGS += -erroff=E_NAME_USED_NOT_DEF2
-LINTFLAGS64 += -erroff=E_STATIC_UNUSED
-LINTFLAGS64 += -erroff=E_NAME_USED_NOT_DEF2
-
 .KEEP_STATE:
 
 %.o:	../%.c
 	$(COMPILE.c) $<
+	$(POST_PROCESS_O)
 
 all: $(PROG)
 

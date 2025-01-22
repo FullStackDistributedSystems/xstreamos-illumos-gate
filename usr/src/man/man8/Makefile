@@ -17,9 +17,9 @@
 # Copyright (c) 2017, Chris Fraire <cfraire@me.com>.
 # Copyright 2018 Nexenta Systems, Inc.
 # Copyright 2020 Joyent, Inc.
-# Copyright 2020 Peter Tribble
 # Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
 # Copyright 2022 Garrett D'Amore
+# Copyright 2023 Peter Tribble
 #
 
 include		$(SRC)/Makefile.master
@@ -91,7 +91,6 @@ _MANFILES=	6to4relay.8		\
 		devattr.8		\
 		devfree.8		\
 		devfsadm.8		\
-		device_remap.8		\
 		devinfo.8		\
 		devlinks.8		\
 		devnm.8			\
@@ -135,7 +134,6 @@ _MANFILES=	6to4relay.8		\
 		fmstat.8		\
 		fmthard.8		\
 		format.8		\
-		fruadm.8		\
 		fsck.8			\
 		fsck_pcfs.8		\
 		fsck_udfs.8		\
@@ -362,14 +360,12 @@ _MANFILES=	6to4relay.8		\
 		pppstats.8		\
 		praudit.8		\
 		print-service.8		\
-		printmgr.8		\
 		projadd.8		\
 		projdel.8		\
 		projmod.8		\
 		prstat.8		\
 		prtconf.8		\
 		prtdiag.8		\
-		prtfru.8		\
 		prtpicl.8		\
 		prtvtoc.8		\
 		psradm.8		\
@@ -426,7 +422,6 @@ _MANFILES=	6to4relay.8		\
 		sasinfo.8		\
 		savecore.8		\
 		sbdadm.8		\
-		scadm.8			\
 		sdpadm.8		\
 		sendmail.8		\
 		share.8			\
@@ -549,18 +544,6 @@ i386_MANFILES=			\
 		nvmeadm.8	\
 		pptadm.8	\
 		rdmsr.8
-
-sparc_MANFILES=	dcs.8		\
-		drd.8		\
-		efdaemon.8	\
-		ldmad.8		\
-		monitor.8	\
-		obpsym.8	\
-		oplhpd.8	\
-		prtdscp.8	\
-		sckmd.8		\
-		sf880drd.8	\
-		vntsd.8
 
 MANLINKS=	acctcon1.8			\
 		acctcon2.8			\

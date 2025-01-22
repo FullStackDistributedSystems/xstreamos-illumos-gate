@@ -26,6 +26,7 @@
  * Copyright (c) 2015, Joyent, Inc.
  * Copyright 2020 Peter Tribble.
  * Copyright 2022 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2023 Oxide Computer Company
  */
 
 #include <unistd.h>
@@ -524,17 +525,19 @@ dladm_status_t
 dladm_str2bw(char *oarg, uint64_t *bw)
 {
 	char		*endp = NULL;
-	int64_t		n;
+	uint64_t	n;
+	int64_t		sn;
 	int		mult = 1;
 
 	errno = 0;
-	n = strtoull(oarg, &endp, 10);
+	sn = strtoull(oarg, &endp, 10);
 
 	if ((errno != 0) || (strlen(endp) > 1))
 		return (DLADM_STATUS_BADARG);
 
-	if (n < 0)
+	if (sn < 0)
 		return (DLADM_STATUS_BADVAL);
+	n = sn;
 
 	switch (*endp) {
 	case 'k':
@@ -685,6 +688,9 @@ dladm_class2str(datalink_class_t class, char *buf)
 	case DATALINK_CLASS_OVERLAY:
 		s = "overlay";
 		break;
+	case DATALINK_CLASS_MISC:
+		s = "misc";
+		break;
 	default:
 		s = "unknown";
 		break;
@@ -702,7 +708,7 @@ dladm_media2str(uint32_t media, char *buf)
 {
 	const char *s = "--";
 	media_type_t *mt;
-	int idx;
+	uint_t idx;
 
 	for (idx = 0; idx < MEDIATYPECOUNT; idx++) {
 		mt = media_type_table + idx;
@@ -723,7 +729,7 @@ uint32_t
 dladm_str2media(const char *buf)
 {
 	media_type_t *mt;
-	int idx;
+	uint_t idx;
 
 	for (idx = 0; idx < MEDIATYPECOUNT; idx++) {
 		mt = media_type_table + idx;
@@ -939,7 +945,7 @@ dladm_status_t
 dladm_str2protect(char *token, uint32_t *ptype)
 {
 	link_protect_t	*lp;
-	int		i;
+	uint_t		i;
 
 	for (i = 0; i < LPTYPES; i++) {
 		lp = &link_protect_types[i];
@@ -959,7 +965,7 @@ dladm_protect2str(uint32_t ptype, char *buf)
 {
 	const char	*s = "--";
 	link_protect_t	*lp;
-	int		i;
+	uint_t		i;
 
 	for (i = 0; i < LPTYPES; i++) {
 		lp = &link_protect_types[i];
@@ -1116,7 +1122,7 @@ dladm_status_t
 dladm_strs2range(char **prop_val, uint_t val_cnt, mac_propval_type_t type,
     mac_propval_range_t **range)
 {
-	int			i;
+	uint_t			i;
 	char			*endp;
 	mac_propval_range_t	*rangep;
 	dladm_status_t		status = DLADM_STATUS_OK;
@@ -1172,7 +1178,7 @@ dladm_strs2range(char **prop_val, uint_t val_cnt, mac_propval_type_t type,
 dladm_status_t
 dladm_range2list(const mac_propval_range_t *rangep, void *elem, uint_t *nelem)
 {
-	int		i, j, k;
+	uint_t		i, j, k;
 	dladm_status_t	status = DLADM_STATUS_OK;
 
 	switch (rangep->mpr_type) {
@@ -1208,7 +1214,7 @@ dladm_range2list(const mac_propval_range_t *rangep, void *elem, uint_t *nelem)
 int
 dladm_range2strs(const mac_propval_range_t *rangep, char **prop_val)
 {
-	int	i;
+	uint_t	i;
 
 	switch (rangep->mpr_type) {
 	case MAC_PROPVAL_UINT32: {
@@ -1264,7 +1270,7 @@ dladm_status_t
 dladm_list2range(void *elem, uint_t nelem, mac_propval_type_t type,
     mac_propval_range_t **range)
 {
-	int			i;
+	uint_t			i;
 	uint_t			nr = 0;
 	mac_propval_range_t	*rangep;
 	dladm_status_t		status = DLADM_STATUS_OK;

@@ -104,6 +104,7 @@ FPOBJS64=			\
 
 FPASMOBJS=			\
 	_Q_get_rp_rd.o		\
+	__quad.o		\
 	__quad_mag64.o		\
 	fpgetmask.o		\
 	fpgetrnd.o		\
@@ -111,9 +112,6 @@ FPASMOBJS=			\
 	fpsetmask.o		\
 	fpsetrnd.o		\
 	fpsetsticky.o
-
-$(__GNUC)FPASMOBJS +=		\
-	__quad.o
 
 ATOMICOBJS=			\
 	atomic.o
@@ -1050,10 +1048,6 @@ SONAME = libc.so.1
 
 CFLAGS64 += $(CCVERBOSE)
 
-# This is necessary to avoid problems with calling _ex_unwind().
-# We probably don't want any inlining anyway.
-CFLAGS64 += -xinline=
-
 CERRWARN += -_gcc=-Wno-parentheses
 CERRWARN += -_gcc=-Wno-switch
 CERRWARN += $(CNOWARN_UNINIT)
@@ -1072,9 +1066,6 @@ CERRWARN += -_gcc=-Wno-address
 THREAD_DEBUG =
 $(NOT_RELEASE_BUILD)THREAD_DEBUG = -DTHREAD_DEBUG
 
-# Make string literals read-only to save memory.
-CFLAGS64 += $(XSTRCONST)
-
 ALTPICS= $(TRACEOBJS:%=pics/%)
 
 $(DYNLIB) := BUILD.SO = $(LD) -o $@ $(GSHARED) $(DYNFLAGS) $(PICS) $(ALTPICS) $(EXTPICS)
@@ -1085,8 +1076,8 @@ sparcv9_C_PICFLAGS= $(sparcv9_C_BIGPICFLAGS)
 CFLAGS64 +=	$(EXTN_CFLAGS)
 CPPFLAGS=	-D_REENTRANT -Dsparc $(EXTN_CPPFLAGS) $(THREAD_DEBUG) \
 		-I$(LIBCBASE)/inc -I$(LIBCDIR)/inc $(CPPFLAGS.master)
-ASFLAGS=	$(EXTN_ASFLAGS) $(AS_BIGPICFLAGS) -P -D__STDC__ -D_ASM -D__sparcv9 $(CPPFLAGS) \
-		$(sparcv9_AS_XARCH)
+ASFLAGS=	$(EXTN_ASFLAGS) $(AS_BIGPICFLAGS) -D__STDC__ \
+		-D_ASM -D__sparcv9 $(CPPFLAGS) $(sparcv9_XARCH)
 
 # As a favor to the dtrace syscall provider, libc still calls the
 # old syscall traps that have been obsoleted by the *at() interfaces.
@@ -1104,7 +1095,7 @@ DYNFLAGS +=	-znow
 
 DYNFLAGS +=	$(EXTN_DYNFLAGS)
 
-BUILD.s=	$(AS) $(ASFLAGS) $< -o $@
+BUILD.s=	$(AS) $(ASFLAGS) $< -c -o $@
 
 # Override this top level flag so the compiler builds in its native
 # C99 mode.  This has been enabled to support the complex arithmetic

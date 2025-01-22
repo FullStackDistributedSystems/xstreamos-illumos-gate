@@ -20,8 +20,8 @@
  */
 /*
  * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2019 Nexenta by DDN, Inc. All rights reserved.
- * Copyright 2020 RackTop Systems, Inc.
+ * Copyright 2015-2021 Tintri by DDN, Inc. All rights reserved.
+ * Copyright 2022-2023 RackTop Systems, Inc.
  */
 
 /*
@@ -477,8 +477,10 @@ smb_auth_get_token(smb_request_t *sr)
 	 * Setup the logon object.
 	 */
 	cr = smb_cred_create(token);
-	if (cr == NULL)
+	if (cr == NULL) {
+		status = NT_STATUS_INTERNAL_ERROR;
 		goto errout;
+	}
 	privileges = smb_priv_xlate(token);
 	(void) smb_user_logon(user, cr,
 	    token->tkn_domain_name, token->tkn_account_name,
@@ -486,20 +488,13 @@ smb_auth_get_token(smb_request_t *sr)
 	crfree(cr);
 
 	/*
-	 * Some basic processing for encryption needs to be done,
-	 * even for anonymous/guest sessions. In particular,
-	 * we need to set Session.EncryptData.
-	 *
-	 * Windows handling of anon/guest and encryption is strange.
-	 * It allows these accounts to get through session setup,
-	 * even when they provide no key material.
-	 * Additionally, Windows somehow manages to have key material
-	 * for anonymous accounts under unknown circumstances.
-	 * As such, We set EncryptData on anon/guest to behave like Windows,
-	 * at least through Session Setup.
+	 * Set Session.EncryptData so encryption can be enforced,
+	 * and set up encryption keys if we have a session key.
+	 * This happens even for anonymous/guest users, as Windows
+	 * currently will send encrypted requests from them.
 	 */
 	if (sr->session->dialect >= SMB_VERS_3_0)
-		smb3_encrypt_begin(sr, token);
+		smb3_encrypt_begin(sr->uid_user, token);
 
 	/*
 	 * Save the session key, and (maybe) enable signing,

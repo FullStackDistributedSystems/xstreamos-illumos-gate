@@ -14,17 +14,19 @@
 # Copyright 2020 Joyent, Inc.
 # Copyright 2021 Tintri by DDN, Inc. All rights reserved.
 # Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
-# Copyright 2022 Oxide Computer Company
+# Copyright 2023 Oxide Computer Company
 #
 
-SUBDIRS_i386 = i386 imc zen_umc
+SUBDIRS_i386 = i386 imc zen_umc xsave
 
 SUBDIRS =       \
 		cores \
 		ddi_ufm \
 		definit \
 		file-locking \
+		ilstr \
 		ksensor \
+		ksid \
 		libtopo \
 		pf_key \
 		poll \
@@ -32,6 +34,7 @@ SUBDIRS =       \
 		regression \
 		sdevfs \
 		secflags \
+		signalfd \
 		sigqueue \
 		sockfs \
 		spoof-ras \
@@ -47,6 +50,7 @@ PROGS = \
 	eventfd \
 	odirectory \
 	ucontext \
+	getcontext_extd \
 	writev
 
 CPPFLAGS += -D_REENTRANT

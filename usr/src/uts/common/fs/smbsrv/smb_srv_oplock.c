@@ -11,7 +11,7 @@
 
 /*
  * Copyright 2021 Tintri by DDN, Inc. All rights reserved.
- * Copyright 2022 RackTop Systems, Inc.
+ * Copyright 2021-2023 RackTop Systems, Inc.
  */
 
 /*
@@ -164,6 +164,7 @@ smb_oplock_ind_break_in_ack(smb_request_t *ack_sr, smb_ofile_t *ofile,
 	smb_server_t *sv = ofile->f_server;
 	smb_node_t *node = ofile->f_node;
 	smb_request_t *sr = NULL;
+	taskqid_t tqid;
 	boolean_t use_postwork = B_TRUE;
 
 	ASSERT(RW_READ_HELD(&node->n_ofile_list.ll_lock));
@@ -248,12 +249,14 @@ smb_oplock_ind_break_in_ack(smb_request_t *ack_sr, smb_ofile_t *ofile,
 		 */
 		sr->smb2_cmd_code = SMB2_OPLOCK_BREAK;
 		smb2sr_append_postwork(ack_sr, sr);
-	} else {
-		/* Will call smb_oplock_send_break */
-		sr->smb2_status = STATUS_CANT_GRANT;
-		(void) taskq_dispatch(sv->sv_worker_pool,
-		    smb_oplock_async_break, sr, TQ_SLEEP);
+		return;
 	}
+
+	/* Will call smb_oplock_send_break */
+	sr->smb2_status = STATUS_CANT_GRANT;
+	tqid = taskq_dispatch(sv->sv_notify_pool,
+	    smb_oplock_async_break, sr, TQ_SLEEP);
+	VERIFY(tqid != TASKQID_INVALID);
 }
 
 /*
@@ -277,6 +280,7 @@ smb_oplock_ind_break(smb_ofile_t *ofile, uint32_t NewLevel,
 	smb_server_t *sv = ofile->f_server;
 	smb_node_t *node = ofile->f_node;
 	smb_request_t *sr = NULL;
+	taskqid_t tqid;
 
 	ASSERT(RW_READ_HELD(&node->n_ofile_list.ll_lock));
 	ASSERT(MUTEX_HELD(&node->n_oplock.ol_mutex));
@@ -375,8 +379,9 @@ smb_oplock_ind_break(smb_ofile_t *ofile, uint32_t NewLevel,
 	smb_oplock_hdl_update(sr);
 
 	/* Will call smb_oplock_send_break */
-	(void) taskq_dispatch(sv->sv_worker_pool,
+	tqid = taskq_dispatch(sv->sv_notify_pool,
 	    smb_oplock_async_break, sr, TQ_SLEEP);
+	VERIFY(tqid != TASKQID_INVALID);
 }
 
 /*
@@ -690,6 +695,38 @@ smb_oplock_wait_ack(smb_request_t *sr, uint32_t NewLevel)
 		rv = cv_timedwait(cv_p, &ol->ol_mutex, time);
 		if (rv < 0) {
 			/* cv_timewait timeout */
+			char *fname;
+			char *opname;
+			int rc;
+
+			/*
+			 * Get the path name of the open file
+			 */
+			fname = smb_srm_zalloc(sr, MAXPATHLEN);
+			rc = smb_node_getpath(node, NULL, fname, MAXPATHLEN);
+			if (rc != 0) {
+				/* Not expected. Just show last part. */
+				(void) snprintf(fname, MAXPATHLEN, "(?)/%s",
+				    node->od_name);
+			}
+
+			/*
+			 * Get an operation name reflecting which kind of
+			 * lease or oplock break got us here, so the log
+			 * message will say "lease break" or whatever.
+			 */
+			if (lease != NULL) {
+				opname = "lease";
+			} else if (ofile->f_oplock.og_dialect >=
+			    SMB_VERS_2_BASE) {
+				opname = "oplock2";
+			} else {
+				opname = "oplock1";
+			}
+
+			cmn_err(CE_NOTE, "!client %s %s break timeout for %s",
+			    sr->session->ip_addr_str, opname, fname);
+
 			status = NT_STATUS_CANNOT_BREAK_OPLOCK;
 			break;
 		}

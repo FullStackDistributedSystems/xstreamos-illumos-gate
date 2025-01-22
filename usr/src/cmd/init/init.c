@@ -707,7 +707,7 @@ main(int argc, char *argv[])
         	console(B_FALSE,
 		    "All other trademarks and copyrights are the property of their respective owners.\r\n\r\n");
 #else
-		bootbanner_print(init_bootbanner_print, 0);
+		bootbanner_print(init_bootbanner_print);
 #endif
 	}
 

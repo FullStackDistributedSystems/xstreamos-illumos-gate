@@ -40,6 +40,71 @@ static int	cons_check(const char *string);
 static int	cons_change(const char *string, char **);
 static int	twiddle_set(struct env_var *ev, int flags, const void *value);
 
+static int	last_input = -1;	/* input device index */
+
+/*
+ * With multiple active console devices, return index of last input
+ * device, so we can set up os_console variable to denote console
+ * device for kernel.
+ *
+ * Please note, this feature can not really work with UEFI, because
+ * efi console input is returned from any device listed in ConIn,
+ * and we have no way to check which device from ConIn actually was
+ * generating input.
+ */
+int
+cons_inputdev(void)
+{
+	int	cons;
+	int	flags = C_PRESENTIN | C_ACTIVEIN;
+	int	active = 0;
+
+	for (cons = 0; consoles[cons] != NULL; cons++)
+		if ((consoles[cons]->c_flags & flags) == flags)
+			active++;
+
+	/* With just one active console, we will not set os_console */
+	if (active == 1)
+		return (-1);
+
+	return (last_input);
+}
+
+/*
+ * Return number of array slots.
+ */
+uint_t
+cons_array_size(void)
+{
+	uint_t n;
+
+	if (consoles == NULL)
+		return (0);
+
+	for (n = 0; consoles[n] != NULL; n++)
+		;
+	return (n + 1);
+}
+
+static void
+cons_add_dev(struct console *dev)
+{
+	uint_t c = cons_array_size();
+	uint_t n = 1;
+	struct console **tmp;
+
+	if (c == 0)
+		n++;
+	tmp = realloc(consoles, (c + n) * sizeof (struct console *));
+	if (tmp == NULL)
+		return;
+	if (c > 0)
+		c--;
+	consoles = tmp;
+	consoles[c] = dev;
+	consoles[c + 1] = NULL;
+}
+
 /*
  * Detect possible console(s) to use.  If preferred console(s) have been
  * specified, mark them as active. Else, mark the first probed console
@@ -51,6 +116,20 @@ cons_probe(void)
 	int	cons;
 	int	active;
 	char	*prefconsole, *list, *console;
+
+	/* Build list of consoles */
+	consoles = NULL;
+	for (cons = 0;; cons++) {
+		if (ct_list[cons].ct_dev != NULL) {
+			cons_add_dev(ct_list[cons].ct_dev);
+			continue;
+		}
+		if (ct_list[cons].ct_init != NULL) {
+			ct_list[cons].ct_init();
+			continue;
+		}
+		break;
+	}
 
 	/* We want a callback to install the new value when this var changes. */
 	env_setenv("twiddle_divisor", EV_VOLATILE, "1", twiddle_set,
@@ -133,9 +212,15 @@ getchar(void)
 	 */
 	for (;;) {
 		for (cons = 0; consoles[cons] != NULL; cons++) {
-			if ((consoles[cons]->c_flags & flags) == flags &&
-			    ((rv = consoles[cons]->c_in(consoles[cons])) != -1))
-				return (rv);
+			if ((consoles[cons]->c_flags & flags) == flags) {
+				rv = consoles[cons]->c_in(consoles[cons]);
+				if (rv != -1) {
+#ifndef EFI
+					last_input = cons;
+#endif
+					return (rv);
+				}
+			}
 		}
 		delay(30 * 1000);	/* delay 30ms */
 	}

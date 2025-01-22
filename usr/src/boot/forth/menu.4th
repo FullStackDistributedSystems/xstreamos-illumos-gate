@@ -132,8 +132,12 @@ create init_text8 64 allot
 only forth definitions
 
 : arch-i386? ( -- BOOL ) \ Returns TRUE (-1) on i386, FALSE (0) otherwise.
-	s" arch-i386" environment? dup if
-		drop
+	\ FICL_PLATFORM_ARCHITECTURE is always defined, drop flag
+	s" FICL_PLATFORM_ARCHITECTURE" environment? drop
+	s" i386" compare 0<> if
+		true
+	else
+		false
 	then
 ;
 
@@ -1039,6 +1043,7 @@ also menu-namespace
 				dup menu_command[x]
 				getenv dup -1 <> if
 					\ Execute the stored procedure
+					cursor-normal cursor-set
 					evaluate
 
 					\ We expect there to be a non-zero
@@ -1049,11 +1054,11 @@ also menu-namespace
 					0= if
 						drop \ key pressed
 						drop \ loop iterator
-						cursor-normal cursor-set
 						exit
 					else
 						swap \ need iterator on top
 					then
+					cursor-invisible cursor-set
 				then
 
 				\ Re-adjust for missing ACPI menuitem
@@ -1081,13 +1086,15 @@ also menu-namespace
 						swap
 						dup menu_command[x]
 						getenv dup -1 <> if
+							cursor-normal
+							cursor-set
 							evaluate
 							0= if
 								2drop
-								cursor-normal
-								cursor-set
 								exit
 							then
+							cursor-invisible
+							cursor-set
 						else
 							drop
 						then

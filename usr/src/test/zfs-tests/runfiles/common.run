@@ -522,7 +522,7 @@ tests = ['ctime_001_pos' ]
 tags = ['functional', 'ctime']
 
 [tests/functional/delegate]
-tests = ['zfs_allow_001_pos', 'zfs_allow_002_pos',
+tests = ['zfs_allow_001_pos', 'zfs_allow_002_pos', 'zfs_allow_003_pos',
     'zfs_allow_004_pos', 'zfs_allow_005_pos', 'zfs_allow_006_pos',
     'zfs_allow_007_pos', 'zfs_allow_008_pos', 'zfs_allow_009_neg',
     'zfs_allow_010_pos', 'zfs_allow_011_neg', 'zfs_allow_012_neg',
@@ -756,9 +756,9 @@ tests = ['rsend_001_pos', 'rsend_002_pos', 'rsend_003_pos', 'rsend_004_pos',
     'send-c_lz4_disabled', 'send-c_recv_lz4_disabled',
     'send-c_mixed_compression', 'send-c_stream_size_estimate', 'send-cD',
     'send-c_embedded_blocks', 'send-c_resume', 'send-cpL_varied_recsize',
-    'send-c_recv_dedup', 'send_encrypted_files', 'send_encrypted_hierarchy',
-    'send_encrypted_props', 'send_encrypted_truncated_files',
-    'send_realloc_files',
+    'send-c_recv_dedup', 'send_encrypted_files', 'send_encrypted_freeobjects',
+    'send_encrypted_hierarchy', 'send_encrypted_props',
+    'send_encrypted_truncated_files', 'send_realloc_files',
     'send_realloc_encrypted_files', 'send_holds',
     'send_mixed_raw', 'send-wDR_encrypted_zvol']
 tags = ['functional', 'rsend']

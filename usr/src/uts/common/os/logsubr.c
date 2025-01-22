@@ -265,7 +265,7 @@ log_init(void)
         printf("XStreamOS is mantained and distributed by Sonicle (http://www.sonicle.com).\n");
         printf("All other trademarks and copyrights are the property of their respective owners.\n");
 #else
-	bootbanner_print(log_bootbanner_print, KM_SLEEP);
+	bootbanner_print(log_bootbanner_print);
 #endif
 #ifdef DEBUG
 	printf("DEBUG enabled\n");

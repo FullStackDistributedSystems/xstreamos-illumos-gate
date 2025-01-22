@@ -1535,7 +1535,12 @@ file path=opt/util-tests/tests/iconv_test mode=0555
 dir  path=opt/util-tests/tests/libcustr
 file path=opt/util-tests/tests/libcustr/custr_remove mode=0555
 file path=opt/util-tests/tests/libcustr/custr_trunc mode=0555
-file path=opt/util-tests/tests/libjedec_test mode=0555
+file path=opt/util-tests/tests/libjedec_spd.32 mode=0555
+file path=opt/util-tests/tests/libjedec_spd.64 mode=0555
+file path=opt/util-tests/tests/libjedec_temp.32 mode=0555
+file path=opt/util-tests/tests/libjedec_temp.64 mode=0555
+file path=opt/util-tests/tests/libjedec_test.32 mode=0555
+file path=opt/util-tests/tests/libjedec_test.64 mode=0555
 dir  path=opt/util-tests/tests/libnvpair_json
 file path=opt/util-tests/tests/libnvpair_json/json_00_blank mode=0555
 file path=opt/util-tests/tests/libnvpair_json/json_01_boolean mode=0555
@@ -1674,6 +1679,8 @@ file path=opt/util-tests/tests/mdb/typedef/tst.emptylist.mdb mode=0444
 file path=opt/util-tests/tests/mdb/typedef/tst.libctype.ksh mode=0444
 file path=opt/util-tests/tests/mdb/typedef/tst.libctype.ksh.out mode=0444
 file path=opt/util-tests/tests/mdb/typedef/tst.models.ksh mode=0444
+file path=opt/util-tests/tests/mdb/typedef/tst.radix.mdb mode=0444
+file path=opt/util-tests/tests/mdb/typedef/tst.radix.mdb.out mode=0444
 file path=opt/util-tests/tests/mdb/typedef/tst.struct.mdb mode=0444
 file path=opt/util-tests/tests/mdb/typedef/tst.struct.mdb.out mode=0444
 file path=opt/util-tests/tests/mdb/typedef/tst.structselfref.mdb mode=0444
