@@ -10,7 +10,7 @@
  */
 
 /*
- * Copyright 2023 Racktop Systems, Inc.
+ * Copyright 2024 Racktop Systems, Inc.
  */
 
 /*
@@ -51,6 +51,7 @@
 #include <sys/ddi.h>
 #include <sys/sunddi.h>
 #include <sys/scsi/scsi.h>
+#include <sys/scsi/adapters/mfi/mfi_pd.h>
 
 #include "lmrc.h"
 #include "lmrc_reg.h"
@@ -281,10 +282,6 @@ lmrc_tran_start(struct scsi_address *sa, struct scsi_pkt *pkt)
 	rc = &io_req->VendorRegion;
 	rc->rc_ld_tgtid = tgt->tgt_dev_id;
 
-	rw_enter(&lmrc->l_raidmap_lock, RW_READER);
-	rc->rc_timeout = lmrc->l_raidmap->rm_fp_pd_io_timeout;
-	rw_exit(&lmrc->l_raidmap_lock);
-
 	if (tgt->tgt_pd_info == NULL) {
 		/* This is LD I/O */
 		io_req->DevHandle = tgt->tgt_dev_id;
@@ -301,7 +298,7 @@ lmrc_tran_start(struct scsi_address *sa, struct scsi_pkt *pkt)
 
 		if (tgt->tgt_type == DTYPE_DIRECT &&
 		    lmrc->l_use_seqnum_jbod_fp) {
-			lmrc_pd_cfg_t *pdcfg;
+			mfi_pd_cfg_t *pdcfg;
 
 			rw_enter(&lmrc->l_pdmap_lock, RW_READER);
 			pdcfg = &lmrc->l_pdmap->pm_pdcfg[tgt->tgt_dev_id];
@@ -408,12 +405,19 @@ lmrc_task_mgmt(lmrc_t *lmrc, lmrc_tgt_t *tgt, uint8_t type, uint16_t smid)
 
 	if (atomic_inc_uint_nv(&lmrc->l_fw_outstanding_cmds) >
 	    lmrc->l_max_scsi_cmds) {
+		rw_exit(&tgt->tgt_lock);
 		atomic_dec_uint(&lmrc->l_fw_outstanding_cmds);
 		return (0);
 	}
 
 	mpt = lmrc_get_mpt(lmrc);
+	if (mpt == NULL) {
+		rw_exit(&tgt->tgt_lock);
+		atomic_dec_uint(&lmrc->l_fw_outstanding_cmds);
+		return (0);
+	}
 	ASSERT(mutex_owned(&mpt->mpt_lock));
+
 
 	bzero(mpt->mpt_io_frame, LMRC_MPI2_RAID_DEFAULT_IO_FRAME_SIZE);
 	tm_req = mpt->mpt_io_frame;
@@ -647,7 +651,12 @@ lmrc_tran_setup_pkt(struct scsi_pkt *pkt, int (*callback)(caddr_t),
 	ASSERT(cmd != NULL);
 
 	mpt = lmrc_get_mpt(lmrc);
+	if (mpt == NULL) {
+		rw_exit(&tgt->tgt_lock);
+		return (-1);
+	}
 	ASSERT(mutex_owned(&mpt->mpt_lock));
+
 
 	io_req = mpt->mpt_io_frame;
 

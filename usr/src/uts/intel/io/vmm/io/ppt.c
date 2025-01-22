@@ -1,5 +1,5 @@
 /*-
- * SPDX-License-Identifier: BSD-2-Clause-FreeBSD
+ * SPDX-License-Identifier: BSD-2-Clause
  *
  * Copyright (c) 2011 NetApp, Inc.
  * All rights reserved.
@@ -24,8 +24,6 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- * $FreeBSD$
  */
 
 /*
@@ -34,7 +32,6 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -488,6 +485,47 @@ ppt_bar_verify_mmio(struct pptdev *ppt, uint64_t base, uint64_t size)
 	return (B_FALSE);
 }
 
+static boolean_t
+ppt_toggle_bar(struct pptdev *ppt, boolean_t enable)
+{
+	/*
+	 * Enable/disable bus mastering and BAR decoding based on the BAR
+	 * configuration. Bhyve emulates the COMMAND register so we won't see
+	 * the bits changing there.
+	 */
+	ddi_acc_handle_t hdl;
+	uint16_t cmd;
+
+	if (pci_config_setup(ppt->pptd_dip, &hdl) != DDI_SUCCESS)
+		return (B_FALSE);
+	cmd = pci_config_get16(hdl, PCI_CONF_COMM);
+
+	if (enable) {
+		cmd |= PCI_COMM_ME;
+
+		for (uint_t i = 0; i < PCI_BASE_NUM; i++) {
+			const struct pptbar *bar = &ppt->pptd_bars[i];
+
+			switch (bar->type) {
+			case PCI_ADDR_MEM32:
+			case PCI_ADDR_MEM64:
+				cmd |= PCI_COMM_MAE;
+				break;
+			case PCI_ADDR_IO:
+				cmd |= PCI_COMM_IO;
+				break;
+			}
+		}
+	} else {
+		cmd &= ~(PCI_COMM_ME | PCI_COMM_MAE | PCI_COMM_IO);
+	}
+
+	pci_config_put16(hdl, PCI_CONF_COMM, cmd);
+	pci_config_teardown(&hdl);
+
+	return (B_TRUE);
+}
+
 static int
 ppt_ddi_attach(dev_info_t *dip, ddi_attach_cmd_t cmd)
 {
@@ -517,6 +555,8 @@ ppt_ddi_attach(dev_info_t *dip, ddi_attach_cmd_t cmd)
 	    DDI_PSEUDO, 0) != DDI_SUCCESS) {
 		goto fail;
 	}
+
+	ppt_toggle_bar(ppt, B_FALSE);
 
 	mutex_enter(&pptdev_mtx);
 	list_insert_tail(&pptdev_list, ppt);
@@ -1034,6 +1074,8 @@ ppt_assign_device(struct vm *vm, int pptfd)
 		goto done;
 	}
 
+	ppt_toggle_bar(ppt, B_TRUE);
+
 	ppt->vm = vm;
 	iommu_remove_device(iommu_host_domain(), pci_get_bdf(ppt->pptd_dip));
 	iommu_add_device(vm_iommu_domain(vm), pci_get_bdf(ppt->pptd_dip));
@@ -1075,7 +1117,6 @@ ppt_do_unassign(struct pptdev *ppt)
 
 	ASSERT3P(vm, !=, NULL);
 	ASSERT(MUTEX_HELD(&pptdev_mtx));
-
 
 	ppt_flr(ppt->pptd_dip, B_TRUE);
 

@@ -34,7 +34,10 @@
  * structure layout information.
  *
  * Although not part of elfdump, it is built by the makefile
- * along with it.
+ * along with it. Note, the Makefile only builds versions that
+ * are natively supported and therefore you must manually run
+ * this for other architectures.
+ *
  * To use it:
  *
  *	1) Run it, capturing the output in a file.
@@ -620,6 +623,18 @@ gen_prupanic(void)
 	END;
 }
 
+static void
+gen_prcwd(void)
+{
+	START(prcwd, prcwd_t);
+	SCALAR_FIELD(prcwd_t, prcwd_fsid, 0);
+	ARRAY_FIELD(prcwd_t, prcwd_fsname, 0);
+	ARRAY_FIELD(prcwd_t, prcwd_mntpt, 0);
+	ARRAY_FIELD(prcwd_t, prcwd_mntspec, 0);
+	ARRAY_FIELD(prcwd_t, prcwd_cwd, 0);
+	END;
+}
+
 /*ARGSUSED*/
 int
 main(int argc, char *argv[])
@@ -663,6 +678,7 @@ main(int argc, char *argv[])
 	gen_prsecflags();
 	gen_prlwpname();
 	gen_prupanic();
+	gen_prcwd();
 
 	/*
 	 * Generate the full arch_layout description
@@ -693,6 +709,7 @@ main(int argc, char *argv[])
 	(void) printf(fmt, "prsecflags");
 	(void) printf(fmt, "prlwpname");
 	(void) printf(fmt, "prupanic");
+	(void) printf(fmt, "prcwd");
 	(void) printf("};\n");
 
 	/*
@@ -910,7 +927,7 @@ get_field_info(char *tname, char *fname, char *dotname,
 	}
 
 	if (rc < 0)
-		errx(1, "Error getting info for %s.%s", stype, fname);
+		errx(1, "Error getting info for %s.%s", tname, fname);
 	if (rc == 0)
 		errx(1, "Did not find %s.%s", tname, fname);
 

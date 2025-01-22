@@ -24,6 +24,7 @@
  * Copyright (c) 2015, 2016 by Delphix. All rights reserved.
  * Copyright 2018 Joyent, Inc.
  * Copyright 2021 Oxide Computer Company
+ * Copyright 2024 MNX Cloud, Inc.
  */
 
 /* Copyright (c) 1983, 1984, 1985, 1986, 1987, 1988, 1989  AT&T */
@@ -84,6 +85,7 @@
 
 static pgcnt_t max_page_get;	/* max page_get request size in pages */
 pgcnt_t total_pages = 0;	/* total number of pages (used by /proc) */
+volatile uint64_t n_throttle = 0;
 
 /*
  * freemem_lock protects all freemem variables:
@@ -1477,6 +1479,8 @@ page_create_throttle(pgcnt_t npages, int flags)
 	uint_t	i;
 	pgcnt_t tf;	/* effective value of throttlefree */
 
+	atomic_inc_64(&n_throttle);
+
 	/*
 	 * Normal priority allocations.
 	 */
@@ -1509,7 +1513,7 @@ page_create_throttle(pgcnt_t npages, int flags)
 	tf = throttlefree -
 	    ((flags & PG_PUSHPAGE) ? pageout_reserve : 0);
 
-	cv_signal(&proc_pageout->p_cv);
+	WAKE_PAGEOUT_SCANNER(page__create__throttle);
 
 	for (;;) {
 		fm = 0;
@@ -1596,7 +1600,7 @@ checkagain:
 	}
 
 	ASSERT(proc_pageout != NULL);
-	cv_signal(&proc_pageout->p_cv);
+	WAKE_PAGEOUT_SCANNER(page__create__wait);
 
 	TRACE_2(TR_FAC_VM, TR_PAGE_CREATE_SLEEP_START,
 	    "page_create_sleep_start: freemem %ld needfree %ld",
@@ -2243,7 +2247,7 @@ page_create_va_large(vnode_t *vp, u_offset_t off, size_t bytes, uint_t flags,
 	if (nscan < desscan && freemem < minfree) {
 		TRACE_1(TR_FAC_VM, TR_PAGEOUT_CV_SIGNAL,
 		    "pageout_cv_signal:freemem %ld", freemem);
-		cv_signal(&proc_pageout->p_cv);
+		WAKE_PAGEOUT_SCANNER(va__large);
 	}
 
 	pp = rootpp;
@@ -2372,7 +2376,7 @@ page_create_va(vnode_t *vp, u_offset_t off, size_t bytes, uint_t flags,
 	if (nscan < desscan && freemem < minfree) {
 		TRACE_1(TR_FAC_VM, TR_PAGEOUT_CV_SIGNAL,
 		    "pageout_cv_signal:freemem %ld", freemem);
-		cv_signal(&proc_pageout->p_cv);
+		WAKE_PAGEOUT_SCANNER(va);
 	}
 
 	/*
@@ -4790,7 +4794,7 @@ do_page_relocate(
 	page_t *targ;
 	page_t *pl = NULL;
 	uint_t ppattr;
-	pfn_t   pfn, repl_pfn;
+	pfn_t   pfn, repl_pfn = 0;
 	uint_t	szc;
 	spgcnt_t npgs, i;
 	int repl_contig = 0;
@@ -4907,10 +4911,6 @@ do_page_relocate(
 		VM_STAT_ADD(vmm_vmstats.ppr_relocok[szc]);
 		return (0);
 	}
-#else
-#if defined(lint)
-	dofree = dofree;
-#endif
 #endif
 
 	first_repl = repl;

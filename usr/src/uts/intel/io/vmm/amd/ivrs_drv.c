@@ -1,5 +1,5 @@
 /*-
- * SPDX-License-Identifier: BSD-2-Clause-FreeBSD
+ * SPDX-License-Identifier: BSD-2-Clause
  *
  * Copyright (c) 2016, Anish Gupta (anish@freebsd.org)
  * Copyright (c) 2021 The FreeBSD Foundation
@@ -28,7 +28,6 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
 
 #include "opt_acpi.h"
 #include <sys/param.h>
@@ -413,7 +412,7 @@ ivhd_identify(driver_t *driver, device_t parent)
 		if (ivhd_devs[i] == NULL) {
 			ivhd_devs[i] = device_find_child(parent, "ivhd", i);
 			if (ivhd_devs[i] == NULL) {
-				printf("AMD-Vi: cant find ivhd%d\n", i);
+				printf("AMD-Vi: can't find ivhd%d\n", i);
 				break;
 			}
 		}

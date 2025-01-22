@@ -10,7 +10,7 @@
  */
 
 /*
- * Copyright 2023 Racktop Systems, Inc.
+ * Copyright 2024 Racktop Systems, Inc.
  */
 
 /*
@@ -113,8 +113,8 @@
  *
  * MFI commands are used internally by the driver or by user space via the ioctl
  * interface. Except for the initial IOC INIT command, all MFI commands will be
- * sent using MPT MFI passthru commands. Therefore, after the initial IOC INIT
- * command each MFI command always has a MPT command associated.
+ * sent using MPT MFI passthru commands. As the driver uses a only small number
+ * of MFI commands, each MFI command has a MPT command preallocated.
  *
  * MFI commands can be sent synchronously in "blocked" or "polled" mode, which
  * differ only in the way the driver waits for completion. When sending a
@@ -200,20 +200,26 @@
  * map locks are acquired and released as necessary with the addressed target
  * being read-locked, preventing target state updates while I/O is being done.
  *
- * Each MPT and MFI command has an associated mutex and condition variable used
- * for synchronization. In general the mutex should be held while the command is
- * set up until it has been sent to the hardware. The interrupt handler acquires
- * the mutex of each completed command before signalling completion. In case of
+ * Each MPT and MFI command has an associated mutex (mpt_lock and mfi_lock,
+ * respectively) and condition variable used for synchronization and completion
+ * signalling. In general, the mutex should be held while the command is set up
+ * until it has been sent to the hardware. The interrupt handler acquires the
+ * mutex of each completed command before signalling completion. In case of
  * command abortion, the mutex of a command to be aborted is held to block
  * completion until the ABORT or TASK MGMT command is sent to the hardware to
  * avoid races.
  *
+ * To simplify MPT command handling, the function lmrc_get_mpt() used to get a
+ * MPT command from the free list always returns the command locked. Mirroring
+ * that, lmrc_put_mpt() expects the MPT command to be locked when it is put back
+ * on the free list, unlocking it only once it had been linked onto that list.
+ *
  * Additionally, each lmrc_tgt_t has an active command list to keep track of all
- * MPT I/O commands send to a target, protected by a mutex. When iterating the
- * active command list of a target, the mutex protecting this list must be held,
- * while the command mutexes are entered and exited. When adding a command to an
- * active command list, the mutex protecting the list is acquired while the
- * command mutex is held. Care must be taken to avoid a deadlock against the
+ * MPT I/O commands send to a target, protected by its own mutex. When iterating
+ * the active command list of a target, the mutex protecting this list must be
+ * held while the command mutexes are entered and exited. When adding a command
+ * to an active command list, the mutex protecting the list is acquired while
+ * the command mutex is held. Care must be taken to avoid a deadlock against the
  * iterating functions when removing a command from an active command list: The
  * command mutex must not be held when the mutex protecting the list is entered.
  * Using the functions for active command list management ensures lock ordering.
@@ -310,7 +316,7 @@ lmrc_ctrl_attach(dev_info_t *dip)
 	lmrc = ddi_get_soft_state(lmrc_state, instance);
 	lmrc->l_dip = dip;
 
-	lmrc->l_ctrl_info = kmem_zalloc(sizeof (lmrc_ctrl_info_t), KM_SLEEP);
+	lmrc->l_ctrl_info = kmem_zalloc(sizeof (mfi_ctrl_info_t), KM_SLEEP);
 	INITLEVEL_SET(lmrc, LMRC_INITLEVEL_BASIC);
 
 	lmrc->l_class = lmrc_get_class(lmrc);
@@ -385,13 +391,13 @@ lmrc_ctrl_attach(dev_info_t *dip)
 
 	INITLEVEL_SET(lmrc, LMRC_INITLEVEL_SYNC);
 
-	if (lmrc_alloc_mfi_cmds(lmrc, LMRC_MAX_MFI_CMDS) != DDI_SUCCESS)
-		goto fail;
-	INITLEVEL_SET(lmrc, LMRC_INITLEVEL_MFICMDS);
-
 	if (lmrc_alloc_mpt_cmds(lmrc, lmrc->l_max_fw_cmds) != DDI_SUCCESS)
 		goto fail;
 	INITLEVEL_SET(lmrc, LMRC_INITLEVEL_MPTCMDS);
+
+	if (lmrc_alloc_mfi_cmds(lmrc, LMRC_MAX_MFI_CMDS) != DDI_SUCCESS)
+		goto fail;
+	INITLEVEL_SET(lmrc, LMRC_INITLEVEL_MFICMDS);
 
 	lmrc->l_thread = thread_create(NULL, 0, lmrc_thread, lmrc, 0, &p0,
 	    TS_RUN, minclsyspri);
@@ -570,7 +576,7 @@ lmrc_cleanup(lmrc_t *lmrc, boolean_t failed)
 	}
 
 	if (INITLEVEL_ACTIVE(lmrc, LMRC_INITLEVEL_BASIC)) {
-		kmem_free(lmrc->l_ctrl_info, sizeof (lmrc_ctrl_info_t));
+		kmem_free(lmrc->l_ctrl_info, sizeof (mfi_ctrl_info_t));
 		INITLEVEL_CLEAR(lmrc, LMRC_INITLEVEL_BASIC);
 	}
 
@@ -801,7 +807,7 @@ lmrc_intr_fini(lmrc_t *lmrc)
 {
 	uint_t i;
 
-	if (lmrc->l_intr_htable[0] == NULL)
+	if (lmrc->l_intr_htable == NULL || lmrc->l_intr_htable[0] == NULL)
 		return;
 
 	if ((lmrc->l_intr_cap & DDI_INTR_FLAG_BLOCK) != 0) {
@@ -942,7 +948,8 @@ lmrc_alloc_mpt_cmds(lmrc_t *lmrc, const size_t ncmd)
 	if (ret != DDI_SUCCESS)
 		return (ret);
 
-	cmds = kmem_zalloc(ncmd * sizeof (lmrc_mpt_cmd_t *), KM_SLEEP);
+	lmrc->l_mpt_cmds = cmds =
+	    kmem_zalloc(ncmd * sizeof (lmrc_mpt_cmd_t *), KM_SLEEP);
 	for (i = 0; i < ncmd; i++) {
 		cmd = kmem_zalloc(sizeof (lmrc_mpt_cmd_t), KM_SLEEP);
 
@@ -998,7 +1005,6 @@ lmrc_alloc_mpt_cmds(lmrc_t *lmrc, const size_t ncmd)
 		list_insert_tail(&lmrc->l_mpt_cmd_list, cmd);
 	}
 
-	lmrc->l_mpt_cmds = cmds;
 	return (DDI_SUCCESS);
 
 fail:
@@ -1039,34 +1045,39 @@ lmrc_alloc_mfi_cmds(lmrc_t *lmrc, const size_t ncmd)
 {
 	int ret = DDI_SUCCESS;
 	lmrc_mfi_cmd_t **cmds;
-	lmrc_mfi_cmd_t *cmd;
+	lmrc_mfi_cmd_t *mfi;
 	uint32_t i;
 
-	cmds = kmem_zalloc(ncmd * sizeof (lmrc_mfi_cmd_t *), KM_SLEEP);
+	lmrc->l_mfi_cmds = cmds =
+	    kmem_zalloc(ncmd * sizeof (lmrc_mfi_cmd_t *), KM_SLEEP);
 	for (i = 0; i < ncmd; i++) {
-		cmd = kmem_zalloc(sizeof (lmrc_mfi_cmd_t), KM_SLEEP);
+		mfi = kmem_zalloc(sizeof (lmrc_mfi_cmd_t), KM_SLEEP);
 		ret = lmrc_dma_alloc(lmrc, lmrc->l_dma_attr,
-		    &cmd->mfi_frame_dma, sizeof (lmrc_mfi_frame_t), 256,
+		    &mfi->mfi_frame_dma, sizeof (mfi_frame_t), 256,
 		    DDI_DMA_CONSISTENT);
 		if (ret != DDI_SUCCESS)
 			goto fail;
 
-		cmd->mfi_lmrc = lmrc;
-		cmd->mfi_frame = cmd->mfi_frame_dma.ld_buf;
-		cmd->mfi_idx = i;
+		mfi->mfi_lmrc = lmrc;
+		mfi->mfi_frame = mfi->mfi_frame_dma.ld_buf;
+		mfi->mfi_idx = i;
 
-		mutex_init(&cmd->mfi_lock, NULL, MUTEX_DRIVER,
+		if (lmrc_build_mptmfi_passthru(lmrc, mfi) != DDI_SUCCESS) {
+			lmrc_dma_free(&mfi->mfi_frame_dma);
+			goto fail;
+		}
+
+		mutex_init(&mfi->mfi_lock, NULL, MUTEX_DRIVER,
 		    DDI_INTR_PRI(lmrc->l_intr_pri));
 
-		cmds[i] = cmd;
-		list_insert_tail(&lmrc->l_mfi_cmd_list, cmd);
+		cmds[i] = mfi;
+		list_insert_tail(&lmrc->l_mfi_cmd_list, mfi);
 	}
 
-	lmrc->l_mfi_cmds = cmds;
 	return (DDI_SUCCESS);
 
 fail:
-	kmem_free(cmd, sizeof (lmrc_mfi_cmd_t));
+	kmem_free(mfi, sizeof (lmrc_mfi_cmd_t));
 	lmrc_free_mfi_cmds(lmrc, ncmd);
 
 	return (ret);
@@ -1075,17 +1086,25 @@ fail:
 static void
 lmrc_free_mfi_cmds(lmrc_t *lmrc, const size_t ncmd)
 {
-	lmrc_mfi_cmd_t *cmd;
+	lmrc_mfi_cmd_t *mfi;
 	size_t count = 0;
 
-	for (cmd = list_remove_head(&lmrc->l_mfi_cmd_list);
-	    cmd != NULL;
-	    cmd = list_remove_head(&lmrc->l_mfi_cmd_list)) {
-		ASSERT(lmrc->l_mfi_cmds[cmd->mfi_idx] == cmd);
-		lmrc->l_mfi_cmds[cmd->mfi_idx] = NULL;
-		lmrc_dma_free(&cmd->mfi_frame_dma);
-		mutex_destroy(&cmd->mfi_lock);
-		kmem_free(cmd, sizeof (lmrc_mfi_cmd_t));
+	for (mfi = list_remove_head(&lmrc->l_mfi_cmd_list);
+	    mfi != NULL;
+	    mfi = list_remove_head(&lmrc->l_mfi_cmd_list)) {
+		ASSERT(lmrc->l_mfi_cmds[mfi->mfi_idx] == mfi);
+		lmrc->l_mfi_cmds[mfi->mfi_idx] = NULL;
+
+		/*
+		 * lmrc_put_mpt() requires the command to be locked, unlocking
+		 * after it has been put back on the free list.
+		 */
+		mutex_enter(&mfi->mfi_mpt->mpt_lock);
+		lmrc_put_mpt(mfi->mfi_mpt);
+
+		lmrc_dma_free(&mfi->mfi_frame_dma);
+		mutex_destroy(&mfi->mfi_lock);
+		kmem_free(mfi, sizeof (lmrc_mfi_cmd_t));
 		count++;
 	}
 	VERIFY3U(count, ==, ncmd);
@@ -1205,7 +1224,7 @@ lmrc_dma_alloc(lmrc_t *lmrc, ddi_dma_attr_t attr, lmrc_dma_t *dmap, size_t len,
 		 * indicates a driver bug which should cause a panic.
 		 */
 		dev_err(lmrc->l_dip, CE_PANIC,
-		    "!failed to get DMA handle, check DMA attributes");
+		    "failed to allocate DMA handle, check DMA attributes");
 		return (ret);
 	}
 
@@ -1219,7 +1238,7 @@ lmrc_dma_alloc(lmrc_t *lmrc, ddi_dma_attr_t attr, lmrc_dma_t *dmap, size_t len,
 		 * driver bug and should cause a panic.
 		 */
 		dev_err(lmrc->l_dip, CE_PANIC,
-		    "!failed to allocated DMA memory, check DMA flags (%x)",
+		    "failed to allocate DMA memory, check DMA flags (%x)",
 		    flags);
 		return (ret);
 	}

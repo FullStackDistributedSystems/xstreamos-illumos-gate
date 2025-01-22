@@ -1,5 +1,5 @@
 /*-
- * SPDX-License-Identifier: BSD-2-Clause-FreeBSD
+ * SPDX-License-Identifier: BSD-2-Clause
  *
  * Copyright (c) 2013, Anish Gupta (akgupt3@gmail.com)
  * All rights reserved.
@@ -41,7 +41,6 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -606,6 +605,13 @@ svm_handle_inout(struct svm_softc *svm_sc, int vcpu, struct vm_exit *vmexit)
 	inout->port = (uint16_t)(info1 >> 16);
 	inout->eax = (uint32_t)(state->rax);
 
+	/*
+	 * We'll always need paging and vie info, even if we bail out early
+	 * due to missing DecodeAssist.
+	 */
+	svm_paging_info(svm_get_vmcb(svm_sc, vcpu), &paging);
+	vie = vm_vie_ctx(svm_sc->vm, vcpu);
+
 	if ((inout->flags & INOUT_STR) != 0) {
 		/*
 		 * The effective segment number in EXITINFO1[12:10] is populated
@@ -622,6 +628,7 @@ svm_handle_inout(struct svm_softc *svm_sc, int vcpu, struct vm_exit *vmexit)
 			vmexit->exitcode = VM_EXITCODE_INST_EMUL;
 			bzero(&vmexit->u.inst_emul,
 			    sizeof (vmexit->u.inst_emul));
+			vie_init_other(vie, &paging);
 			return (UNHANDLED);
 		}
 
@@ -649,8 +656,6 @@ svm_handle_inout(struct svm_softc *svm_sc, int vcpu, struct vm_exit *vmexit)
 	}
 
 	vmexit->exitcode = VM_EXITCODE_INOUT;
-	svm_paging_info(svm_get_vmcb(svm_sc, vcpu), &paging);
-	vie = vm_vie_ctx(svm_sc->vm, vcpu);
 	vie_init_inout(vie, inout, vmexit->inst_length, &paging);
 
 	/* The in/out emulation will handle advancing %rip */

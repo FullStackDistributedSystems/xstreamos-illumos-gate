@@ -14,7 +14,7 @@
  */
 
 /*
- * Test memory based streams: opem_memstream(3C), open_wmemstream(3C), and
+ * Test memory based streams: open_memstream(3C), open_wmemstream(3C), and
  * fmemopen(3C).
  */
 
@@ -1544,7 +1544,7 @@ open_wmemstream_append_nul(void)
 	}
 
 	if (c[s] != L'\0') {
-		warnx("missing nul character, found %x", c[s]);
+		warnx("missing nul character, found %" _PRIxWC, c[s]);
 		ret = B_FALSE;
 	}
 
@@ -1559,7 +1559,7 @@ open_wmemstream_append_nul(void)
 	}
 
 	if (c[s] != L'\0') {
-		warnx("missing nul character, found %x", c[s]);
+		warnx("missing nul character, found %" _PRIxWC, c[s]);
 		ret = B_FALSE;
 	}
 

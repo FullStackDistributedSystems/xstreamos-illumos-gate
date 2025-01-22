@@ -10,7 +10,7 @@
  */
 
 /*
- * Copyright 2023 Racktop Systems, Inc.
+ * Copyright 2024 Racktop Systems, Inc.
  */
 
 /*
@@ -31,6 +31,10 @@
 #include <sys/sunddi.h>
 #include <sys/scsi/scsi.h>
 
+#include <sys/scsi/adapters/mfi/mfi.h>
+#include <sys/scsi/adapters/mfi/mfi_evt.h>
+#include <sys/scsi/adapters/mfi/mfi_pd.h>
+
 #include <sys/cpuvar.h>
 
 #include "lmrc.h"
@@ -42,10 +46,9 @@ static uint32_t lmrc_read_reg(lmrc_t *, uint32_t);
 static void lmrc_write_reg(lmrc_t *, uint32_t, uint32_t);
 static int lmrc_transition_to_ready(lmrc_t *);
 static void lmrc_process_mptmfi_passthru(lmrc_t *, lmrc_mpt_cmd_t *);
-static void lmrc_build_mptmfi_passthru(lmrc_t *, lmrc_mfi_cmd_t *);
 static int lmrc_poll_mfi(lmrc_t *, lmrc_mfi_cmd_t *, uint8_t);
 static boolean_t lmrc_check_fw_fault(lmrc_t *);
-static int lmrc_get_event_log_info(lmrc_t *, lmrc_evt_log_info_t *);
+static int lmrc_get_event_log_info(lmrc_t *, mfi_evt_log_info_t *);
 static void lmrc_aen_handler(void *);
 static void lmrc_complete_aen(lmrc_t *, lmrc_mfi_cmd_t *);
 static int lmrc_register_aen(lmrc_t *, uint32_t);
@@ -350,7 +353,7 @@ lmrc_process_mpt_pkt(lmrc_t *lmrc, struct scsi_pkt *pkt, uint8_t status,
 		break;
 
 	default:
-		dev_err(lmrc->l_dip, CE_PANIC, "!command failed, status = %x, "
+		dev_err(lmrc->l_dip, CE_WARN, "!command failed, status = %x, "
 		    "ex_status = %x, cdb[0] = %x", status, ex_status,
 		    pkt->pkt_cdbp[0]);
 		pkt->pkt_reason = CMD_TRAN_ERR;
@@ -485,9 +488,8 @@ lmrc_process_replies(lmrc_t *lmrc, uint8_t queue)
 		default:
 			mutex_exit(&mpt->mpt_lock);
 			dev_err(lmrc->l_dip, CE_PANIC,
-			    "!reply received for unknown Function %x",
+			    "reply received for unknown Function %x",
 			    io_req->Function);
-			break;
 		}
 
 		mutex_exit(&mpt->mpt_lock);
@@ -522,11 +524,15 @@ lmrc_process_replies(lmrc_t *lmrc, uint8_t queue)
 /*
  * lmrc_build_mptmfi_passthru
  *
- * MFI commands are send as MPT MFI passthrough I/O requests. To send a a MFI
- * frame to the RAID controller, we need to get a MPT command, set up the MPT
- * I/O request and build a one-entry SGL pointing to the MFI command.
+ * MFI commands are send as MPT MFI passthrough I/O requests. To be able to send
+ * a MFI frame to the RAID controller, we need to have a MPT command set up as
+ * MPT I/O request and a one-entry SGL pointing to the MFI command.
+ *
+ * As there's only a small number of MFI commands compared to the amound of MPT
+ * commands, the MPT command for each MFI is pre-allocated at attach time and
+ * initialized here.
  */
-static void
+int
 lmrc_build_mptmfi_passthru(lmrc_t *lmrc, lmrc_mfi_cmd_t *mfi)
 {
 	Mpi25SCSIIORequest_t *io_req;
@@ -534,6 +540,10 @@ lmrc_build_mptmfi_passthru(lmrc_t *lmrc, lmrc_mfi_cmd_t *mfi)
 	lmrc_mpt_cmd_t *mpt;
 
 	mpt = lmrc_get_mpt(lmrc);
+	if (mpt == NULL)
+		return (DDI_FAILURE);
+
+	/* lmrc_get_mpt() should return the mpt locked */
 	ASSERT(mutex_owned(&mpt->mpt_lock));
 
 	mfi->mfi_mpt = mpt;
@@ -550,6 +560,14 @@ lmrc_build_mptmfi_passthru(lmrc_t *lmrc, lmrc_mfi_cmd_t *mfi)
 	    (void *)io_req - lmrc->l_ioreq_dma.ld_buf,
 	    LMRC_MPI2_RAID_DEFAULT_IO_FRAME_SIZE, DDI_DMA_SYNC_FORDEV),
 	    ==, DDI_SUCCESS);
+
+	/*
+	 * As we're not sending this command to the hardware any time soon,
+	 * drop the mutex before we return.
+	 */
+	mutex_exit(&mpt->mpt_lock);
+
+	return (DDI_SUCCESS);
 }
 
 /*
@@ -562,7 +580,7 @@ static void
 lmrc_process_mptmfi_passthru(lmrc_t *lmrc, lmrc_mpt_cmd_t *mpt)
 {
 	lmrc_mfi_cmd_t *mfi;
-	lmrc_mfi_header_t *hdr;
+	mfi_header_t *hdr;
 
 	VERIFY3P(mpt->mpt_mfi, !=, NULL);
 	mfi = mpt->mpt_mfi;
@@ -588,7 +606,7 @@ lmrc_process_mptmfi_passthru(lmrc_t *lmrc, lmrc_mpt_cmd_t *mpt)
 	case MFI_CMD_INVALID:
 	default:
 		dev_err(lmrc->l_dip, CE_PANIC,
-		    "!invalid MFI cmd completion received, cmd = %x",
+		    "invalid MFI cmd completion received, cmd = %x",
 		    hdr->mh_cmd);
 		break;
 	}
@@ -599,15 +617,12 @@ lmrc_process_mptmfi_passthru(lmrc_t *lmrc, lmrc_mpt_cmd_t *mpt)
  *
  * Post a MFI command to the firmware. Reset the cmd_status to invalid. Build
  * a MPT MFI passthru command if necessary and a MPT atomic request descriptor
- * before posting the request. The MFI command's mutex must be held. If the MPT
- * MFI passthru command already exists for the MFI command, the MPT command's
- * mutex must be held, too, and we don't drop it on return.
+ * before posting the request. The MFI command's mutex must be held.
  */
 void
 lmrc_issue_mfi(lmrc_t *lmrc, lmrc_mfi_cmd_t *mfi, lmrc_mfi_cmd_cb_t *cb)
 {
-	boolean_t exit_mutex = B_FALSE;
-	lmrc_mfi_header_t *hdr = &mfi->mfi_frame->mf_hdr;
+	mfi_header_t *hdr = &mfi->mfi_frame->mf_hdr;
 	lmrc_atomic_req_desc_t req_desc;
 
 	ASSERT(mutex_owned(&mfi->mfi_lock));
@@ -620,12 +635,6 @@ lmrc_issue_mfi(lmrc_t *lmrc, lmrc_mfi_cmd_t *mfi, lmrc_mfi_cmd_cb_t *cb)
 	}
 
 	hdr->mh_cmd_status = MFI_STAT_INVALID_STATUS;
-	if (mfi->mfi_mpt == NULL) {
-		exit_mutex = B_TRUE;
-		lmrc_build_mptmfi_passthru(lmrc, mfi);
-	}
-
-	ASSERT(mutex_owned(&mfi->mfi_mpt->mpt_lock));
 
 	req_desc = lmrc_build_atomic_request(lmrc, mfi->mfi_mpt,
 	    MPI2_REQ_DESCRIPT_FLAGS_SCSI_IO);
@@ -638,8 +647,6 @@ lmrc_issue_mfi(lmrc_t *lmrc, lmrc_mfi_cmd_t *mfi, lmrc_mfi_cmd_cb_t *cb)
 		    mfi->mfi_data_dma.ld_len, DDI_DMA_SYNC_FORDEV);
 
 	lmrc_send_atomic_request(lmrc, req_desc);
-	if (exit_mutex)
-		mutex_exit(&mfi->mfi_mpt->mpt_lock);
 }
 
 /*
@@ -653,7 +660,7 @@ lmrc_issue_mfi(lmrc_t *lmrc, lmrc_mfi_cmd_t *mfi, lmrc_mfi_cmd_cb_t *cb)
 static int
 lmrc_poll_mfi(lmrc_t *lmrc, lmrc_mfi_cmd_t *mfi, uint8_t max_wait)
 {
-	lmrc_mfi_header_t *hdr = &mfi->mfi_frame->mf_hdr;
+	mfi_header_t *hdr = &mfi->mfi_frame->mf_hdr;
 	lmrc_dma_t *dma = &mfi->mfi_frame_dma;
 	clock_t timeout = ddi_get_lbolt() + drv_usectohz(max_wait * MICROSEC);
 	clock_t now;
@@ -699,7 +706,7 @@ lmrc_poll_mfi(lmrc_t *lmrc, lmrc_mfi_cmd_t *mfi, uint8_t max_wait)
 int
 lmrc_wait_mfi(lmrc_t *lmrc, lmrc_mfi_cmd_t *mfi, uint8_t max_wait)
 {
-	lmrc_mfi_header_t *hdr = &mfi->mfi_frame->mf_hdr;
+	mfi_header_t *hdr = &mfi->mfi_frame->mf_hdr;
 	lmrc_dma_t *dma = &mfi->mfi_frame_dma;
 	clock_t timeout = ddi_get_lbolt() + drv_usectohz(max_wait * MICROSEC);
 	int ret;
@@ -754,7 +761,7 @@ lmrc_wakeup_mfi(lmrc_t *lmrc, lmrc_mfi_cmd_t *cmd)
 int
 lmrc_issue_blocked_mfi(lmrc_t *lmrc, lmrc_mfi_cmd_t *mfi)
 {
-	lmrc_mfi_header_t *hdr = &mfi->mfi_frame->mf_hdr;
+	mfi_header_t *hdr = &mfi->mfi_frame->mf_hdr;
 	int ret;
 
 	mutex_enter(&mfi->mfi_lock);
@@ -783,7 +790,7 @@ lmrc_issue_blocked_mfi(lmrc_t *lmrc, lmrc_mfi_cmd_t *mfi)
 static void
 lmrc_abort_cb(lmrc_t *lmrc, lmrc_mfi_cmd_t *mfi)
 {
-	lmrc_mfi_header_t *hdr = &mfi->mfi_frame->mf_hdr;
+	mfi_header_t *hdr = &mfi->mfi_frame->mf_hdr;
 
 	if (hdr->mh_cmd_status == MFI_STAT_OK)
 		hdr->mh_cmd_status = MFI_STAT_NOT_FOUND;
@@ -804,8 +811,8 @@ static int
 lmrc_abort_cmd(lmrc_t *lmrc, lmrc_mfi_cmd_t *mfi_to_abort)
 {
 	lmrc_mfi_cmd_t *mfi = lmrc_get_mfi(lmrc);
-	lmrc_mfi_header_t *hdr = &mfi->mfi_frame->mf_hdr;
-	lmrc_mfi_abort_payload_t *abort = &mfi->mfi_frame->mf_abort;
+	mfi_header_t *hdr = &mfi->mfi_frame->mf_hdr;
+	mfi_abort_payload_t *abort = &mfi->mfi_frame->mf_abort;
 	lmrc_mfi_cmd_cb_t *orig_cb = mfi_to_abort->mfi_callback;
 	int ret;
 
@@ -1518,8 +1525,8 @@ int
 lmrc_ioc_init(lmrc_t *lmrc)
 {
 	lmrc_mfi_cmd_t *mfi = lmrc_get_mfi(lmrc);
-	lmrc_mfi_header_t *hdr = &mfi->mfi_frame->mf_hdr;
-	lmrc_mfi_init_payload_t *init = &mfi->mfi_frame->mf_init;
+	mfi_header_t *hdr = &mfi->mfi_frame->mf_hdr;
+	mfi_init_payload_t *init = &mfi->mfi_frame->mf_init;
 	lmrc_req_desc_t req_desc;
 	Mpi2IOCInitRequest_t *IOCInitMsg;
 	lmrc_dma_t dma;
@@ -1604,12 +1611,12 @@ lmrc_ioc_init(lmrc_t *lmrc)
 static int
 lmrc_get_ctrl_info(lmrc_t *lmrc)
 {
-	lmrc_ctrl_info_t *ci = lmrc->l_ctrl_info;
+	mfi_ctrl_info_t *ci = lmrc->l_ctrl_info;
 	lmrc_mfi_cmd_t *mfi;
 	int ret;
 
-	mfi = lmrc_get_dcmd(lmrc, MFI_FRAME_DIR_READ, LMRC_DCMD_CTRL_GET_INFO,
-	    sizeof (lmrc_ctrl_info_t), 1);
+	mfi = lmrc_get_dcmd(lmrc, MFI_FRAME_DIR_READ, MFI_DCMD_CTRL_GET_INFO,
+	    sizeof (mfi_ctrl_info_t), 1);
 
 	if (mfi == NULL)
 		return (DDI_FAILURE);
@@ -1621,7 +1628,7 @@ lmrc_get_ctrl_info(lmrc_t *lmrc)
 
 	(void) ddi_dma_sync(mfi->mfi_data_dma.ld_hdl, 0,
 	    mfi->mfi_data_dma.ld_len, DDI_DMA_SYNC_FORKERNEL);
-	bcopy(mfi->mfi_data_dma.ld_buf, ci, sizeof (lmrc_ctrl_info_t));
+	bcopy(mfi->mfi_data_dma.ld_buf, ci, sizeof (mfi_ctrl_info_t));
 
 out:
 	lmrc_put_dcmd(lmrc, mfi);
@@ -1640,8 +1647,8 @@ out:
 int
 lmrc_fw_init(lmrc_t *lmrc)
 {
-	int drv_max_lds = LMRC_MAX_LOGICAL_DRIVES;
-	lmrc_ctrl_info_t *ci = lmrc->l_ctrl_info;
+	int drv_max_lds = MFI_MAX_LOGICAL_DRIVES;
+	mfi_ctrl_info_t *ci = lmrc->l_ctrl_info;
 	int ret;
 
 	ret = lmrc_get_ctrl_info(lmrc);
@@ -1663,7 +1670,8 @@ lmrc_fw_init(lmrc_t *lmrc)
 
 	lmrc->l_fw_supported_vd_count = min(ci->ci_max_lds, drv_max_lds);
 
-	lmrc->l_fw_supported_pd_count = min(ci->ci_max_pds, LMRC_MAX_PHYS_DEV);
+	lmrc->l_fw_supported_pd_count = min(ci->ci_max_pds,
+	    MFI_MAX_PHYSICAL_DRIVES);
 
 	lmrc->l_max_map_sz = lmrc->l_current_map_sz =
 	    lmrc->l_max_raid_map_sz * LMRC_MIN_MAP_SIZE;
@@ -1688,8 +1696,8 @@ int
 lmrc_ctrl_shutdown(lmrc_t *lmrc)
 {
 	lmrc_mfi_cmd_t *mfi = list_remove_head(&lmrc->l_mfi_cmd_list);
-	lmrc_mfi_header_t *hdr;
-	lmrc_mfi_dcmd_payload_t *dcmd;
+	mfi_header_t *hdr;
+	mfi_dcmd_payload_t *dcmd;
 
 	if (mfi == NULL)
 		return (DDI_FAILURE);
@@ -1699,7 +1707,7 @@ lmrc_ctrl_shutdown(lmrc_t *lmrc)
 
 	hdr->mh_cmd = MFI_CMD_DCMD;
 	hdr->mh_flags = MFI_FRAME_DONT_POST_IN_REPLY_QUEUE;
-	dcmd->md_opcode = LMRC_DCMD_CTRL_SHUTDOWN;
+	dcmd->md_opcode = MFI_DCMD_CTRL_SHUTDOWN;
 
 	lmrc_disable_intr(lmrc);
 	lmrc_issue_mfi(lmrc, mfi, NULL);
@@ -1729,7 +1737,7 @@ lmrc_ctrl_shutdown(lmrc_t *lmrc)
  */
 void
 lmrc_tgt_init(lmrc_tgt_t *tgt, uint16_t dev_id, char *addr,
-    lmrc_pd_info_t *pd_info)
+    mfi_pd_info_t *pd_info)
 {
 	rw_enter(&tgt->tgt_lock, RW_WRITER);
 
@@ -1766,7 +1774,7 @@ lmrc_tgt_clear(lmrc_tgt_t *tgt)
 	rw_enter(&tgt->tgt_lock, RW_WRITER);
 
 	if (tgt->tgt_pd_info != NULL)
-		kmem_free(tgt->tgt_pd_info, sizeof (lmrc_pd_info_t));
+		kmem_free(tgt->tgt_pd_info, sizeof (mfi_pd_info_t));
 
 	bzero(&tgt->tgt_dev_id,
 	    sizeof (lmrc_tgt_t) - offsetof(lmrc_tgt_t, tgt_dev_id));
@@ -1865,6 +1873,7 @@ lmrc_tgt_find(lmrc_t *lmrc, struct scsi_device *sd)
  * lmrc_get_mpt
  *
  * Get a MPT command from the list and initialize it. Return the command locked.
+ * Return NULL if the MPT command list is empty.
  */
 lmrc_mpt_cmd_t *
 lmrc_get_mpt(lmrc_t *lmrc)
@@ -1875,7 +1884,8 @@ lmrc_get_mpt(lmrc_t *lmrc)
 	mutex_enter(&lmrc->l_mpt_cmd_lock);
 	mpt = list_remove_head(&lmrc->l_mpt_cmd_list);
 	mutex_exit(&lmrc->l_mpt_cmd_lock);
-	VERIFY(mpt != NULL);
+	if (mpt == NULL)
+		return (NULL);
 
 	mutex_enter(&mpt->mpt_lock);
 	bzero(mpt->mpt_io_frame, LMRC_MPI2_RAID_DEFAULT_IO_FRAME_SIZE);
@@ -1898,8 +1908,10 @@ lmrc_get_mpt(lmrc_t *lmrc)
 /*
  * lmrc_put_mpt
  *
- * Put a MPT command back on the list. Destroy the CV, thereby
- * asserting that no one is waiting on it.
+ * Put a MPT command back on the list. The command lock must be held when this
+ * function is called, being unlocked only after the command has been put on
+ * the free list. The command CV is destroyed, thereby asserting that no one is
+ * still waiting on it.
  */
 void
 lmrc_put_mpt(lmrc_mpt_cmd_t *mpt)
@@ -1934,10 +1946,9 @@ lmrc_get_mfi(lmrc_t *lmrc)
 	VERIFY(mfi != NULL);
 
 	mutex_enter(&mfi->mfi_lock);
-	bzero(mfi->mfi_frame, sizeof (lmrc_mfi_frame_t));
+	bzero(mfi->mfi_frame, sizeof (mfi_frame_t));
 	mfi->mfi_frame->mf_hdr.mh_context = mfi->mfi_idx;
 	mfi->mfi_callback = NULL;
-	mfi->mfi_mpt = NULL;
 
 	cv_init(&mfi->mfi_cv, NULL, CV_DRIVER, NULL);
 	mutex_exit(&mfi->mfi_lock);
@@ -1961,10 +1972,6 @@ lmrc_put_mfi(lmrc_mfi_cmd_t *mfi)
 	ASSERT0(list_link_active(&mfi->mfi_node));
 
 	mutex_enter(&mfi->mfi_lock);
-	if (mfi->mfi_mpt != NULL) {
-		mutex_enter(&mfi->mfi_mpt->mpt_lock);
-		lmrc_put_mpt(mfi->mfi_mpt);
-	}
 
 	cv_destroy(&mfi->mfi_cv);
 
@@ -2031,8 +2038,8 @@ lmrc_get_dcmd(lmrc_t *lmrc, uint16_t flags, uint32_t opcode, uint32_t xferlen,
     uint_t align)
 {
 	lmrc_mfi_cmd_t *mfi = lmrc_get_mfi(lmrc);
-	lmrc_mfi_header_t *hdr = &mfi->mfi_frame->mf_hdr;
-	lmrc_mfi_dcmd_payload_t *dcmd = &mfi->mfi_frame->mf_dcmd;
+	mfi_header_t *hdr = &mfi->mfi_frame->mf_hdr;
+	mfi_dcmd_payload_t *dcmd = &mfi->mfi_frame->mf_dcmd;
 	lmrc_dma_t *dma = &mfi->mfi_data_dma;
 	int ret;
 
@@ -2083,13 +2090,13 @@ lmrc_put_dcmd(lmrc_t *lmrc, lmrc_mfi_cmd_t *mfi)
  * Get the Event Log Info from the firmware.
  */
 static int
-lmrc_get_event_log_info(lmrc_t *lmrc, lmrc_evt_log_info_t *eli)
+lmrc_get_event_log_info(lmrc_t *lmrc, mfi_evt_log_info_t *eli)
 {
 	lmrc_mfi_cmd_t *mfi;
 	int ret;
 
 	mfi = lmrc_get_dcmd(lmrc, MFI_FRAME_DIR_READ,
-	    LMRC_DCMD_CTRL_EVENT_GET_INFO, sizeof (lmrc_evt_log_info_t), 1);
+	    MFI_DCMD_CTRL_EVENT_GET_INFO, sizeof (mfi_evt_log_info_t), 1);
 
 	if (mfi == NULL)
 		return (DDI_FAILURE);
@@ -2099,7 +2106,7 @@ lmrc_get_event_log_info(lmrc_t *lmrc, lmrc_evt_log_info_t *eli)
 	if (ret != DDI_SUCCESS)
 		goto out;
 
-	bcopy(mfi->mfi_data_dma.ld_buf, eli, sizeof (lmrc_evt_log_info_t));
+	bcopy(mfi->mfi_data_dma.ld_buf, eli, sizeof (mfi_evt_log_info_t));
 
 out:
 	lmrc_put_dcmd(lmrc, mfi);
@@ -2117,15 +2124,15 @@ lmrc_aen_handler(void *arg)
 {
 	lmrc_mfi_cmd_t *mfi = arg;
 	lmrc_t *lmrc = mfi->mfi_lmrc;
-	lmrc_evt_t *evt = mfi->mfi_data_dma.ld_buf;
-	lmrc_mfi_dcmd_payload_t *dcmd = &mfi->mfi_frame->mf_dcmd;
+	mfi_evt_detail_t *evt = mfi->mfi_data_dma.ld_buf;
+	mfi_dcmd_payload_t *dcmd = &mfi->mfi_frame->mf_dcmd;
 	int ret = DDI_FAILURE;
 
 	/* Controller & Configuration specific events */
 	switch (evt->evt_code) {
-	case LMRC_EVT_CFG_CLEARED:
-	case LMRC_EVT_CTRL_HOST_BUS_SCAN_REQD:
-	case LMRC_EVT_FOREIGN_CFG_IMPORTED:
+	case MFI_EVT_CFG_CLEARED:
+	case MFI_EVT_CTRL_HOST_BUS_SCAN_REQD:
+	case MFI_EVT_FOREIGN_CFG_IMPORTED:
 		ret = lmrc_get_pd_list(lmrc);
 		if (ret != DDI_SUCCESS)
 			break;
@@ -2133,29 +2140,29 @@ lmrc_aen_handler(void *arg)
 		ret = lmrc_get_ld_list(lmrc);
 		break;
 
-	case LMRC_EVT_CTRL_PROP_CHANGED:
+	case MFI_EVT_CTRL_PROP_CHANGED:
 		ret = lmrc_get_ctrl_info(lmrc);
 		break;
 
-	case LMRC_EVT_CTRL_PATROL_READ_START:
-	case LMRC_EVT_CTRL_PATROL_READ_RESUMED:
-	case LMRC_EVT_CTRL_PATROL_READ_COMPLETE:
-	case LMRC_EVT_CTRL_PATROL_READ_CANT_START:
-	case LMRC_EVT_CTRL_PERF_COLLECTION:
-	case LMRC_EVT_CTRL_BOOTDEV_SET:
-	case LMRC_EVT_CTRL_BOOTDEV_RESET:
-	case LMRC_EVT_CTRL_PERSONALITY_CHANGE:
-	case LMRC_EVT_CTRL_PERSONALITY_CHANGE_PEND:
-	case LMRC_EVT_CTRL_NR_OF_VALID_SNAPDUMP:
+	case MFI_EVT_CTRL_PATROL_READ_START:
+	case MFI_EVT_CTRL_PATROL_READ_RESUMED:
+	case MFI_EVT_CTRL_PATROL_READ_COMPLETE:
+	case MFI_EVT_CTRL_PATROL_READ_CANT_START:
+	case MFI_EVT_CTRL_PERF_COLLECTION:
+	case MFI_EVT_CTRL_BOOTDEV_SET:
+	case MFI_EVT_CTRL_BOOTDEV_RESET:
+	case MFI_EVT_CTRL_PERSONALITY_CHANGE:
+	case MFI_EVT_CTRL_PERSONALITY_CHANGE_PEND:
+	case MFI_EVT_CTRL_NR_OF_VALID_SNAPDUMP:
 		break;
 
 	default:
 		/* LD-specific events */
-		if ((evt->evt_locale & LMRC_EVT_LOCALE_LD) != 0)
+		if ((evt->evt_cl.evt_locale & MFI_EVT_LOCALE_LD) != 0)
 			ret = lmrc_raid_aen_handler(lmrc, evt);
 
 		/* PD-specific events */
-		else if ((evt->evt_locale & LMRC_EVT_LOCALE_PD) != 0)
+		else if ((evt->evt_cl.evt_locale & MFI_EVT_LOCALE_PD) != 0)
 			ret = lmrc_phys_aen_handler(lmrc, evt);
 
 		if (ret != DDI_SUCCESS) {
@@ -2163,7 +2170,8 @@ lmrc_aen_handler(void *arg)
 			    "seqnum = %d, timestamp = %d, code = %x, "
 			    "locale = %x, class = %d, argtype = %d",
 			    evt->evt_seqnum, evt->evt_timestamp, evt->evt_code,
-			    evt->evt_locale, evt->evt_class, evt->evt_argtype);
+			    evt->evt_cl.evt_locale, evt->evt_cl.evt_class,
+			    evt->evt_argtype);
 		}
 	}
 
@@ -2175,9 +2183,7 @@ lmrc_aen_handler(void *arg)
 	 */
 	dcmd->md_mbox_32[0] = evt->evt_seqnum + 1;
 	mutex_enter(&mfi->mfi_lock);
-	mutex_enter(&mfi->mfi_mpt->mpt_lock);
 	lmrc_issue_mfi(lmrc, mfi, lmrc_complete_aen);
-	mutex_exit(&mfi->mfi_mpt->mpt_lock);
 	mutex_exit(&mfi->mfi_lock);
 }
 
@@ -2189,7 +2195,7 @@ lmrc_aen_handler(void *arg)
 static void
 lmrc_complete_aen(lmrc_t *lmrc, lmrc_mfi_cmd_t *mfi)
 {
-	lmrc_mfi_header_t *hdr = &mfi->mfi_frame->mf_hdr;
+	mfi_header_t *hdr = &mfi->mfi_frame->mf_hdr;
 
 	ASSERT(mutex_owned(&mfi->mfi_lock));
 
@@ -2225,23 +2231,19 @@ lmrc_complete_aen(lmrc_t *lmrc, lmrc_mfi_cmd_t *mfi)
 static int
 lmrc_register_aen(lmrc_t *lmrc, uint32_t seqnum)
 {
-	lmrc_evt_class_locale_t ecl = {
-		.ecl_class = LMRC_EVT_CLASS_DEBUG,
-		.ecl_locale = LMRC_EVT_LOCALE_ALL
-	};
-
 	lmrc_mfi_cmd_t *mfi;
-	lmrc_mfi_dcmd_payload_t *dcmd;
+	mfi_dcmd_payload_t *dcmd;
 
-	mfi = lmrc_get_dcmd(lmrc, MFI_FRAME_DIR_READ, LMRC_DCMD_CTRL_EVENT_WAIT,
-	    sizeof (lmrc_evt_t), 1);
+	mfi = lmrc_get_dcmd(lmrc, MFI_FRAME_DIR_READ, MFI_DCMD_CTRL_EVENT_WAIT,
+	    sizeof (mfi_evt_detail_t), 1);
 
 	if (mfi == NULL)
 		return (DDI_FAILURE);
 
 	dcmd = &mfi->mfi_frame->mf_dcmd;
 	dcmd->md_mbox_32[0] = seqnum;
-	dcmd->md_mbox_32[1] = ecl.ecl_word;
+	dcmd->md_mbox_16[2] = MFI_EVT_LOCALE_ALL;
+	dcmd->md_mbox_8[7] = MFI_EVT_CLASS_DEBUG;
 
 	mutex_enter(&mfi->mfi_lock);
 	lmrc_issue_mfi(lmrc, mfi, lmrc_complete_aen);
@@ -2258,7 +2260,7 @@ lmrc_register_aen(lmrc_t *lmrc, uint32_t seqnum)
 int
 lmrc_start_aen(lmrc_t *lmrc)
 {
-	lmrc_evt_log_info_t eli;
+	mfi_evt_log_info_t eli;
 	int ret;
 
 	bzero(&eli, sizeof (eli));

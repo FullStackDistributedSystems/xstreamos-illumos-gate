@@ -1180,7 +1180,7 @@ static int
 pad_process(topo_mod_t *mp, tf_rdata_t *rd, xmlNodePtr pxn, tnode_t *ptn,
     tf_pad_t **rpad)
 {
-	xmlNodePtr cn, gcn, psn, target;
+	xmlNodePtr cn, gcn, psn = NULL, target;
 	/* Explicitly initialize ecn to help -Wmaybe-unit */
 	xmlNodePtr def_set = NULL, ecn = NULL;
 	tnode_t *ct;
@@ -2010,8 +2010,6 @@ txml_file_parse(topo_mod_t *tmp,
 	 */
 	if (getenv("TOPOXML_VALIDATE") != NULL) {
 		dtdpath = getenv("TOPO_DTD");
-		if (dtdpath != NULL)
-			xmlLoadExtDtdDefaultValue = 0;
 		validate = 1;
 	}
 

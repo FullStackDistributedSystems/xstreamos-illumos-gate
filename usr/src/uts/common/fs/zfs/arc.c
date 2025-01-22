@@ -27,6 +27,7 @@
  * Copyright (c) 2011, 2019, Delphix. All rights reserved.
  * Copyright (c) 2020, George Amanakis. All rights reserved.
  * Copyright (c) 2020, The FreeBSD Foundation [1]
+ * Copyright 2024 Bill Sommerfeld <sommerfeld@hamachi.org>
  *
  * [1] Portions of this software were developed by Allan Jude
  *     under sponsorship from the FreeBSD Foundation.
@@ -1332,52 +1333,8 @@ arc_cksum_verify(arc_buf_t *buf)
 static boolean_t
 arc_cksum_is_equal(arc_buf_hdr_t *hdr, zio_t *zio)
 {
-	enum zio_compress compress = BP_GET_COMPRESS(zio->io_bp);
-	boolean_t valid_cksum;
-
 	ASSERT(!BP_IS_EMBEDDED(zio->io_bp));
 	VERIFY3U(BP_GET_PSIZE(zio->io_bp), ==, HDR_GET_PSIZE(hdr));
-
-	/*
-	 * We rely on the blkptr's checksum to determine if the block
-	 * is valid or not. When compressed arc is enabled, the l2arc
-	 * writes the block to the l2arc just as it appears in the pool.
-	 * This allows us to use the blkptr's checksum to validate the
-	 * data that we just read off of the l2arc without having to store
-	 * a separate checksum in the arc_buf_hdr_t. However, if compressed
-	 * arc is disabled, then the data written to the l2arc is always
-	 * uncompressed and won't match the block as it exists in the main
-	 * pool. When this is the case, we must first compress it if it is
-	 * compressed on the main pool before we can validate the checksum.
-	 */
-	if (!HDR_COMPRESSION_ENABLED(hdr) && compress != ZIO_COMPRESS_OFF) {
-		ASSERT3U(HDR_GET_COMPRESS(hdr), ==, ZIO_COMPRESS_OFF);
-		uint64_t lsize = HDR_GET_LSIZE(hdr);
-		uint64_t csize;
-
-		abd_t *cdata = abd_alloc_linear(HDR_GET_PSIZE(hdr), B_TRUE);
-		csize = zio_compress_data(compress, zio->io_abd,
-		    abd_to_buf(cdata), lsize);
-
-		ASSERT3U(csize, <=, HDR_GET_PSIZE(hdr));
-		if (csize < HDR_GET_PSIZE(hdr)) {
-			/*
-			 * Compressed blocks are always a multiple of the
-			 * smallest ashift in the pool. Ideally, we would
-			 * like to round up the csize to the next
-			 * spa_min_ashift but that value may have changed
-			 * since the block was last written. Instead,
-			 * we rely on the fact that the hdr's psize
-			 * was set to the psize of the block when it was
-			 * last written. We set the csize to that value
-			 * and zero out any part that should not contain
-			 * data.
-			 */
-			abd_zero_off(cdata, csize, HDR_GET_PSIZE(hdr) - csize);
-			csize = HDR_GET_PSIZE(hdr);
-		}
-		zio_push_transform(zio, cdata, csize, HDR_GET_PSIZE(hdr), NULL);
-	}
 
 	/*
 	 * Block pointers always store the checksum for the logical data.
@@ -1392,11 +1349,9 @@ arc_cksum_is_equal(arc_buf_hdr_t *hdr, zio_t *zio)
 	 * generated using the correct checksum algorithm and accounts for the
 	 * logical I/O size and not just a gang fragment.
 	 */
-	valid_cksum = (zio_checksum_error_impl(zio->io_spa, zio->io_bp,
+	return (zio_checksum_error_impl(zio->io_spa, zio->io_bp,
 	    BP_GET_CHECKSUM(zio->io_bp), zio->io_abd, zio->io_size,
 	    zio->io_offset, NULL) == 0);
-	zio_pop_transforms(zio);
-	return (valid_cksum);
 }
 
 /*
@@ -3319,7 +3274,13 @@ arc_hdr_realloc_crypt(arc_buf_hdr_t *hdr, boolean_t need_crypt)
 	arc_buf_t *buf;
 	kmem_cache_t *ncache, *ocache;
 
+	/*
+	 * This function requires that hdr is in the arc_anon state.
+	 * Therefore it won't have any L2ARC data for us to worry about
+	 * copying.
+	 */
 	ASSERT(HDR_HAS_L1HDR(hdr));
+	ASSERT(!HDR_HAS_L2HDR(hdr));
 	ASSERT3U(!!HDR_PROTECTED(hdr), !=, need_crypt);
 	ASSERT3P(hdr->b_l1hdr.b_state, ==, arc_anon);
 	ASSERT(!multilist_link_active(&hdr->b_l1hdr.b_arc_node));
@@ -3379,6 +3340,18 @@ arc_hdr_realloc_crypt(arc_buf_hdr_t *hdr, boolean_t need_crypt)
 	zfs_refcount_transfer(&nhdr->b_l1hdr.b_refcnt, &hdr->b_l1hdr.b_refcnt);
 	(void) zfs_refcount_remove(&nhdr->b_l1hdr.b_refcnt, FTAG);
 	ASSERT0(zfs_refcount_count(&hdr->b_l1hdr.b_refcnt));
+
+	/*
+	 * We have already asserted that we are not on any ghost lists, and we
+	 * are never called to switch from a crypt to non-crypt header
+	 * with a non-NULL rabd (this is asserted below).
+	 * This leaves the hdr's b_pabd buffer to deal with.
+	 */
+	if (hdr->b_l1hdr.b_pabd != NULL) {
+		zfs_refcount_transfer_ownership_many(
+		    &hdr->b_l1hdr.b_state->arcs_size, arc_hdr_size(hdr),
+		    hdr, nhdr);
+	}
 
 	if (need_crypt) {
 		arc_hdr_set_flags(nhdr, ARC_FLAG_PROTECTED);
@@ -6179,8 +6152,6 @@ arc_freed(spa_t *spa, const blkptr_t *bp)
 void
 arc_release(arc_buf_t *buf, void *tag)
 {
-	arc_buf_hdr_t *hdr = buf->b_hdr;
-
 	/*
 	 * It would be nice to assert that if its DMU metadata (level >
 	 * 0 || it's the dnode file), then it must be syncing context.
@@ -6188,6 +6159,8 @@ arc_release(arc_buf_t *buf, void *tag)
 	 */
 
 	mutex_enter(&buf->b_evict_lock);
+
+	arc_buf_hdr_t *hdr = buf->b_hdr;
 
 	ASSERT(HDR_HAS_L1HDR(hdr));
 
@@ -6227,6 +6200,16 @@ arc_release(arc_buf_t *buf, void *tag)
 
 	kmutex_t *hash_lock = HDR_LOCK(hdr);
 	mutex_enter(hash_lock);
+
+	/*
+	 * Wait for any other IO for this hdr, as additional
+	 * buf(s) could be about to appear, in which case
+	 * we would not want to transition hdr to arc_anon.
+	 */
+	while (HDR_IO_IN_PROGRESS(hdr)) {
+		DTRACE_PROBE1(arc_release__io, arc_buf_hdr_t *, hdr);
+		cv_wait(&hdr->b_l1hdr.b_cv, hash_lock);
+	}
 
 	/*
 	 * This assignment is only valid as long as the hash_lock is
@@ -6799,6 +6782,20 @@ arc_memory_throttle(spa_t *spa, uint64_t reserve, uint64_t txg)
 	spa->spa_lowmem_page_load = 0;
 #endif /* _KERNEL */
 	return (0);
+}
+
+/*
+ * In more extreme cases, return B_TRUE if system memory is tight enough
+ * that ZFS should defer work requiring new allocations.
+ */
+boolean_t
+arc_memory_is_low(void)
+{
+#ifdef _KERNEL
+	if (freemem < minfree + needfree)
+		return (B_TRUE);
+#endif /* _KERNEL */
+	return (B_FALSE);
 }
 
 void

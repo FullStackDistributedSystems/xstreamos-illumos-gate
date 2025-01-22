@@ -10,7 +10,7 @@
  */
 
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 #include <stdio.h>
@@ -364,14 +364,8 @@ load_payload(struct vmctx *ctx)
 	return (0);
 }
 
-struct vmctx *
-test_initialize(const char *tname)
-{
-	return (test_initialize_flags(tname, 0));
-}
-
-struct vmctx *
-test_initialize_flags(const char *tname, uint64_t create_flags)
+static struct vmctx *
+test_initialize_opts(const char *tname, uint64_t create_flags, bool is_plain)
 {
 	char vm_name[VM_MAX_NAMELEN];
 	int err;
@@ -395,6 +389,11 @@ test_initialize_flags(const char *tname, uint64_t create_flags)
 	}
 	test_vmctx = ctx;
 
+	/* No further setup required for a "plain" instance */
+	if (is_plain) {
+		return (ctx);
+	}
+
 	err = vm_setup_memory(ctx, MEM_TOTAL_SZ, VM_MMAP_ALL);
 	if (err != 0) {
 		test_fail_errno(err, "Could not set up VM memory");
@@ -414,6 +413,24 @@ test_initialize_flags(const char *tname, uint64_t create_flags)
 	}
 
 	return (ctx);
+}
+
+struct vmctx *
+test_initialize(const char *tname)
+{
+	return (test_initialize_opts(tname, 0, false));
+}
+
+struct vmctx *
+test_initialize_plain(const char *tname)
+{
+	return (test_initialize_opts(tname, 0, true));
+}
+
+struct vmctx *
+test_initialize_flags(const char *tname, uint64_t create_flags)
+{
+	return (test_initialize_opts(tname, create_flags, false));
 }
 
 void
@@ -437,11 +454,11 @@ test_reinitialize(struct vmctx *ctx, uint64_t flags)
 }
 
 int
-test_setup_vcpu(struct vmctx *ctx, int vcpu, uint64_t rip, uint64_t rsp)
+test_setup_vcpu(struct vcpu *vcpu, uint64_t rip, uint64_t rsp)
 {
 	int err;
 
-	err = vm_activate_cpu(ctx, vcpu);
+	err = vm_activate_cpu(vcpu);
 	if (err != 0 && err != EBUSY) {
 		return (err);
 	}
@@ -450,20 +467,20 @@ test_setup_vcpu(struct vmctx *ctx, int vcpu, uint64_t rip, uint64_t rsp)
 	 * Granularity bit important here for VMX validity:
 	 * "If any bit in the limit field in the range 31:20 is 1, G must be 1"
 	 */
-	err = vm_set_desc(ctx, vcpu, VM_REG_GUEST_CS, 0, UINT32_MAX,
+	err = vm_set_desc(vcpu, VM_REG_GUEST_CS, 0, UINT32_MAX,
 	    SDT_MEMERA | SEG_ACCESS_P | SEG_ACCESS_L | SEG_ACCESS_G);
 	if (err != 0) {
 		return (err);
 	}
 
-	err = vm_set_desc(ctx, vcpu, VM_REG_GUEST_SS, 0, UINT32_MAX,
+	err = vm_set_desc(vcpu, VM_REG_GUEST_SS, 0, UINT32_MAX,
 	    SDT_MEMRWA | SEG_ACCESS_P | SEG_ACCESS_L |
 	    SEG_ACCESS_D | SEG_ACCESS_G);
 	if (err != 0) {
 		return (err);
 	}
 
-	err = vm_set_desc(ctx, vcpu, VM_REG_GUEST_DS, 0, UINT32_MAX,
+	err = vm_set_desc(vcpu, VM_REG_GUEST_DS, 0, UINT32_MAX,
 	    SDT_MEMRWA | SEG_ACCESS_P | SEG_ACCESS_D | SEG_ACCESS_G);
 	if (err != 0) {
 		return (err);
@@ -473,16 +490,16 @@ test_setup_vcpu(struct vmctx *ctx, int vcpu, uint64_t rip, uint64_t rsp)
 	 * While SVM will happilly run with an otherwise unusable TR, VMX
 	 * includes it among its entry checks.
 	 */
-	err = vm_set_desc(ctx, vcpu, VM_REG_GUEST_TR, MEM_LOC_TSS, 0xff,
+	err = vm_set_desc(vcpu, VM_REG_GUEST_TR, MEM_LOC_TSS, 0xff,
 	    SDT_SYSTSSBSY | SEG_ACCESS_P);
 	if (err != 0) {
 		return (err);
 	}
-	err = vm_set_desc(ctx, vcpu, VM_REG_GUEST_GDTR, MEM_LOC_GDT, 0x1ff, 0);
+	err = vm_set_desc(vcpu, VM_REG_GUEST_GDTR, MEM_LOC_GDT, 0x1ff, 0);
 	if (err != 0) {
 		return (err);
 	}
-	err = vm_set_desc(ctx, vcpu, VM_REG_GUEST_IDTR, MEM_LOC_IDT, 0xfff, 0);
+	err = vm_set_desc(vcpu, VM_REG_GUEST_IDTR, MEM_LOC_IDT, 0xfff, 0);
 	if (err != 0) {
 		return (err);
 	}
@@ -495,7 +512,7 @@ test_setup_vcpu(struct vmctx *ctx, int vcpu, uint64_t rip, uint64_t rsp)
 		VM_REG_GUEST_LDTR,
 	};
 	for (uint_t i = 0; i < ARRAY_SIZE(unsable_segs); i++) {
-		err = vm_set_desc(ctx, vcpu, unsable_segs[i], 0, 0,
+		err = vm_set_desc(vcpu, unsable_segs[i], 0, 0,
 		    SEG_ACCESS_UNUSABLE);
 		if (err != 0) {
 			return (err);
@@ -533,13 +550,13 @@ test_setup_vcpu(struct vmctx *ctx, int vcpu, uint64_t rip, uint64_t rsp)
 	};
 	assert(ARRAY_SIZE(regnums) == ARRAY_SIZE(regvals));
 
-	err = vm_set_register_set(ctx, vcpu, ARRAY_SIZE(regnums), regnums,
+	err = vm_set_register_set(vcpu, ARRAY_SIZE(regnums), regnums,
 	    regvals);
 	if (err != 0) {
 		return (err);
 	}
 
-	err = vm_set_run_state(ctx, vcpu, VRS_RUN, 0);
+	err = vm_set_run_state(vcpu, VRS_RUN, 0);
 	if (err != 0) {
 		return (err);
 	}
@@ -580,12 +597,11 @@ which_exit_kind(struct vm_entry *ventry, const struct vm_exit *vexit)
 }
 
 enum vm_exit_kind
-test_run_vcpu(struct vmctx *ctx, int vcpu, struct vm_entry *ventry,
-    struct vm_exit *vexit)
+test_run_vcpu(struct vcpu *vcpu, struct vm_entry *ventry, struct vm_exit *vexit)
 {
 	int err;
 
-	err = vm_run(ctx, vcpu, ventry, vexit);
+	err = vm_run(vcpu, ventry, vexit);
 	if (err != 0) {
 		test_fail_errno(err, "Failure during vcpu entry");
 	}

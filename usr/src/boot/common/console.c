@@ -86,6 +86,21 @@ cons_array_size(void)
 	return (n + 1);
 }
 
+struct console *
+cons_get_console(const char *name)
+{
+	char port[5];
+
+	(void) strlcpy(port, name, sizeof (port));
+	for (uint_t i = 0; consoles[i] != NULL; i++) {
+		if (strcmp(port, consoles[i]->c_name) == 0)
+			return (consoles[i]);
+	}
+
+	printf("No such port: %s\n", port);
+	return (NULL);
+}
+
 static void
 cons_add_dev(struct console *dev)
 {
@@ -132,7 +147,7 @@ cons_probe(void)
 	}
 
 	/* We want a callback to install the new value when this var changes. */
-	env_setenv("twiddle_divisor", EV_VOLATILE, "1", twiddle_set,
+	(void) env_setenv("twiddle_divisor", EV_VOLATILE, "16", twiddle_set,
 	    env_nounset);
 
 	/* Do all console probes */
@@ -178,7 +193,7 @@ cons_probe(void)
 	else
 		console = prefconsole;
 
-	env_setenv("console", EV_VOLATILE, console, cons_set,
+	(void) env_setenv("console", EV_VOLATILE, console, cons_set,
 	    env_nounset);
 
 	free(prefconsole);
@@ -463,7 +478,7 @@ twiddle_set(struct env_var *ev, int flags, const void *value)
 		return (CMD_ERROR);
 	}
 	twiddle_divisor((uint_t)tdiv);
-	env_setenv(ev->ev_name, flags | EV_NOHOOK, value, NULL, NULL);
+	(void) env_setenv(ev->ev_name, flags | EV_NOHOOK, value, NULL, NULL);
 
 	return (CMD_OK);
 }

@@ -29,7 +29,7 @@
 # Copyright 2016 Hans Rosenfeld <rosenfeld@grumpf.hope-2000.org>
 # Copyright 2019 Peter Tribble.
 # Copyright 2015, Joyent, Inc. All rights reserved.
-# Copyright 2023 Oxide Computer Company
+# Copyright 2024 Oxide Computer Company
 #
 
 include $(SRC)/uts/Makefile.uts
@@ -238,6 +238,7 @@ CHKHDRS=			\
 	exacct_catalog.h	\
 	exacct_impl.h		\
 	exec.h			\
+	execx.h			\
 	exechdr.h		\
 	extdirent.h		\
 	fault.h			\
@@ -251,6 +252,7 @@ CHKHDRS=			\
 	fctio.h			\
 	fdbuffer.h		\
 	fdio.h			\
+	fdsync.h		\
 	feature_tests.h		\
 	fem.h			\
 	file.h			\
@@ -271,6 +273,7 @@ CHKHDRS=			\
 	gld.h			\
 	gldpriv.h		\
 	group.h			\
+	hexdump.h		\
 	hdio.h			\
 	hook.h			\
 	hook_event.h		\
@@ -348,6 +351,8 @@ CHKHDRS=			\
 	kstr.h			\
 	ksyms.h			\
 	ksynch.h		\
+	ktest.h			\
+	ktest_impl.h		\
 	ldterm.h		\
 	lgrp.h			\
 	lgrp_user.h		\
@@ -549,6 +554,7 @@ CHKHDRS=			\
 	statfs.h		\
 	statvfs.h		\
 	stdalign.h		\
+	stdbit.h		\
 	stdbool.h		\
 	stddef.h		\
 	stdint.h		\
@@ -677,7 +683,6 @@ CHKHDRS=			\
 	wait.h			\
 	waitq.h			\
 	watchpoint.h		\
-	winlockio.h		\
 	zcons.h			\
 	zone.h			\
 	xti_inet.h		\
@@ -879,6 +884,22 @@ FSHDRS=				\
 	ufs_trans.h		\
 	zfs.h			\
 	zut.h
+
+NVMEHDRS=		\
+	discovery.h		\
+	kioxia.h		\
+	kioxia_cd8.h		\
+	micron.h		\
+	micron_7300.h		\
+	micron_74x0.h		\
+	micron_x500.h		\
+	ocp.h			\
+	solidigm.h		\
+	solidigm_p5xxx.h	\
+	solidigm_ps10x0.h	\
+	wdc.h			\
+	wdc_sn840.h		\
+	wdc_sn65x.h
 
 SCSIHDRS=		\
 	scsi.h		\
@@ -1169,6 +1190,7 @@ CHECKHDRS=						\
 	$(FMFSHDRS:%.h=fm/fs/%.check)			\
 	$(FMIOHDRS:%.h=fm/io/%.check)			\
 	$(FSHDRS:%.h=fs/%.check)			\
+	$(NVMEHDRS:%.h=nvme/%.check)			\
 	$(SCSIHDRS:%.h=scsi/%.check)			\
 	$(SCSIADHDRS:%.h=scsi/adapters/%.check)		\
 	$(SCSICONFHDRS:%.h=scsi/conf/%.check)		\
@@ -1228,6 +1250,7 @@ CHECKHDRS=						\
 	$(ROOTIBNEXHDRS)	\
 	$(ROOTIBMGTHDRS)	\
 	$(ROOTIBMFHDRS)		\
+	$(ROOTNVMEHDRS)		\
 	$(ROOTOFHDRS)		\
 	$(ROOTRDMAHDRS)		\
 	$(ROOTSATAGENHDRS)	\
@@ -1300,6 +1323,7 @@ install_h:			\
 	$(ROOTIBNEXHDRS)	\
 	$(ROOTIBMGTHDRS)	\
 	$(ROOTIBMFHDRS)		\
+	$(ROOTNVMEHDRS)		\
 	$(ROOTOFHDRS)		\
 	$(ROOTRDMAHDRS)		\
 	$(ROOTSATAGENHDRS)	\
